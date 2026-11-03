@@ -38,8 +38,8 @@ def main():
         call(python,"-I","-m","chuantuo","example",base/"fixture","--template","release")
         call(python,"-I","-m","chuantuo","run",base/"fixture/scenario.json",base/"fixture/config.json","--output",base/"runs/new","--report")
         call(python,"-I","-m","chuantuo","verify",base/"runs/new")
-        call(python,"-I","-c","from pathlib import Path; from fastapi.testclient import TestClient; from chuantuo.web import create_app; "
-             "c=TestClient(create_app(Path('runs'))); assert c.get('/api/health').json()['version']=='1.1.0'; "
+        call(python,"-I","-c","from pathlib import Path; from importlib.metadata import version; from fastapi.testclient import TestClient; from chuantuo.web import create_app; "
+             "c=TestClient(create_app(Path('runs'))); assert c.get('/api/health').json()['version']==version('chuantuo'); "
              "assert c.get('/static/workbench.js').status_code==200 and '准备一场推演' in c.get('/').text; "
              "assert len(c.get('/api/case/replay').json()['windows'])==10 and c.get('/archive').status_code==200; "
              "assert c.get('/api/case/recording').json()['kind']=='recorded_model_run'; "

@@ -213,6 +213,7 @@ class Rule(Record):
 class ScopedRule(Rule):
     # Without an explicit audience a world rule belongs only to the adjudicator.
     visibility: Visibility = Field(default_factory=Visibility)
+    active_from: int = Field(default=1, ge=1)
 
 
 class Scenario(Record):

@@ -126,7 +126,8 @@ class Perception:
             roster, subsystems = self.scene.entities, self.scene.subsystems
         result = {"window":window, "round":turn, "window_duration":self.config.window_duration,
             "background":self.scene.background, "rules":[{"text":r.text,"provenance":{"kind":r.provenance.kind}} for r in self.scene.rules
-                if not isinstance(r,ScopedRule) or r.visibility.public or actor_id in r.visibility.readers],
+                if not isinstance(r,ScopedRule) or
+                (window >= r.active_from and (r.visibility.public or actor_id in r.visibility.readers))],
             "self":{"id":actor.id,"name":actor.name,"identity":actor.identity,"preferences":actor.preferences,"depth":self.depths[actor_id]},
             "roster":[{"id":a.id,"name":a.name,"subsystem_id":a.subsystem_id, **({"parent_id":a.parent_id} if a.parent_id else {})} for a in roster],
             "subsystems":[s.model_dump(exclude={"interaction"}) if s.owner_id != actor_id and actor.subsystem_id != s.id else s.model_dump() for s in subsystems],

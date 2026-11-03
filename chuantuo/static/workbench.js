@@ -50,6 +50,7 @@ async function api(path, method = "GET", body) {
 const statuses = {ready:"待启动",running:"推演中",paused:"已暂停",failed:"运行失败",interrupted:"运行中断",stopped:"已提前结束",completed:"已完成"};
 let profile, sources = [], draft, project, activeRun, example, timer, routeGeneration = 0, busy = false;
 let selectedWindow = null, eventLimit = 100, lastView = "", reportsSignature = "";
+let actorLimit = 8, watchRequest = 0;
 const playbacks = new Map();
 const playback = () => ["case","recording"].includes(activeRun);
 let extraAnswers = "", overrides = {}, currentStateWindow = 0;
@@ -139,6 +140,7 @@ $("use-case").onclick = safe(async () => {
   showFiles(); persistSeed(); notice("已加入潮汐港文稿，可直接整理。");
 });
 $("read-case").onclick = () => { location.hash = "case"; };
+$("try-letter").onclick = openLetterLab;
 $("import-bundle").onchange = safe(async () => {
   const file = $("import-bundle").files[0]; if (!file) return;
   const form = new FormData(); form.append("file", file); $("import-bundle").value = "";
@@ -472,9 +474,9 @@ function drawLibrary() {
   if (!savedLibrary) return;
   const {projects,catalog} = savedLibrary, query = $("library-search").value.trim().toLocaleLowerCase();
   const matches = (...parts) => parts.some(x => String(x || "").toLocaleLowerCase().includes(query));
-  const selections = {projects:projects.filter(p => matches(p.title,p.id,p.goal)),runs:catalog.runs.filter(r => matches(r.title,r.run_id,statuses[r.status],r.status))};
+  const selections = {projects:projects.filter(p => matches(p.title,p.id,p.goal)),runs:catalog.runs.filter(r => matches(r.title,r.run_id,statuses[r.status],r.status,r.experiment?.condition,r.experiment && experimentKind(r.experiment)))};
   $("projects").replaceChildren(...selections.projects.slice(0,libraryLimits.projects).map(p => recordRow(p.title, p.actors + " 个主体 · 第 " + p.version + " 版", () => {location.hash = "project/" + p.id;})));
-  $("runs").replaceChildren(...selections.runs.slice(0,libraryLimits.runs).map(r => recordRow(r.title, (statuses[r.status] || r.status) + " · " + r.window + "/" + r.windows + " 窗 · " + (r.mode === "demo" ? "脚本" : "模型接口"), () => {location.hash = "run/" + r.run_id;}, "回看")));
+  $("runs").replaceChildren(...selections.runs.slice(0,libraryLimits.runs).map(r => recordRow(r.experiment ? experimentKind(r.experiment)+" · "+(r.experiment.condition || r.title) : r.title, (statuses[r.status] || r.status) + " · " + r.window + "/" + r.windows + " 窗 · " + (r.mode === "demo" ? "脚本" : "模型接口"), () => {location.hash = "run/" + r.run_id;}, "回看")));
   if (!selections.projects.length) $("projects").append(h("p",query ? "没有匹配的场景。" : "整理后的场景会保存在这里。","empty"));
   if (!selections.runs.length) $("runs").append(h("p",query ? "没有匹配的推演。" : "启动后可以在这里回看每次推演。","empty"));
   for (const [key,items] of Object.entries(selections)) {
@@ -483,17 +485,27 @@ function drawLibrary() {
   catalog.warnings.forEach(w => $("runs").append(h("p",w.message,"error")));
 }
 $("library-search").oninput = () => {libraryLimits={projects:20,runs:20};drawLibrary();};
-async function evidence(id) {
+async function evidence(id, sourceRun = activeRun) {
   const ticket=++readingRequest, run=activeRun;
-  const item = playback() ? example.evidence[id] : await api("/api/runs/" + activeRun + "/events/" + encodeURIComponent(id));
+  const item = playback() && sourceRun === run ? example.evidence[id] : await api("/api/runs/" + sourceRun + "/events/" + encodeURIComponent(id));
   if (ticket !== readingRequest || run !== activeRun) return;
   if (!item) throw new Error("这份回放未收录该记录。");
   const body = h("div");
-  if (item.data?.text) body.append(h("p", item.data.text));
-  body.append(h("pre", json(item.data || item)));
+  const data=item.data || {}, labels={expression:"主体决定",message_delivered:"定向消息",window_committed:"窗口结算",observation:"当时的观察",run_created:"开局材料"};
+  body.append(h("small",(item.window ? "第 "+item.window+" 窗" : "开局")+" · "+(labels[item.kind] || item.kind),"quiet"));
+  if (data.text) body.append(h("p",data.text));
+  if (item.kind==="message_delivered") body.append(h("p",data.from+" → "+data.to),h("small","对应行动","quiet"),evidenceLinks([data.action_id],sourceRun));
+  if (item.kind==="expression" && !playback() && item.commit_status==="committed")
+    body.append(button("查看作出决定时的可见信息",()=>openActorContext({id:data.actor_id,name:data.actor_id},item.window,data.round,false,sourceRun),"link"));
+  if (item.kind==="window_committed") {
+    for (const c of data.consequences || []) body.append(h("p",c.text),evidenceLinks(c.action_ids,sourceRun));
+    for (const r of data.reviews || []) body.append(h("p",r.entity_id+" · "+r.field_id+"　"+(r.before??"未知")+" → "+(r.after??"未知")),h("small",r.reason,"quiet"),evidenceLinks(r.action_ids,sourceRun));
+  }
+  if (item.kind==="run_created" && data.scenario) body.append(h("h3",data.scenario.title),h("p",data.scenario.background));
+  body.append(disclosure("完整记录数据",h("pre",json(item.data || item))));
   reading("记录 " + id, body);
 }
-function evidenceLinks(ids) { const line = h("div"); for (const id of new Set(ids || [])) line.append(button(id, () => evidence(id), "link")); return line; }
+function evidenceLinks(ids, sourceRun = activeRun) { const line = h("div"); for (const id of new Set(ids || [])) line.append(button(id, () => evidence(id, sourceRun), "link")); return line; }
 function groupDeliveries(events) {
   const rows = [];
   for (const e of events) {
@@ -520,14 +532,14 @@ function fieldDetails(actor, stateRecord) {
   return disclosure("数值、字段与来源",fields,h("small","当前数值的提交记录","quiet"),evidenceLinks([stateRecord]),
     disclosure("完整字段数据",h("pre",json(actor.fields))));
 }
-async function openActorContext(actor, window, turn, replace = false) {
-  const run=activeRun, ticket=++readingRequest;
+async function openActorContext(actor, window, turn, replace = false, run = activeRun) {
+  const current=activeRun, ticket=++readingRequest;
   const result=await api("/api/runs/"+run+"/actors/"+encodeURIComponent(actor.id)+"/context?window="+window+(turn ? "&turn="+turn : ""));
-  if (ticket!==readingRequest || run!==activeRun) return;
+  if (ticket!==readingRequest || current!==activeRun) return;
   const view=result.observation, memory=result.memory, body=h("div");
   const round=h("select"); round.setAttribute("aria-label","查看主体决策轮次");
   result.rounds.forEach(n=>{const o=h("option","第 "+n+" 轮");o.value=n;round.append(o);}); round.value=result.round;
-  round.onchange=safe(()=>openActorContext(actor,window,Number(round.value),true));
+  round.onchange=safe(()=>openActorContext(actor,window,Number(round.value),true,run));
   body.append(h("p",actor.name+" · 第 "+window+" 窗 · 这次作决定时实际收到的内容。","hint"),round);
   if(view.state){
     const names=Object.fromEntries(view.roster.map(a=>[a.id,a.name]));
@@ -535,17 +547,18 @@ async function openActorContext(actor, window, turn, replace = false) {
   } else body.append(disclosure("可见字段",h("pre",json(view.visible_state))));
   if(view.messages?.length) {
     body.append(h("h3","本轮收到的消息"));
-    view.messages.forEach(m=>body.append(h("p",m.from+" → "+m.to+"　"+m.text),evidenceLinks([m.action_id])));
+    view.messages.forEach(m=>body.append(h("p",m.from+" → "+m.to+"　"+m.text),evidenceLinks([m.action_id],run)));
   }
   if(memory?.open_matters) {
     body.append(h("h3","持续事项")); const items=Object.values(memory.open_matters);
     if(!items.length) body.append(h("p","当时没有登记的未完成事项。","hint"));
-    for(const m of items) body.append(h("p",m.text),evidenceLinks([m.first_record,m.record].filter(Boolean)));
+    for(const m of items) body.append(h("p",m.text),evidenceLinks([m.first_record,m.record].filter(Boolean),run));
     for(const [key,label] of [["recent","近期原文"],["earlier","历史摘录"],["retrieved","本轮检索"]]) {
       if(memory[key]?.length) body.append(disclosure(label+"（"+memory[key].length+"）",h("pre",json(memory[key]))));
     }
   } else body.append(disclosure("当时的记忆输入",h("pre",json(memory))));
-  body.append(disclosure("完整可见信息",h("pre",json(view))),h("small","原始输入与对应决定","quiet"),evidenceLinks([result.input_id,result.action_id]));
+  if (view.rules?.length) body.append(disclosure("当时已知的规则和条件",bullets(view.rules.map(r=>r.text))));
+  body.append(disclosure("完整可见信息",h("pre",json(view))),h("small","原始输入与对应决定","quiet"),evidenceLinks([result.input_id,result.action_id],run));
   if(replace && $("reading").open) { $("reading-title").textContent=actor.name+"的决策现场"; $("reading-content").replaceChildren(body); }
   else reading(actor.name+"的决策现场",body);
 }
@@ -584,6 +597,7 @@ function adoptSuggestedField(view, event, suggestion, index) {
 function renderWindow(view) {
   const s = view.status, isCase = playback(), names = Object.fromEntries(view.actors.map(a => [a.id,a.name]));
   currentStateWindow = view.settled_through;
+  showExperimentTools(view);
   if ($("all-windows").open && historyThrough !== s.window) safe(drawWindowHistory)();
   $("followup").hidden = isCase; $("ask").disabled = ["ready","running"].includes(s.status);
   const scope = $("question-scope"), priorScope = scope.value;
@@ -610,12 +624,19 @@ function renderWindow(view) {
     if (s.stop_requested && s.status === "running") controls.append(h("small","正在结束"));
   }
   const feed = $("events"); feed.replaceChildren();
+  const actorSelect=$("feed-actor"), focus=actorSelect.value;
+  if (actorSelect.options.length!==view.actors.length+1 || view.actors.some((a,i)=>actorSelect.options[i+1]?.value!==a.id)) {
+    actorSelect.replaceChildren(new Option("全部主体",""),...view.actors.map(a=>new Option(a.name,a.id)));
+    actorSelect.value=names[focus] ? focus : "";
+  }
   if (s.error) feed.append(h("p", s.error, "error"));
-  const settlement = view.events.find(e => e.kind === "window_committed");
+  const settlement = view.settlement || view.events.find(e => e.kind === "window_committed");
   const cited = new Set((settlement?.data.consequences || []).concat(settlement?.data.changes || []).flatMap(c => c.action_ids || []));
+  const outcome=$("window-outcome"); outcome.hidden=!settlement; outcome.replaceChildren();
   if (settlement) {
-    const highlights = (settlement.data.consequences || []).map(c => c.text);
-    feed.append(h("p", highlights.join(" ") || "本窗已结算，客观状态与此前一致。", "outcome"));
+    const highlights=settlement.data.consequences || [], changes=settlement.data.changes || [];
+    outcome.append(h("strong","本窗结果 · "+changes.length+" 项字段变化"),h("p",highlights[0]?.text || changes[0]?.reason || "本窗已结算，已定义字段保持原值。"),
+      button("查看结算依据",()=>evidence(settlement.id),"link"));
   }
   let group = null, grouped = 0;
   for (const e of groupDeliveries(view.events)) {
@@ -645,22 +666,26 @@ function renderWindow(view) {
       }
     } else row.append(h("span","运行异常","type"), h("p",data.reason || "本窗口未完成，查看记录了解原因。"));
     row.append(button("记录 " + e.id, () => evidence(e.id), "link"));
+    if (!isCase && e.kind==="expression" && e.commit_status==="committed")
+      row.append(button("当时知道什么",()=>openActorContext({id:data.actor_id,name:names[data.actor_id]},e.window,data.round),"link"));
     if (e.receipts.length) row.append(disclosure("送达记录（" + e.receipts.length + "）",evidenceLinks(e.receipts)));
     if (settlement && e.kind === "expression" && !data.message_count && !cited.has(e.id)) {
       if (!group) { group = disclosure(""); group.classList.add("minor-actions"); feed.append(group); grouped = 0; }
       group.append(row); group.firstChild.textContent = "查看同期主体决定（" + (++grouped) + "）";
     } else { group = null; feed.append(row); }
   }
-  if (!view.events.length) feed.append(h("p", view.selected === 0 ? "这是开局时的状态。" : "正在等待本窗口的行动记录。", "empty"));
+  if (!view.events.length) feed.append(h("p", view.selected === 0 ? "这是开局时的状态。" : (focus || $("feed-kind").value) ? "这个窗口没有符合筛选的记录。" : "正在等待本窗口的行动记录。", "empty"));
   if (view.next < view.total) feed.append(button("继续读取本窗口",async () => { eventLimit += 100; await refreshWatch(routeGeneration); }));
   const open = new Set(Array.from($("actors").querySelectorAll("details[open]"), el => el.dataset.actor));
   $("actors").replaceChildren(); $("state-time").textContent = view.settled_through ? "来自第 " + view.settled_through + " 窗的已提交状态" : "来自开局配置";
-  for (const a of view.actors) {
+  const displayActors=focus ? view.actors.filter(a=>a.id===focus) : view.actors;
+  for (const a of displayActors.slice(0,actorLimit)) {
     const card = h("div",null,"actor"); card.append(h("strong",a.name),h("p",a.profile || "未定义结算字段。"));
     if (Object.keys(a.fields).length) { const d = fieldDetails(a,view.state_record); d.dataset.actor = a.id; d.open = open.has(a.id); card.append(d); }
     if (!isCase && view.settled_through) card.append(button("当时可见的信息",()=>openActorContext(a,view.settled_through),"link"));
     $("actors").append(card);
   }
+  if (displayActors.length>actorLimit) $("actors").append(button("查看更多主体（共 "+displayActors.length+" 位）",()=>{actorLimit+=12; renderWindow(view);},"link"));
   if (!isCase && view.usage) {
     const rows = Object.entries(view.usage).filter(([,u]) => u.calls).map(([stage,u]) => {
       const tokenText = u.with_usage ? "接口回报输入 " + u.input_tokens + "、输出 " + u.output_tokens + " token（" + u.with_usage + "/" + u.attempts + " 次有用量回执）" : "接口未回报 token";
@@ -716,22 +741,28 @@ async function refreshReports(gen) {
 }
 async function refreshWatch(gen) {
   clearTimeout(timer);
-  const pinned = selectedWindow, run = activeRun;
+  const pinned = selectedWindow, run = activeRun, ticket=++watchRequest;
+  const actor=$("feed-actor").value, kind=$("feed-kind").value;
   let view;
   if (playback()) {
     const data = playbacks.get(run) || await api(run === "recording" ? "/api/case/recording" : "/api/case/replay");
     if (gen !== routeGeneration || run !== activeRun) return;
     playbacks.set(run,data); example = data; view = data.windows[pinned ?? data.windows.length - 1];
+    const settlement=view.events.find(e=>e.kind==="window_committed");
+    const events=view.events.filter(e=>(!kind || e.kind===kind) && (!actor || [e.data.actor_id,e.data.from,e.data.to].includes(actor) ||
+      (e.kind==="window_committed" && e.data.reviewed_actors?.includes(actor))));
+    view={...view,settlement,events,total:events.length,next:events.length};
   } else {
-    const url = "/api/runs/" + run + "/watch?" + (pinned === null ? "" : "window=" + pinned + "&");
+    const filters=(actor ? "actor="+encodeURIComponent(actor)+"&" : "")+(kind ? "kind="+encodeURIComponent(kind)+"&" : "");
+    const url = "/api/runs/" + run + "/watch?" + filters + (pinned === null ? "" : "window=" + pinned + "&");
     view = await api(url + "limit=100");
     const target = view.selected;
     for (let offset = view.next; offset < Math.min(eventLimit, view.total);) {
-      const page = await api("/api/runs/" + run + "/watch?window=" + target + "&offset=" + offset + "&limit=100");
+      const page = await api("/api/runs/" + run + "/watch?"+filters+"window=" + target + "&offset=" + offset + "&limit=100");
       view.events.push(...page.events); view.next = page.next; offset = page.next;
     }
   }
-  if (gen !== routeGeneration || pinned !== selectedWindow || run !== activeRun) return;
+  if (gen !== routeGeneration || pinned !== selectedWindow || run !== activeRun || ticket!==watchRequest) return;
   const signature = json(view);
   if (signature !== lastView) { lastView = signature; renderWindow(view); }
   await refreshReports(gen);
@@ -739,6 +770,7 @@ async function refreshWatch(gen) {
     timer = setTimeout(safe(() => refreshWatch(gen)), view.status.status === "running" ? 1100 : 3500);
 }
 $("window").onchange = safe(async () => { selectedWindow = $("window").value === "" ? null : Number($("window").value); eventLimit = 100; lastView = ""; await refreshWatch(routeGeneration); });
+$("feed-actor").onchange=$("feed-kind").onchange=safe(async()=>{eventLimit=100; lastView=""; await refreshWatch(routeGeneration);});
 async function drawWindowHistory() {
   const run = activeRun, root = $("window-list");
   let items, total;
@@ -799,12 +831,15 @@ $("write-report").onclick = safe(async () => {
 async function route() {
   readingRequest++; if ($("reading").open) $("reading").close();
   const gen = ++routeGeneration; clearTimeout(timer); notice(""); lastView = reportsSignature = "";
-  const [kind = "new", id] = location.hash.slice(1).split("/"); activeRun = null; selectedWindow = null; eventLimit = 100;
+  const [kind = "new", id, pinned] = location.hash.slice(1).split("/"); activeRun = null; selectedWindow = null; eventLimit = 100;
   const showWatch = ["run","case","recording"].includes(kind), showLibrary = kind === "library";
   $("watch-page").hidden = !showWatch; $("library-page").hidden = !showLibrary; $("prepare-page").hidden = showWatch || showLibrary;
   $("nav-new").classList.toggle("active", !showWatch && !showLibrary); $("nav-library").classList.toggle("active", showWatch || showLibrary);
   if (showWatch) {
     activeRun = kind === "run" ? id : kind; $("watch-title").textContent = "正在打开记录";
+    if (kind === "run" && /^\d{1,9}$/.test(pinned || "")) selectedWindow = Number(pinned);
+    $("experiment-tools").hidden = true; $("experiment-tools").replaceChildren();
+    $("window-outcome").hidden=true; $("feed-actor").replaceChildren(new Option("全部主体","")); $("feed-kind").value=""; actorLimit=8;
     $("all-windows").open = false; historyThrough = -1; requestedWindows = 40; $("window-list").replaceChildren();
     $("followup").open = false; $("answers").replaceChildren(); $("question-text").value = "";
     $("watch-meta").textContent = ""; ["events","actors","reports","run-actions","window"].forEach(k => $(k).replaceChildren());
@@ -838,7 +873,7 @@ safe(async () => {
   busy = true; $("prepare").disabled = true;
   try {
     const result = await awaitJob(pending.id);
-    if (pending.kind === "launch") location.hash = "run/" + result.run_id;
+    if (["launch","experiment"].includes(pending.kind)) location.hash = "run/" + result.run_id;
     else if (pending.kind === "prepare") {
       if (pending.project && project?.id !== pending.project) openProject(await api("/api/projects/" + pending.project));
       await acceptedDraft(result);

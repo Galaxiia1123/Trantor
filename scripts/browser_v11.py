@@ -65,6 +65,23 @@ def main():
                 page.locator("#reading-content").get_by_role("button",name="e000001",exact=True).first.click()
                 expect(page.locator("#reading-title")).to_have_text("记录 e000001"); page.get_by_role("button",name="返回推演报告",exact=False).click()
                 page.keyboard.press("Escape"); assert not endpoint.calls
+                page.locator("#nav-new").click(); page.locator("#try-letter").click()
+                page.get_by_role("button",name="按时送达，并通知运营社",exact=False).click()
+                expect(page.locator("#experiment-tools")).to_contain_text("第 2 窗 · 1 项状态不同")
+                expect(page.locator(".comparison-side").first).to_contain_text("待签收")
+                expect(page.locator(".comparison-side").last).to_contain_text("已排入复核")
+                page.get_by_text("并排查看主体的决定",exact=True).click()
+                page.get_by_label("选择要比较决定的主体").select_option("desk")
+                page.get_by_role("button",name="查看当时的决策现场").last.click()
+                expect(page.locator("#reading-content")).to_contain_text("有效签字函已送达收件台")
+                page.keyboard.press("Escape")
+                page.get_by_role("button",name="已有路线",exact=True).click()
+                expect(page.locator("#reading-content")).to_contain_text("已排入复核 · 1 次")
+                page.keyboard.press("Escape")
+                page.locator("#feed-actor").select_option("desk"); page.locator("#feed-kind").select_option("message_delivered")
+                expect(page.locator("#events")).to_contain_text("签章已核对")
+                if args.screenshots: page.screenshot(path=args.screenshots/"compare.png")
+                assert not endpoint.calls
                 page.locator("#nav-new").click()
                 page.locator("#read-case").click(); expect(page.locator("#watch-meta")).to_contain_text("脚本案例")
                 page.locator("#window").select_option("8"); expect(page.locator("#actors")).to_contain_text("已列入复议")
@@ -146,10 +163,23 @@ def main():
                 page.locator("#nav-library").click(); expect(page.locator("#projects")).to_contain_text("潮汐港")
                 page.locator("#projects button").first.click(); expect(page.locator("#draft")).to_contain_text("9 个窗口")
                 assert page.request.get(url+"/api/runs/"+rid+"/reports").json()
-            assert len([task for _,task in endpoint.calls if task=="agent"]) == 90
-            assert len(endpoint.calls)==102 and {m for m,_ in endpoint.calls}=={"local-script-http"},endpoint.calls
+                assert len(endpoint.calls)==102
+                page.goto(run_url); expect(page.locator("#watch-meta")).to_contain_text("已完成")
+                page.get_by_role("button",name="试一个条件",exact=True).click()
+                page.get_by_label("从哪里分岔").select_option("8")
+                page.get_by_label("改变的条件").fill("一份附有复核日期的新回执已送达市议会。")
+                page.get_by_label("开始时谁知道这个条件").select_option("readers")
+                page.locator("#reading input[value=council]").check()
+                page.get_by_role("button",name="启动新路线",exact=True).click()
+                expect(page.locator("#experiment-tools")).to_contain_text("第 9 窗 · 0 项状态不同",timeout=30000)
+                assert page.url!=run_url
+                variant_id=page.url.split("#run/")[1]
+                filtered=page.request.get(url+"/api/runs/"+variant_id+"/watch?window=9&actor=engineer&kind=expression&limit=1").json()
+                assert filtered["total"]==2 and filtered["settlement"]["kind"]=="window_committed"
+            assert len([task for _,task in endpoint.calls if task=="agent"]) == 100
+            assert len(endpoint.calls)==113 and {m for m,_ in endpoint.calls}=={"local-script-http"},endpoint.calls
             assert not errors and not endpoint.errors,(errors,endpoint.errors)
-            browser.close(); print("Browser acceptance passed: Markdown-only intake, one profile, 102 local HTTP calls, 9 windows, report citations/download, private interview, branch, history and mobile.")
+            browser.close(); print("Browser acceptance passed: offline letter experiment, Markdown intake, 9 windows, 113 local HTTP calls including a one-window fork, linked comparison, report, private interview and mobile.")
     finally:
         endpoint.shutdown(); endpoint.server_close()
 

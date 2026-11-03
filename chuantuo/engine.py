@@ -72,6 +72,9 @@ class Journal:
 
     def _remember(self, event, size):
         kind, data = event["kind"], event["data"]
+        if kind == "experiment_forked":
+            self._usage.clear()
+            self._prep_sizes.clear()
         if kind in {"model_input","model_output","prepare_input","prepare_output","provider_attempt","prepare_provider_attempt",
                     "report_input","report_output","report_batch_input","report_batch_output","analysis_input","analysis_output"}:
             stage = ("准备" if kind.startswith("prepare") else "主体" if data.get("purpose") == "agent"
@@ -118,10 +121,19 @@ class Journal:
             self._settlements[event["window"]] = event
         self._disk_size += size
 
-    def window_rows(self, window, offset, limit):
+    def window_rows(self, window, offset, limit=None, *, actor=None, kind=None):
         with self._lock:
             items = self._window_rows.get(window, ())
-            return items[offset:offset + limit], len(items)
+            if actor or kind:
+                def matches(item):
+                    data = item["data"]
+                    if kind and item["kind"] != kind:
+                        return False
+                    if not actor or actor in (data.get("actor_id"),data.get("from"),data.get("to")):
+                        return True
+                    return item["kind"] == "window_committed" and any(r["entity_id"]==actor for r in data["reviews"])
+                items = [e for e in items if matches(e)]
+            return items[offset:offset + limit if limit is not None else None], len(items)
 
     def settlement(self, window):
         with self._lock:
@@ -285,6 +297,7 @@ class Simulation:
         self.run_id = _run_id or uuid.uuid4().hex[:12]
         self.gateway = gateway or ModelGateway()
         self.journal = _journal or Journal(directory)
+        self.experiment = _journal.event("e000001")["data"].get("experiment") if _journal else None
         self._lock = threading.RLock()
         self._runner_lock = threading.Lock()
         self._pause = threading.Event()
@@ -365,7 +378,8 @@ class Simulation:
         self._last_feedback = ({"window":self.window, "commit_id":commits[-1]["id"], "changes":commits[-1]["data"]["changes"]}
                                if commits else None)
         self._history = [{"id": e["id"], "window": e["window"], "consequences": deepcopy(e["data"]["consequences"])} for e in commits]
-        self._call_count = sum(e["kind"] == "model_input" for e in events)
+        inherited = int(self.experiment["parent_event"][1:]) if self.experiment else 0
+        self._call_count = sum(e["kind"] == "model_input" for e in events[inherited:])
         if [e["window"] for e in commits] != list(range(1, self.window + 1)) or self.window > self.config.windows:
             raise ValueError("已提交窗口的顺序或数量不合法，无法继续")
         self._inbox = {actor.id: [] for actor in self._scenario.entities}
@@ -461,6 +475,8 @@ class Simulation:
                     "can_resume": self.status in {"paused", "failed", "interrupted"} and self.window < self.config.windows
                                   and (self.config.model_call_limit is None or self._call_count < self.config.model_call_limit),
                     "pause_requested": self._pause.is_set(), "stop_requested": self._stop.is_set()}
+            if self.experiment:
+                result["experiment"] = deepcopy(self.experiment)
             if self.window != known_window:
                 result.update(state=deepcopy(self._state),depths=dict(self.depths))
             return result

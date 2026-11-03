@@ -33,6 +33,26 @@ def scene_dict():
     return scene
 
 
+def test_counterfactual_reopens_with_original_private_memory_and_only_new_usage(native_run,tmp_path):
+    from chuantuo.experiments import ExperimentRequest, experiment_comparison, fork_experiment
+    marker="试验签件在第八窗送达市议会"
+    spec=ExperimentRequest(window=7,through=9,condition=marker,audience="readers",readers=["council"])
+    path=tmp_path/"route"
+    variant=fork_experiment(native_run,spec,"e"*12,None,path)
+    assert variant.window==7 and variant.snapshot()["model_calls"]==0 and not variant.journal.usage()
+    assert variant.run()["status"]=="completed"
+    restored=Simulation.restore(path)
+    assert restored.snapshot()["model_calls"]==22 and restored.experiment["parent_id"]==native_run.run_id
+    for item in restored.journal.snapshot({"model_input"}):
+        obs=json.loads(item["data"]["messages"][-1]["content"])
+        assert (marker in str(obs))==(item["window"]>7 and (obs["task"]=="world" or obs.get("actor_id")=="council"))
+    context=restored.journal.decision_context("engineer",8,1,restored._discarded)
+    prior=native_run.journal.decision_context("engineer",8,1,native_run._discarded)
+    assert context["memory"]==prior["memory"] and context["observation"]==prior["observation"]
+    result=experiment_comparison(native_run,restored,8)
+    assert result["first_state_difference"] is None and result["baseline"]["actions"] and result["variant"]["actions"]
+
+
 def test_containment_simplification_keeps_ownership_and_directed_channels():
     data = scene_dict()
     base = load_scenario(data)

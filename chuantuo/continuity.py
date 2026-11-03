@@ -107,6 +107,8 @@ class Notebook:
 
 def objective_input(scene, config, state, actions, history, window, schema):
     definitions = scene.model_dump(mode="json", exclude={"sources"}, exclude_defaults=True)
+    if "rules" in definitions:
+        definitions["rules"] = [rule for rule in definitions["rules"] if rule.get("active_from", 1) <= window]
     for actor in definitions["entities"]:
         for field in actor.get("fields", []):
             field.pop("value", None)

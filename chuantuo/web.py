@@ -9,6 +9,7 @@ from collections import OrderedDict
 from contextlib import asynccontextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Literal
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Query
@@ -37,7 +38,7 @@ from .live import stream_events
 from .repository import Repository, VersionConflict
 from .project_io import export_project, import_project
 from . import __version__
-from .experiments import Adoption, adopt_suggestion, branch_payload, compare
+from .experiments import Adoption, ExperimentRequest, adopt_suggestion, branch_payload, compare, experiment_comparison, fork_experiment, outcome_groups
 from .recovery import salvage
 from .insights import Question, actor_observation, answer_question, event_preview, search_evidence, timeline, watch_window, window_history
 
@@ -110,6 +111,7 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
     recent = OrderedDict()
     workers: dict[str, threading.Thread] = {}
     guard = threading.RLock()
+    letter_lock = threading.Lock()
     materials = MaterialStore(root / "_materials")
     repository = Repository(root)
     profile = ModelProfile(root)
@@ -213,6 +215,17 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
     @app.get("/api/case/recording")
     def verified_replay():
         return Response(case_assets["verified-replay.json"],media_type="application/json",headers={"Cache-Control":"no-cache"})
+
+    @app.post("/api/case/letter/{choice}")
+    def letter_experiment(choice: Literal["notified","unseen","repeat"]):
+        from .letter_case import run_example
+        # This sample uses the built-in script independently of the user's current profile.
+        with letter_lock:
+            sample = ModelGateway()
+            try:
+                return run_example(root,choice,sample)
+            finally:
+                sample.close()
 
     @app.put("/api/model")
     def save_model(request: ProfileInput):
@@ -362,13 +375,13 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
             original,_ = materials.load(job_id)
             return jobs.reconcile(job_id,{"source":original.model_dump(mode="json")})
         rid = context.get("run_id")
-        if not rid or kind not in {"launch","report","question"}:
+        if not rid or kind not in {"launch","experiment","report","question"}:
             return receipt
         try:
             sim = get_run(rid)
         except FileNotFoundError:
             return receipt
-        if kind == "launch" and sim.journal.event("e000001")["data"].get("launch_job_id")==job_id:
+        if kind in {"launch","experiment"} and sim.journal.event("e000001")["data"].get("launch_job_id")==job_id:
             return jobs.reconcile(job_id,sim.snapshot())
         record_kind = "report_created" if kind=="report" else "analysis_answer"
         for e in sim.journal.snapshot({record_kind}):
@@ -532,8 +545,9 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
 
     @app.get("/api/runs/{run_id}/watch")
     def observe_window(run_id: str, window: int | None = Query(default=None,ge=0),
-                       offset: int = Query(default=0,ge=0), limit: int = Query(default=100,ge=1,le=300)):
-        return watch_window(get_run(run_id), window, offset, limit)
+                       offset: int = Query(default=0,ge=0), limit: int = Query(default=100,ge=1,le=300),
+                       actor: str | None = None, kind: Literal["expression","message_delivered","window_committed","settlement_rejected","model_failure"] | None = None):
+        return watch_window(get_run(run_id), window, offset, limit, actor, kind)
 
     @app.get("/api/runs/{run_id}/windows")
     def committed_history(run_id: str, offset: int = Query(default=0,ge=0), limit: int = Query(default=40,ge=1,le=100)):
@@ -542,6 +556,46 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
     @app.post("/api/runs/{run_id}/branch")
     def branch(run_id: str, request: BranchRequest):
         return repository.save_project(branch_payload(get_run(run_id),request.window,request.title))
+
+    @app.post("/api/jobs/{job_id}/experiment/{parent_id}")
+    def experiment_job(job_id: str, parent_id: str, request: ExperimentRequest):
+        parent = get_run(parent_id)
+        if not isinstance(parent.config, RunConfig11) or profile.model != parent.config.model:
+            raise ValueError("对照实验需要绑定与原路线相同的 v1.1 模型配置")
+        if owns_gateway and not credential_ready(profile.model):
+            raise ValueError("请先配置当前模型的凭据")
+        protect_credentials(request.model_dump(mode="json"),parent.config.catalog.values())
+        run_id = uuid.uuid5(uuid.NAMESPACE_URL,"chuantuo:experiment:"+job_id).hex[:12]
+        def launch(progress):
+            progress("fork","正在恢复分岔窗口的状态、记忆和已投递消息")
+            with TemporaryDirectory(dir=root,prefix="_creating-") as temporary:
+                stage = Path(temporary)/"run"
+                alternate = fork_experiment(parent,request,run_id,job_id,stage)
+                stage.rename(root/run_id)
+                alternate.journal.directory = root/run_id
+            with guard:
+                remember(alternate)
+            start(alternate)
+            return alternate.snapshot()
+        return jobs.submit(job_id,"experiment",{"run_id":run_id,"parent_id":parent_id,"spec":request.model_dump(mode="json")},launch)
+
+    @app.get("/api/runs/{run_id}/experiment")
+    def experiment_result(run_id: str, window: int | None = Query(default=None,ge=0)):
+        alternate = get_run(run_id)
+        if not alternate.experiment:
+            raise ValueError("这次推演没有原路线可对照")
+        return experiment_comparison(get_run(alternate.experiment["parent_id"]),alternate,window)
+
+    @app.get("/api/runs/{run_id}/alternatives")
+    def alternatives(run_id: str, actor: str | None = None, field: str | None = None):
+        parent = get_run(run_id)
+        items = repository.catalog(with_outcomes=True)["runs"]
+        with guard:
+            for item in items:
+                live = runs.get(item["run_id"])
+                if live:
+                    item["status"] = live.status
+        return outcome_groups(parent,items,actor,field)
 
     @app.post("/api/runs/{run_id}/adopt-field")
     def adopt_field(run_id:str, request:Adoption):

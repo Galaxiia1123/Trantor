@@ -81,7 +81,7 @@ def timeline(simulation):
             "communications": [{"source": source, "target": target, "count": count} for (source, target), count in messages.items()]}
 
 
-def watch_window(simulation, selected=None, offset=0, limit=100):
+def watch_window(simulation, selected=None, offset=0, limit=100, actor_id=None, kind=None):
     from .perception import state_sentences
     with simulation._lock:
         status = simulation.snapshot(known_window=simulation.window)
@@ -102,10 +102,15 @@ def watch_window(simulation, selected=None, offset=0, limit=100):
                             **({"constraints":f.constraints.model_dump(exclude_defaults=True)} if f.constraints else {})} for f in actor.fields}
             profile = state_sentences({actor.id:fields}).get(actor.id)
             actors.append({"id":actor.id, "name":actor.name, "profile":profile or actor.identity, "fields":fields})
-        rows, total = simulation.journal.window_rows(window, offset, limit)
+        if actor_id and actor_id not in simulation.depths:
+            raise ValueError("该场景没有所选主体")
+        rows, total = simulation.journal.window_rows(window,offset,limit,actor=actor_id,kind=kind)
         events = [dict(event_preview(e), commit_status=simulation.event_status(e)) for e in rows]
-        return {"title":scene.title, "domains":scene.domains, "status":status, "selected":window, "latest":current, "settled_through":committed,
+        return {"title":scene.title, "format_version":getattr(scene,"format_version","1.0"),
+                "rounds_per_window":simulation.config.rounds_per_window,
+                "domains":scene.domains, "status":status, "selected":window, "latest":current, "settled_through":committed,
                 "state_record":state_id, "actors":actors, "events":events, "total":total, "next":offset+len(rows),
+                "settlement":event_preview(commit) if commit and committed==window else None,
                 "usage":simulation.journal.usage(),
                 "model":", ".join(dict.fromkeys(m.model for m in simulation.config.catalog.values())),
                 "mode":"sample" if all(m.provider == "demo" for m in simulation.config.catalog.values()) else "api"}

@@ -16,3 +16,27 @@ dialog{width:min(520px,94vw);max-height:88vh;border:1px solid var(--line);border
 .outcome{margin:16px 0;padding:12px 14px;border-left:3px solid #a26a59;background:#f5efea;border-radius:0 7px 7px 0}.minor-actions{margin:9px 0 9px 4px}.relations{margin:12px 0}.relation{padding:12px 14px;border-left:2px solid #cac0d4;background:#f5f2f6;margin:8px 0;border-radius:0 8px 8px 0}.relation p{margin:5px 0}.relation details{margin:4px 0}.relation .link{font-size:12px}.arrow{color:var(--rust)}.model-pill span{display:block;max-width:20ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media(max-width:780px){.brand-sub{display:none}.bar{gap:6px}nav{margin-left:2%}nav a{padding:0 7px}.prepare-grid,.watch-grid,.library-grid{grid-template-columns:1fr}.case-card{display:grid;grid-template-columns:32% 1fr}.case-art{align-content:center}.case-art svg{height:auto}.case-copy{padding:14px}.split{grid-template-columns:1fr;gap:0}.lead{font-size:15px;margin-bottom:20px}.case-copy .eyebrow{font-size:11px}.window-bar span{margin-left:0}.draft{margin-top:16px}}
 @media(max-width:480px){.brand svg{width:27px;height:27px}.brand{font-size:18px;gap:6px}.bar{padding:0 11px;min-height:56px}.model-pill{padding:4px 8px;font-size:12px}nav{gap:0;font-size:12px}nav a{padding:0 6px;font-size:12px}main{padding-top:29px}.card{padding:17px}.card-top h2{font-size:18px}.case-card{grid-template-columns:23% 1fr}.right{justify-content:stretch}.actions{gap:7px}.watch-head{display:block}.case-copy p{font-size:13px}}@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+
+.experiment-tools{margin:0 0 18px;padding:18px 22px;border:1px solid #d8d1df;border-radius:13px;background:#f2eff5}
+.experiment-bar,.comparison-heading{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.experiment-bar h2{font-size:19px;line-height:1.4;margin:4px 0;overflow-wrap:anywhere}
+.experiment-start{white-space:nowrap}.experiment-tools>.hint{margin:5px 0 0}
+.experiment-diff{margin-top:12px}.comparison-heading{padding-top:12px;border-top:1px solid #dad3e0}
+.comparison-heading a{font-size:13px}.comparison-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:11px 0}
+.comparison-side{padding:12px 15px;border-radius:9px;border-left:3px solid #a8a2ac;background:var(--paper);overflow-wrap:anywhere}
+.comparison-side:last-child{border-color:#785884}.comparison-side h3{font-size:13px;margin:0;color:var(--muted)}
+.comparison-side p{font-size:14px;margin:7px 0}.comparison-fact{font-weight:650}.experiment-form fieldset{border:1px solid var(--line);border-radius:7px}
+.experiment-form label.check{display:flex;flex-direction:row;align-items:center}.experiment-estimate{border-left:3px solid #b9a5be;padding-left:12px;color:var(--muted)}
+@media(max-width:600px){.comparison-grid{grid-template-columns:1fr}.experiment-bar,.comparison-heading{align-items:flex-start;flex-wrap:wrap;gap:8px}.experiment-tools{padding:15px}}
+
+.letter-choice{display:block;width:100%;padding:13px 15px;margin:9px 0;text-align:left;border:1px solid var(--line);background:var(--paper)}
+.letter-choice:hover,.letter-choice:focus-visible{border-color:var(--violet);background:var(--soft)}
+.letter-choice strong,.letter-choice small{display:block}.letter-choice small{color:var(--muted);font-weight:400;margin-top:3px}
+.window-outcome{padding:12px 15px;background:#f3f1eb;border-left:3px solid #ad745c;border-radius:7px;margin:9px 0 14px}
+.window-outcome strong{font-size:13px}.window-outcome p{margin:5px 0;overflow-wrap:anywhere}
+.feed-filters{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin:8px 0 16px}
+.feed-filters label{font-size:12px;color:var(--muted);display:grid;gap:3px}.feed-filters select{font-size:14px;max-width:20ch}
+
+.cohort{padding:12px 0;border-top:1px solid var(--line)}.cohort h3,.cohort p{margin:4px 0}
+.outcome-count{display:inline-block;margin:3px 6px 0 0;border-radius:12px;padding:3px 9px;background:var(--soft);color:var(--violet);font-size:13px}
+.cohort-links{display:flex;gap:9px;flex-wrap:wrap}.cohort-links a{font-size:13px}

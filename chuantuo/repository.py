@@ -128,7 +128,7 @@ class Repository:
         return [self.project_summary(json.loads(path.read_text(encoding="utf-8")))
                 for path in sorted(self.project_folder(project_id).glob("v*.json"), reverse=True)]
 
-    def catalog(self):
+    def catalog(self, *, with_outcomes=False):
         result, errors = [], []
         for path in self.root.glob("*/events.jsonl"):
             if path.parent.name.startswith("_"):
@@ -137,14 +137,14 @@ class Repository:
             signature = (stat.st_size, stat.st_mtime_ns)
             cached = self._catalog.get(str(path))
             if cached and cached[0] == signature:
-                result.append(dict(cached[1]))
+                result.append({**cached[1], **({"end_state":cached[2]} if with_outcomes and cached[2] is not None else {})})
                 continue
             try:
                 record = None
                 with path.open("rb") as stream:
-                    record = self._summarize(stream, path)
-                self._catalog[str(path)] = (signature, record)
-                result.append(dict(record))
+                    record, end_state = self._summarize(stream, path)
+                self._catalog[str(path)] = (signature, record, end_state)
+                result.append({**record, **({"end_state":end_state} if with_outcomes and end_state is not None else {})})
             except (ValueError, KeyError, TypeError, OSError):
                 recoverable = False
                 if path.is_file() and stat.st_size:
@@ -158,6 +158,7 @@ class Repository:
     @staticmethod
     def _summarize(stream, path):
         record = None
+        end_state = None
         for index, line in enumerate(stream, 1):
             event = json.loads(line)
             if event["id"] != f"e{index:06d}" or not line.endswith(b"\n"):
@@ -176,6 +177,8 @@ class Repository:
                           "actors": len(data["scenario"]["entities"]), "project_id": None,
                           "mode": "demo" if providers == {"demo"} else "mixed" if "demo" in providers else "api",
                           "directory": path.parent.name, "events": 0, "reports": 0}
+                if data.get("experiment"):
+                    record["experiment"] = data["experiment"]
             if record is None:
                 raise ValueError("缺少初始记录")
             record["events"] += 1
@@ -188,6 +191,8 @@ class Repository:
                 record["status"] = "stopped"
             elif event["kind"] == "window_committed":
                 record["window"] = event["window"]
+                if record.get("experiment"):
+                    end_state = data["state"]
             elif event["kind"] == "project_linked":
                 record["project_id"] = data["project_id"]
             elif event["kind"] == "report_created":
@@ -196,7 +201,7 @@ class Repository:
             raise ValueError("空记录")
         if record["window"] == record["windows"]:
             record["status"] = "completed"
-        return record
+        return record, end_state
 
     def run_directory(self, run_id):
         match = next((item for item in self.catalog()["runs"] if item["run_id"] == run_id), None)
