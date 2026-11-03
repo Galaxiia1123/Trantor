@@ -1,0 +1,59 @@
+.field-watches {
+  margin: 0 0 16px;
+  padding: 14px 19px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+}
+.watchlist-head, .trace-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.watchlist-head h2 { margin: 0; font-size: 16px; }
+.watch-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(215px, 100%), 1fr));
+  gap: 10px;
+}
+.watch-cards .hint { margin: 3px 0 0; }
+.watch-card {
+  display: grid;
+  gap: 3px;
+  margin-top: 7px;
+  padding: 11px 13px;
+  text-align: left;
+  background: #f2f5f0;
+  border-left: 3px solid #708267;
+  overflow-wrap: anywhere;
+}
+.watch-card small, .watch-card span { font-size: 12px; font-weight: 400; }
+.watch-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 14px;
+}
+.watch-fields label, .watch-form > label { margin: 5px 0; }
+.watch-form .actions { margin-top: 12px; }
+.watch-finding {
+  display: grid;
+  justify-items: start;
+  gap: 3px;
+  padding: 12px 15px;
+  border-radius: 8px;
+  background: #eef2eb;
+}
+.watch-finding p, .trace-row p, .matter-step p { margin: 3px 0; }
+.watch-baseline { border-left: 2px solid #a9a1b1; padding-left: 11px; }
+.watch-chart { width: 100%; max-height: 85px; color: #526c4d; border-bottom: 1px solid var(--line); }
+.trace-row, .matter-step { padding: 8px 0; border-top: 1px solid var(--line); }
+.trace-row small, .trace-row strong { display: block; }
+.trace-row .link { flex-shrink: 0; }
+.matter-step .link { margin-right: 12px; }
+.whole-run .feed-filters .check { display: flex; gap: 6px; align-items: center; }
+@media (max-width: 500px) {
+  .watch-fields { grid-template-columns: 1fr; }
+  .watchlist-head { flex-wrap: wrap; }
+  .field-watches { padding: 12px 15px; }
+}

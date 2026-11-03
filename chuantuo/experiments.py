@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from copy import deepcopy
 from decimal import Decimal
 from pathlib import Path
 from typing import Literal
@@ -23,7 +24,7 @@ def boundary(simulation, window=None):
         if selected == 0:
             return {"window":0,"event_id":"e000001","state":simulation._scenario.initial_state()}
         commit = simulation.journal.settlement(selected)
-        return {"window":selected,"event_id":commit["id"],"state":commit["data"]["state"]}
+        return {"window":selected,"event_id":commit["id"],"state":deepcopy(commit["data"]["state"])}
 
 
 def branch_payload(simulation, window, title):
@@ -203,6 +204,10 @@ def fork_experiment(parent, spec, run_id, job_id, directory: Path):
     alternate.journal.append("experiment_forked",marker,spec.window)
     alternate.status, alternate.error = "paused", None
     alternate.journal.append("run_status",alternate.snapshot(),spec.window)
+    watch_file=parent.journal.directory/"observer.json"
+    if watch_file.is_file():
+        # The complete sidecar is replaced atomically by the UI. Each route keeps its own copy.
+        (directory/"observer.json").write_bytes(watch_file.read_bytes())
     return alternate
 
 

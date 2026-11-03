@@ -4,7 +4,8 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#f7f7f4">
   <title>Trantor 川陀 · 推演工作台</title>
-  <link rel="stylesheet" href="/static/workbench.css"><script defer src="/static/experiments.js"></script><script defer src="/static/workbench.js"></script>
+  <link rel="stylesheet" href="/static/workbench.css"><link rel="stylesheet" href="/static/observatory.css">
+  <script defer src="/static/observatory.js"></script><script defer src="/static/experiments.js"></script><script defer src="/static/workbench.js"></script>
 </head>
 <body>
   <a class="skip" href="#main">跳到正文</a>
@@ -31,14 +32,16 @@
         </aside>
       </div>
       <div id="draft" hidden class="card draft"></div>
-      <div class="recording-entry"><span class="eyebrow">案例文稿</span><span>潮汐港的窗口期 <small>跨层协商 · 9 个窗口</small></span><button id="use-case" class="link">使用这份文稿</button><button id="read-case" class="link">看案例回放</button></div>
+      <div class="recording-entry"><label for="sample-material" class="eyebrow">案例文稿</label><select id="sample-material"><option value="tidal">潮汐港 · 跨层协商 · 9 窗</option><option value="rehearsal">北廊排练室 · 排期交换 · 3 窗</option></select><button id="use-case" class="link">使用这份文稿</button><button id="read-case" class="link">看案例回放</button></div>
       <div class="recording-entry"><span class="eyebrow">真实推演实录</span><span>芦湾维修押保协商 <small>已归档 · 2 个窗口</small></span><a href="#recording">阅读这次推演 ↗</a></div>
     </section>
     <section id="library-page" hidden><div class="eyebrow"><span class="dash"></span> 本机记录</div><h1>项目与记录</h1><p class="lead">从已保存的场景继续，或回看某次推演的完整过程。</p><label class="library-find">查找项目或推演<input id="library-search" type="search" placeholder="名称、编号或运行状态"></label><div class="library-grid"><article class="card"><h2>已保存场景</h2><div id="projects"></div></article><article class="card"><h2>推演记录</h2><div id="runs"></div></article></div><details class="foot-tools"><summary>导入项目包与历史工具</summary><label>导入已导出的项目包 <input id="import-bundle" type="file" accept=".zip"></label><p><a href="/archive">打开旧版工作台 ↗</a></p></details></section>
     <section id="watch-page" hidden><div class="eyebrow"><span class="dash"></span> 推演观察</div><div class="watch-head"><div><h1 id="watch-title"></h1><p class="lead" id="watch-meta"></p></div><div class="actions" id="run-actions"></div></div>
-      <div class="window-bar"><label for="window">观察窗口</label><select id="window"></select><span id="window-status"></span></div>
+      <div class="window-bar"><label for="window">观察窗口</label><button type="button" id="previous-window" aria-label="上一窗">‹</button><select id="window"></select><button type="button" id="next-window" aria-label="下一窗">›</button><span id="window-status"></span></div>
       <section id="experiment-tools" class="experiment-tools" aria-label="条件实验" hidden></section>
-      <details id="all-windows" class="whole-run"><summary>按时间回顾整场推演</summary><div id="window-list"></div></details>
+      <section id="field-watches" class="field-watches" aria-label="观察问题" hidden></section>
+      <details id="all-windows" class="whole-run"><summary>按时间回顾整场推演</summary>
+        <div class="feed-filters"><label class="check"><input type="checkbox" id="changed-windows">只看字段变化的窗口</label><label>时间顺序<select id="window-order"><option value="new">最新在前</option><option value="old">最早在前</option></select></label></div><div id="window-list"></div></details>
       <div class="watch-grid"><article class="card"><div class="card-top"><h2>事件经过</h2><span class="quiet">按发生顺序</span></div>
         <div id="window-outcome" class="window-outcome" hidden></div>
         <div class="feed-filters"><label>关注主体<select id="feed-actor"><option value="">全部主体</option></select></label>

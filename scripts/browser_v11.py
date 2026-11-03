@@ -78,6 +78,21 @@ def main():
                 page.get_by_role("button",name="已有路线",exact=True).click()
                 expect(page.locator("#reading-content")).to_contain_text("已排入复核 · 1 次")
                 page.keyboard.press("Escape")
+                page.get_by_role("button",name="添加关注",exact=True).click()
+                page.get_by_label("观察字段",exact=True).select_option(label="复核安排")
+                page.get_by_label("观察方式",exact=True).select_option("equals")
+                page.get_by_label("目标值",exact=True).select_option(label="已排入复核")
+                page.get_by_label("问题名称（可选）").fill("申请何时被登记？")
+                page.get_by_role("button",name="查看结果",exact=True).click()
+                expect(page.locator(".watch-finding")).to_contain_text("第 2 窗首次记录达成")
+                expect(page.locator(".watch-baseline")).to_contain_text("待签收")
+                page.get_by_role("button",name="固定到观察台").click()
+                expect(page.locator("#field-watches")).to_contain_text("申请何时被登记？")
+                with page.expect_download() as notes: page.get_by_role("link",name="下载观察笔记").click()
+                assert "observations" in notes.value.suggested_filename
+                page.get_by_role("button",name="主体持续事项").click()
+                expect(page.locator("#reading-content")).to_contain_text("三个工作日内等候")
+                page.keyboard.press("Escape")
                 page.locator("#feed-actor").select_option("desk"); page.locator("#feed-kind").select_option("message_delivered")
                 expect(page.locator("#events")).to_contain_text("签章已核对")
                 if args.screenshots: page.screenshot(path=args.screenshots/"compare.png")
@@ -96,6 +111,7 @@ def main():
                     page.locator("#prepare").click()
                 job_id = prepared.value.json()["id"]
                 expect(page.locator("#draft")).to_contain_text("9 个窗口")
+                expect(page.locator("#draft")).to_contain_text("准备追踪的问题（1）")
                 expect(page.locator("#draft")).to_contain_text("已存 · 第 1 版")
                 interpreter = [str(args.installed_python),"-I"] if args.installed_python else [sys.executable]
                 adoption = subprocess.run([*interpreter,"-m","chuantuo","prepare","--resume-job",job_id,"--port",url.rsplit(":",1)[1]],
@@ -122,6 +138,7 @@ def main():
                 page.wait_for_url(re.compile(r"#run/[a-f0-9]{12}"), timeout=25000)
                 expect(page.locator("#watch-meta")).to_contain_text("已完成",timeout=55000)
                 run_url = page.url; rid = run_url.split("#run/")[1]
+                expect(page.locator("#field-watches")).to_contain_text("第 8 窗首次记录达成")
                 page.locator("#all-windows>summary").click()
                 page.locator("#window-list .record-row").filter(has_text="第 8 窗").get_by_role("button",name="回看").click()
                 expect(page.locator("#window")).to_have_value("8"); expect(page.locator("#actors")).to_contain_text("资金缺口为2000万元")
@@ -174,6 +191,7 @@ def main():
                 expect(page.locator("#experiment-tools")).to_contain_text("第 9 窗 · 0 项状态不同",timeout=30000)
                 assert page.url!=run_url
                 variant_id=page.url.split("#run/")[1]
+                assert page.request.get(url+"/api/runs/"+variant_id+"/watches").json()[0]["first_hit"]["window"]==8
                 filtered=page.request.get(url+"/api/runs/"+variant_id+"/watch?window=9&actor=engineer&kind=expression&limit=1").json()
                 assert filtered["total"]==2 and filtered["settlement"]["kind"]=="window_committed"
             assert len([task for _,task in endpoint.calls if task=="agent"]) == 100

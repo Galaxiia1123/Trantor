@@ -54,6 +54,7 @@ def definition(data):
                        "provenance":origin("只有取得有效书面担保并完成工程复核才会再次审议")}], "sources":[]}
     return {"summary":"五方围绕一项港口扩建议案互动。观察书面担保能否在工程复核后生效，以及市议会何时重启审议。",
             "scenario":scene,"plan":{"windows":3,"rounds_per_window":1,"recent_records":3,"history_windows":2},
+            "observation_questions":[{"actor_id":"council","field_id":"agenda","title":"议案何时进入复议？","operator":"equals","target":"已列入复议"}],
             "plan_reason":"按文稿约定逐日推演，每窗留出回应机会。保留近期沟通和未完成事项。",
             "checklist":dict.fromkeys(Coverage.model_fields, "grounded"),"gaps":[],"findings":[]}
 

@@ -40,6 +40,7 @@ from .project_io import export_project, import_project
 from . import __version__
 from .experiments import Adoption, ExperimentRequest, adopt_suggestion, branch_payload, compare, experiment_comparison, fork_experiment, outcome_groups
 from .recovery import salvage
+from .observatory import FieldWatch, observe_field, observation_notes, ongoing_matters
 from .insights import Question, actor_observation, answer_question, event_preview, search_evidence, timeline, watch_window, window_history
 
 
@@ -215,6 +216,10 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
     @app.get("/api/case/recording")
     def verified_replay():
         return Response(case_assets["verified-replay.json"],media_type="application/json",headers={"Cache-Control":"no-cache"})
+
+    @app.get("/api/case/rehearsal")
+    def rehearsal_material():
+        return {"name":"rehearsal-room.md","text":case_assets["rehearsal-room.md"].decode("utf-8")}
 
     @app.post("/api/case/letter/{choice}")
     def letter_experiment(choice: Literal["notified","unseen","repeat"]):
@@ -404,6 +409,7 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
         return estimate_weights(request.scenario, request.model, gateway)
 
     def create_run(request: RunRequest, run_id, launch_id=None):
+        suggested = next((r.get("observation_questions",[]) for r in reversed(request.preparation_records) if r.get("kind")=="scene_parse"),[])
         if isinstance(request.config, RunConfig11):
             if any(record.get("blocking_questions") for record in request.preparation_records):
                 raise ValueError("开局仍有关键问题，请补充回答并重新整理场景")
@@ -413,6 +419,7 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
             raise ValueError("关联项目需要同时提供项目编号和版本")
         if request.project_id:
             project = repository.get_project(request.project_id, request.project_version)
+            suggested = project["payload"].get("assistant",{}).get("observation_questions",suggested)
             saved = SceneBundle.model_validate({k: project["payload"][k] for k in SceneBundle.model_fields}).model_dump(mode="json")
             if any(saved[key] != getattr(request, key).model_dump(mode="json") for key in ("scenario", "config")) or saved["preparation_records"] != request.preparation_records:
                 raise VersionConflict("请先保存当前配置为新版本，再关联这次推演")
@@ -430,6 +437,11 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
                 simulation.journal.append("project_linked", {"project_id": request.project_id, "version": request.project_version})
             for record in request.preparation_records:
                 simulation.journal.append(record["kind"], record)
+            for data in suggested if isinstance(suggested,list) else []:
+                watch=FieldWatch.model_validate(data)
+                watch.resolve(simulation._scenario,simulation.config.catalog.values())
+                wid=uuid.uuid5(uuid.NAMESPACE_URL,encode(watch.model_dump(mode="json"))).hex
+                repository.field_watches(stage,wid,watch.model_dump(mode="json"))
             stage.rename(target)
             simulation.journal.directory = target
         with guard:
@@ -550,8 +562,49 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
         return watch_window(get_run(run_id), window, offset, limit, actor, kind)
 
     @app.get("/api/runs/{run_id}/windows")
-    def committed_history(run_id: str, offset: int = Query(default=0,ge=0), limit: int = Query(default=40,ge=1,le=100)):
-        return window_history(get_run(run_id),offset,limit)
+    def committed_history(run_id: str, offset: int = Query(default=0,ge=0), limit: int = Query(default=40,ge=1,le=100),
+                          changed_only: bool=False, newest_first: bool=False):
+        return window_history(get_run(run_id),offset,limit,changed_only=changed_only,newest_first=newest_first)
+
+    @app.post("/api/runs/{run_id}/field-observation")
+    def field_observation(run_id:str, request:FieldWatch, through:int|None=Query(default=None,ge=0)):
+        sim=get_run(run_id)
+        result=observe_field(sim,request,through)
+        if sim.experiment:
+            parent=get_run(sim.experiment["parent_id"])
+            result["baseline"]={"run_id":parent.run_id, **observe_field(parent,request,result["through"],details=False)}
+        return result
+
+    @app.get("/api/runs/{run_id}/watches")
+    def watch_cards(run_id:str, through:int|None=Query(default=None,ge=0)):
+        sim=get_run(run_id)
+        return [{"id":key,**observe_field(sim,FieldWatch.model_validate(data),through,details=False)}
+                for key,data in repository.field_watches(sim.journal.directory).items()]
+
+    @app.put("/api/runs/{run_id}/watches/{watch_id}")
+    def save_watch(run_id:str, watch_id:str, request:FieldWatch):
+        sim=get_run(run_id)
+        request.resolve(sim._scenario,sim.config.catalog.values())
+        repository.field_watches(sim.journal.directory,watch_id,request.model_dump(mode="json"))
+        return {"id":watch_id}
+
+    @app.get("/api/runs/{run_id}/watch-notes")
+    def export_watch_notes(run_id:str,through:int|None=Query(default=None,ge=0)):
+        sim=get_run(run_id)
+        result=observation_notes(sim,repository.field_watches(sim.journal.directory),through)
+        return Response(result,media_type="text/markdown; charset=utf-8",
+                        headers={"Content-Disposition":f'attachment; filename="trantor-observations-{sim.run_id}.md"'})
+
+    @app.delete("/api/runs/{run_id}/watches/{watch_id}")
+    def remove_watch(run_id:str,watch_id:str):
+        sim=get_run(run_id)
+        repository.field_watches(sim.journal.directory,watch_id,None)
+        return {"id":watch_id}
+
+    @app.get("/api/runs/{run_id}/matters")
+    def run_matters(run_id:str, through:int|None=Query(default=None,ge=0), actor:str|None=None,
+                    status:Literal["open","closed"]|None=None,offset:int=Query(default=0,ge=0),limit:int=Query(default=30,ge=1,le=100)):
+        return ongoing_matters(get_run(run_id),through,actor,status,offset,limit)
 
     @app.post("/api/runs/{run_id}/branch")
     def branch(run_id: str, request: BranchRequest):
@@ -715,7 +768,7 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
     # A running service serves a matched UI/API release even when the source is edited.
     static = Path(__file__).parent / "static"
     assets = {p.name:p.read_bytes() for p in sorted(static.iterdir()) if p.is_file()}
-    case_assets = {name:(static.parent/"templates"/name).read_bytes() for name in ("tidal-port.md","tidal-replay.json","verified-replay.json")}
+    case_assets = {name:(static.parent/"templates"/name).read_bytes() for name in ("tidal-port.md","rehearsal-room.md","tidal-replay.json","verified-replay.json")}
     revision = hashlib.sha256(b"".join(assets.values())).hexdigest()[:12]
     build_digest = hashlib.sha256(revision.encode())
     for file in sorted(static.parent.glob("*.py")):

@@ -102,6 +102,19 @@ def test_private_long_memory_survives_eviction_and_replay(native_run):
 
 
 def test_current_state_prose_and_details_share_a_commit(native_run):
+    from chuantuo.observatory import FieldWatch, observe_field, ongoing_matters
+    q=FieldWatch(actor_id="council",field_id="agenda",operator="equals",target="已列入复议",deadline=8)
+    before_result=observe_field(native_run,q,7)
+    after_result=observe_field(native_run,q,9)
+    assert before_result["status"]=="pending" and before_result["first_hit"] is None
+    assert after_result["through"]==8 and after_result["first_hit"]["window"]==8 and after_result["segments"][-1]["actions"]
+    throughout=observe_field(native_run,q.model_copy(update={"criterion":"always"}),8)
+    final=q.model_copy(update={"criterion":"at_end"})
+    assert throughout["status"]=="violated" and throughout["first_miss"]["window"]==0
+    assert observe_field(native_run,final,7)["status"]=="pending_end" and observe_field(native_run,final,8)["status"]=="met_at_end"
+    matters=ongoing_matters(native_run,7,"engineer","open")
+    assert all(note["actor_id"]=="engineer" for note in matters["items"])
+    assert any("2000" in note["text"] for note in matters["items"])
     before, after = (watch_window(native_run, i) for i in (7,8))
     council = next(a for a in after["actors"] if a["id"] == "council")
     assert "已列入复议" in council["profile"] and "资金缺口为2000万元" in council["profile"]

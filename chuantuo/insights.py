@@ -97,7 +97,7 @@ def watch_window(simulation, selected=None, offset=0, limit=100, actor_id=None, 
         state_id = commit["id"] if commit else "e000001"
         actors = []
         for actor in scene.entities:
-            fields = {f.id:{"value":state[actor.id][f.id], "label":f.label or f.id, "unit":f.unit,
+            fields = {f.id:{"value":state[actor.id][f.id], "label":f.label or f.id, "kind":f.kind, "unit":f.unit,
                             "domain":f.domain,"provenance":f.provenance.model_dump(exclude_defaults=True),
                             **({"constraints":f.constraints.model_dump(exclude_defaults=True)} if f.constraints else {})} for f in actor.fields}
             profile = state_sentences({actor.id:fields}).get(actor.id)
@@ -116,18 +116,21 @@ def watch_window(simulation, selected=None, offset=0, limit=100, actor_id=None, 
                 "mode":"sample" if all(m.provider == "demo" for m in simulation.config.catalog.values()) else "api"}
 
 
-def window_history(simulation, offset, limit):
+def window_history(simulation, offset, limit, *, changed_only=False, newest_first=False):
     with simulation._lock:
         last = simulation.window
         rows = []
-        for window in range(offset + 1, min(last, offset + limit) + 1):
+        numbers=range(last,0,-1) if newest_first else range(1,last+1)
+        if changed_only:
+            numbers=[w for w in numbers if simulation.journal.settlement(w)["data"]["changes"]]
+        for window in numbers[offset:offset+limit]:
             commit = simulation.journal.settlement(window)
             data = commit["data"]
             # The ledger already contains the world's explanation. No summary-model call is needed.
             reasons = [c["text"] for c in data["consequences"]] or [c["reason"] for c in data["changes"]]
             rows.append({"window":window,"event_id":commit["id"],"changed_fields":len(data["changes"]),
                          "summary":" ".join(dict.fromkeys(reasons))[:360] or "本窗已结算，已定义字段保持原值。"})
-        return {"windows":rows,"total":last,"next":offset+len(rows)}
+        return {"windows":rows,"total":len(numbers),"committed":last,"next":offset+len(rows)}
 
 
 def actor_observation(simulation, actor_id, window=None):

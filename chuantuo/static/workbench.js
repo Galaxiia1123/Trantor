@@ -55,6 +55,7 @@ const playbacks = new Map();
 const playback = () => ["case","recording"].includes(activeRun);
 let extraAnswers = "", overrides = {}, currentStateWindow = 0;
 let requestedWindows = 40, historyThrough = -1;
+let historyRequest = 0;
 let savedLibrary = null;
 let libraryLimits = {projects:20,runs:20};
 const readingTrail = [];
@@ -135,10 +136,12 @@ $("material").onchange = safe(async () => {
   } finally { $("prepare").disabled = busy; }
 });
 $("use-case").onclick = safe(async () => {
-  const item = await api("/api/case"); const source = {id:"tidal_brief", name:item.name, text:item.text};
-  if (!sources.some(s => s.id === source.id)) sources.push(source);
-  showFiles(); persistSeed(); notice("已加入潮汐港文稿，可直接整理。");
+  const rehearsal=$("sample-material").value==="rehearsal",item=await api(rehearsal ? "/api/case/rehearsal" : "/api/case");
+  const source={id:rehearsal ? "rehearsal_brief" : "tidal_brief",name:item.name,text:item.text};
+  sources=sources.filter(s=>!["rehearsal_brief","tidal_brief"].includes(s.id));sources.push(source);
+  showFiles(); persistSeed(); notice("已加入"+(rehearsal ? "排练室" : "潮汐港")+"文稿，可直接整理。");
 });
+$("sample-material").onchange=()=>{$("read-case").hidden=$("sample-material").value!=="tidal";};
 $("read-case").onclick = () => { location.hash = "case"; };
 $("try-letter").onclick = openLetterLab;
 $("import-bundle").onchange = safe(async () => {
@@ -179,6 +182,8 @@ async function job(kind, path, payload, follow) {
 async function saveProject(reason = "", preparedJob = null) {
   const assistant = {summary:draft.summary, goal:$("brief").value, extra_answers:extraAnswers,
     source_ids:sources.map(s => s.id), overrides, plan_reason:draft.plan_reason, revision_reason:reason};
+  if (draft.observation_questions || draft.preparation_records.at(-1)?.observation_questions)
+    assistant.observation_questions=applicableQuestions(draft.scenario,draft.observation_questions ?? draft.preparation_records.at(-1).observation_questions);
   const payload = {scenario:draft.scenario, config:draft.config, preparation_records:draft.preparation_records,
     assistant, expected_version:project?.version || 0};
   const endpoint = "/api/projects" + (project ? "/" + project.id : "") + (preparedJob ? "?prepared_job=" + encodeURIComponent(preparedJob) : "");
@@ -365,6 +370,26 @@ function renderDraft() {
   const top = h("div", null, "card-top"); top.append(h("div", "开局摘要", "eyebrow"), h("span", project ? "已存 · 第 " + project.version + " 版" : "待保存", "quiet"));
   root.append(top, h("h2", scene.title), h("p", draft.summary, "summary"), h("p", scene.entities.length + " 个主体　·　" + config.windows + " 个窗口　·　每窗 " + config.window_duration + "　·　" + config.model.model, "badge"));
   root.append(h("p", "每窗互动 " + config.rounds_per_window + " 轮，主体与世界预计至少调用 " + (config.windows * (scene.entities.length * config.rounds_per_window + 1)) + " 次。", "hint"));
+  const proposed=applicableQuestions(scene,record.observation_questions || []);
+  if (proposed.length) {
+    const selected=draft.observation_questions ?? proposed, panel=h("div");
+    panel.append(h("p","整理模型根据文稿建议了这些观察问题。勾选的项目会在启动后显示，可随时增删。","hint"));
+    for (const question of proposed) {
+      const label=h("label",null,"check"), checkbox=h("input");checkbox.type="checkbox";
+      checkbox.checked=selected.some(s=>sameValue(s,question));
+      const actor=scene.entities.find(a=>a.id===question.actor_id), field=actor.fields.find(f=>f.id===question.field_id);
+      label.append(checkbox,document.createTextNode(question.title || actor.name+" · "+(field.label || field.id)));panel.append(label);
+      checkbox.onchange=safe(async()=>{
+        const old=draft.observation_questions;
+        draft.observation_questions=proposed.filter((q,i)=>panel.querySelectorAll("input")[i].checked);
+        panel.querySelectorAll("input").forEach(input=>input.disabled=true);
+        try {await saveProject("调整开局关注的问题");}
+        catch(error){draft.observation_questions=old;throw error;}
+        finally{renderDraft();}
+      });
+    }
+    root.append(disclosure("准备追踪的问题（"+selected.length+"）",panel));
+  }
   root.append(disclosure("参与者与有向关系", relationExplorer(scene)));
   if (scene.assumptions.length || scene.missing_information.length) root.append(disclosure("假设与缺项（" + (scene.assumptions.length + scene.missing_information.length) + "）", bullets([...scene.assumptions,...scene.missing_information])));
   const check = record.source_reconciliation || {};
@@ -458,6 +483,7 @@ function openProject(p) {
   if (data.scenario.format_version !== "1.1") { location.href = "/archive?project=" + p.id; return; }
   draft = {scenario:data.scenario, config:data.config,preparation_records:data.preparation_records, summary:a.summary || record.summary || data.scenario.background,
     plan_reason:a.plan_reason || record.plan_reason, questions:record.blocking_questions || []};
+  draft.observation_questions=a.observation_questions ?? record.observation_questions;
   sources = data.scenario.sources.filter(s => (a.source_ids || []).includes(s.id)); $("brief").value = a.goal || "";
   extraAnswers = a.extra_answers || ""; overrides = {...(record.explicit_settings || {}), ...(a.overrides || {})};
   showFiles(); renderDraft();
@@ -518,7 +544,7 @@ function groupDeliveries(events) {
   }
   return rows;
 }
-function fieldDetails(actor, stateRecord) {
+function fieldDetails(actor, stateRecord, view) {
   const fields = h("dl",null,"field-facts");
   const origins = {material:"原始材料",ai_assumption:"模拟假设",missing:"资料缺失",user:"用户设定"};
   for (const [id,field] of Object.entries(actor.fields)) {
@@ -526,6 +552,7 @@ function fieldDetails(actor, stateRecord) {
     fields.append(h("dt",field.label || id));
     const row = h("dd"), value = field.value === null ? "未知" : typeof field.value === "boolean" ? (field.value ? "是" : "否") : String(field.value) + (field.unit || "");
     row.append(h("strong",value),h("small",field.domain + " · 定义来自" + (origins[definition.kind || "user"] || "已保存设定")));
+    if (!playback()) row.append(button("追踪这个字段",()=>openFieldWatch(view,{actor_id:actor.id,field_id:id}),"link"));
     if (definition.quotes?.length) row.append(disclosure("查看定义原句",...definition.quotes.map(q => h("p","“" + q.quote + "”" + (q.page ? " · 第 " + q.page + " 页" : ""),"hint"))));
     fields.append(row);
   }
@@ -598,6 +625,7 @@ function renderWindow(view) {
   const s = view.status, isCase = playback(), names = Object.fromEntries(view.actors.map(a => [a.id,a.name]));
   currentStateWindow = view.settled_through;
   showExperimentTools(view);
+  showFieldWatches(view);
   if ($("all-windows").open && historyThrough !== s.window) safe(drawWindowHistory)();
   $("followup").hidden = isCase; $("ask").disabled = ["ready","running"].includes(s.status);
   const scope = $("question-scope"), priorScope = scope.value;
@@ -610,6 +638,8 @@ function renderWindow(view) {
   const live = h("option", isCase ? "最后一个窗口" : "跟随最新"); live.value = ""; select.append(live);
   for (let i = 0; i <= view.latest; i++) { const option = h("option", i ? "第 " + i + " 窗" : "开局"); option.value = String(i); select.append(option); }
   select.value = selectedWindow === null ? "" : String(selectedWindow);
+  $("previous-window").disabled=view.selected===0; $("next-window").disabled=view.selected>=view.latest;
+  $("previous-window").onclick=safe(()=>pinWindow(view.selected-1)); $("next-window").onclick=safe(()=>pinWindow(view.selected+1));
   $("window-status").textContent = "第 " + view.selected + " 窗 / 共 " + s.windows + " 窗";
   const controls = $("run-actions"); controls.replaceChildren();
   const control = (label, action) => button(label, async () => {
@@ -681,7 +711,7 @@ function renderWindow(view) {
   const displayActors=focus ? view.actors.filter(a=>a.id===focus) : view.actors;
   for (const a of displayActors.slice(0,actorLimit)) {
     const card = h("div",null,"actor"); card.append(h("strong",a.name),h("p",a.profile || "未定义结算字段。"));
-    if (Object.keys(a.fields).length) { const d = fieldDetails(a,view.state_record); d.dataset.actor = a.id; d.open = open.has(a.id); card.append(d); }
+    if (Object.keys(a.fields).length) { const d = fieldDetails(a,view.state_record,view); d.dataset.actor = a.id; d.open = open.has(a.id); card.append(d); }
     if (!isCase && view.settled_through) card.append(button("当时可见的信息",()=>openActorContext(a,view.settled_through),"link"));
     $("actors").append(card);
   }
@@ -769,35 +799,44 @@ async function refreshWatch(gen) {
   if (gen === routeGeneration && !["completed","stopped"].includes(view.status.status) && !playback())
     timer = setTimeout(safe(() => refreshWatch(gen)), view.status.status === "running" ? 1100 : 3500);
 }
-$("window").onchange = safe(async () => { selectedWindow = $("window").value === "" ? null : Number($("window").value); eventLimit = 100; lastView = ""; await refreshWatch(routeGeneration); });
+async function pinWindow(n) {
+  selectedWindow=n;eventLimit=100;lastView="";
+  const base=playback() ? activeRun : "run/"+activeRun;
+  history.replaceState(null,"","#"+base+(n===null ? "" : "/"+n));
+  await refreshWatch(routeGeneration);
+}
+$("window").onchange = safe(() => pinWindow($("window").value === "" ? null : Number($("window").value)));
 $("feed-actor").onchange=$("feed-kind").onchange=safe(async()=>{eventLimit=100; lastView=""; await refreshWatch(routeGeneration);});
 async function drawWindowHistory() {
-  const run = activeRun, root = $("window-list");
-  let items, total;
+  const run = activeRun, root = $("window-list"), ticket=++historyRequest;
+  const changes=$("changed-windows").checked, newest=$("window-order").value==="new";
+  let items, total, committed;
   if (playback()) {
     if (!example) return;
     items = example.windows.slice(1).map(view => {
       const commit = view.events.find(e => e.kind === "window_committed");
       return {window:view.selected, changed_fields:commit?.data.changes?.length || 0,
         summary:(commit?.data.consequences || []).map(c => c.text).join(" ") || "本窗已结算，已定义字段保持原值。"};
-    }); total = items.length;
+    }); committed=items.length; if(changes)items=items.filter(v=>v.changed_fields); if(newest)items.reverse();
+    total=items.length;items=items.slice(0,requestedWindows);
   } else {
     items = []; total = 0;
     do {
-      const page = await api("/api/runs/" + run + "/windows?offset=" + items.length + "&limit=40");
-      items.push(...page.windows); total = page.total;
+      const page = await api("/api/runs/" + run + "/windows?offset=" + items.length + "&limit=40&changed_only="+changes+"&newest_first="+newest);
+      items.push(...page.windows); total = page.total; committed=page.committed;
       if (!page.windows.length) break;
     } while (items.length < Math.min(total,requestedWindows));
   }
-  if (run !== activeRun || !$("all-windows").open) return;
-  historyThrough = total;
+  if (ticket!==historyRequest || run !== activeRun || !$("all-windows").open) return;
+  historyThrough = committed;
   root.replaceChildren(...items.map(v => recordRow("第 " + v.window + " 窗 · " + v.changed_fields + " 项状态变化",v.summary,async () => {
-    selectedWindow = v.window; eventLimit = 100; lastView = ""; await refreshWatch(routeGeneration); $("all-windows").open = false;
+    $("all-windows").open = false; await pinWindow(v.window);
   },"回看")));
-  if (!items.length) root.append(h("p","首个窗口结算后可在这里回顾。","hint"));
+  if (!items.length) root.append(h("p",committed && changes ? "已提交的窗口均保持原有字段值。清除筛选可回看互动。" : "首个窗口结算后可在这里回顾。","hint"));
   if (items.length < total) root.append(button("继续读取窗口",async () => {requestedWindows += 40; await drawWindowHistory();}));
 }
 $("all-windows").ontoggle = safe(async () => { if ($("all-windows").open) await drawWindowHistory(); });
+$("changed-windows").onchange=$("window-order").onchange=safe(async()=>{requestedWindows=40;await drawWindowHistory();});
 async function loadAnswers() {
   const run = activeRun;
   if (!run || playback()) return;
@@ -837,10 +876,13 @@ async function route() {
   $("nav-new").classList.toggle("active", !showWatch && !showLibrary); $("nav-library").classList.toggle("active", showWatch || showLibrary);
   if (showWatch) {
     activeRun = kind === "run" ? id : kind; $("watch-title").textContent = "正在打开记录";
-    if (kind === "run" && /^\d{1,9}$/.test(pinned || "")) selectedWindow = Number(pinned);
+    const at=kind==="run" ? pinned : id;
+    if (/^\d{1,9}$/.test(at || "")) selectedWindow = Number(at);
     $("experiment-tools").hidden = true; $("experiment-tools").replaceChildren();
+    $("field-watches").hidden=true; $("field-watches").replaceChildren(); delete $("field-watches").dataset.stamp;
     $("window-outcome").hidden=true; $("feed-actor").replaceChildren(new Option("全部主体","")); $("feed-kind").value=""; actorLimit=8;
     $("all-windows").open = false; historyThrough = -1; requestedWindows = 40; $("window-list").replaceChildren();
+    $("changed-windows").checked=false; $("window-order").value="new";
     $("followup").open = false; $("answers").replaceChildren(); $("question-text").value = "";
     $("watch-meta").textContent = ""; ["events","actors","reports","run-actions","window"].forEach(k => $(k).replaceChildren());
     await refreshWatch(gen);

@@ -48,6 +48,22 @@ class Repository:
             raise ValueError("项目 ID 无效")
         return self.projects / project_id
 
+    def field_watches(self, directory, watch_id=None, value=None):
+        if watch_id is not None and not re.fullmatch(r"[a-f0-9]{32}",watch_id):
+            raise ValueError("观察卡编号无效")
+        path=directory/"observer.json"
+        with self.lock:
+            items=json.loads(path.read_text("utf-8")) if path.is_file() else {}
+            if watch_id is not None:
+                if value is None:
+                    items.pop(watch_id,None)
+                else:
+                    if watch_id not in items and len(items)>=32:
+                        raise ValueError("本场已有 32 张观察卡，请先移除不再关注的卡片")
+                    items[watch_id]=value
+                atomic_json(path,items)
+            return items
+
     def save_project(self, payload: dict, project_id=None, expected_version=0):
         with self.lock:
             project_id = project_id or uuid.uuid4().hex[:12]
