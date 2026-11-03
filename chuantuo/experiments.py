@@ -13,7 +13,7 @@ from .engine import Simulation, encode
 from pydantic import Field, model_validator
 
 from .models import protect_credentials
-from .schema import Identifier, Provenance, Record, RunConfig11, Scenario11, Source, StateField, load_scenario
+from .schema import Identifier, Provenance, Record, RunConfig11, Scenario11, ScheduledValue, Source, StateField, load_scenario
 
 
 def boundary(simulation, window=None):
@@ -137,8 +137,9 @@ def compare(left, right, left_window=None, right_window=None):
 class ExperimentRequest(Record):
     window: int = Field(ge=0)
     through: int = Field(ge=1)
-    kind: Literal["condition", "repeat"] = "condition"
+    kind: Literal["condition","field","repeat"] = "condition"
     condition: str = Field(default="", max_length=1600)
+    assignment: ScheduledValue | None = None
     audience: Literal["public", "readers", "world"] = "world"
     readers: list[Identifier] = Field(default_factory=list)
 
@@ -146,8 +147,10 @@ class ExperimentRequest(Record):
     def coherent(self):
         if self.through <= self.window:
             raise ValueError("终点须晚于分岔窗口")
-        if (self.kind == "condition") != bool(self.condition.strip()):
+        if (self.kind=="condition" and not self.condition.strip()) or (self.kind=="repeat" and self.condition.strip()):
             raise ValueError("改变条件时请填写具体情境，原样重跑时请留空")
+        if (self.kind=="field")!=(self.assignment is not None):
+            raise ValueError("字段实验只能选择一个已定义的字段和目标值")
         if (self.audience == "readers") != bool(self.readers) or len(set(self.readers)) != len(self.readers):
             raise ValueError("请选择实际获知条件的主体")
         if self.kind == "repeat" and self.audience != "world":
@@ -166,7 +169,22 @@ def fork_experiment(parent, spec, run_id, job_id, directory: Path):
     selected = boundary(parent, spec.window)
     scene = parent.scenario.model_dump(mode="json")
     condition = spec.condition.strip()
-    if condition:
+    if spec.kind=="field":
+        change=spec.assignment
+        actor=next((a for a in parent._scenario.entities if a.id==change.entity_id),None)
+        f=next((f for f in actor.fields if f.id==change.field_id),None) if actor else None
+        if not f or not f.permits(change.value) or f.constraints and f.constraints.fixed:
+            raise ValueError("请选择可以调整的已定义字段，并符合它的类型、范围和约束")
+        if selected["state"][actor.id][f.id]==change.value:
+            raise ValueError("目标值与分岔时相同，可选择原样重跑")
+        scene["scheduled_events"].append({"id":"variation_"+run_id,"window":spec.window+1,
+            "text":condition or "本窗有一项外部调整，将在结算时生效。",
+            "visibility":{"public":spec.audience=="public","readers":spec.readers},
+            "assignments":[change.model_dump(mode="json")],"provenance":{"kind":"user","explanation":"操作者在字段对照中指定。"}})
+        if not condition:
+            value="未知" if change.value is None else ("是" if change.value else "否") if isinstance(change.value,bool) else str(change.value)+(f.unit or "")
+            condition=f"{actor.name}的{f.label or f.id}在第 {spec.window+1} 窗末设为{value}"
+    elif condition:
         scene["rules"].append({"text":condition, "active_from":spec.window + 1,
             "visibility":{"public":spec.audience == "public","readers":spec.readers},
             "provenance":{"kind":"user","explanation":f"对照实验设定，自第 {spec.window + 1} 窗起生效。"}})
@@ -253,7 +271,7 @@ def outcome_groups(parent, catalog, actor_id=None, field_id=None):
         spec = row.get("experiment")
         if not spec or spec["parent_id"] != parent.run_id:
             continue
-        key = (spec["parent_event"],spec["state_sha256"],spec["through"],spec["kind"],spec["condition"],spec["audience"],tuple(sorted(spec["readers"])))
+        key = (spec["parent_event"],spec["state_sha256"],spec["through"],spec["kind"],spec["condition"],spec["audience"],tuple(sorted(spec["readers"])),encode(spec.get("assignment")))
         if key not in groups:
             original = boundary(parent,spec["through"])
             groups[key] = {"spec":spec,"baseline":original["state"][selected["actor"]][selected["field"]] if selected else None,

@@ -44,6 +44,7 @@ class Journal:
         self._disk_size = 0
         self._offsets = {}
         self._window_rows = {}
+        self._round_observations = {}
         self._settlements = {}
         self._usage = {}
         self._prep_sizes = {}
@@ -116,6 +117,9 @@ class Journal:
             keys = ("purpose", "actor_id", "config_id", "input_id", "level", "batch")
             event = {**event, "data": {k: event["data"][k] for k in keys if k in event["data"]}}
         self._events.append(event)
+        if kind=="observation":
+            key=(event["window"],data["visible"]["round"],data["actor_id"])
+            self._round_observations.setdefault(key,[]).append(event)
         if event["kind"] in {"expression","decision_deferred","message_delivered","window_committed","settlement_rejected","model_failure","external_event"}:
             self._window_rows.setdefault(event["window"], []).append(event)
         if event["kind"] == "window_committed":
@@ -141,6 +145,15 @@ class Journal:
     def settlement(self, window):
         with self._lock:
             return self._settlements.get(window)
+
+    def observation_receipt(self,actor,window,turn,delivery,discarded):
+        with self._lock:
+            for obs in reversed(self._round_observations.get((window,turn,actor),())):
+                if obs["id"] in discarded:
+                    continue
+                if any(all(m.get(k)==delivery[k] for k in ("action_id","from","to","text")) for m in obs["data"]["visible"]["messages"]):
+                    return obs["id"]
+        return None
 
     def usage(self):
         with self._lock:
@@ -221,10 +234,8 @@ class Journal:
                 raise ValueError("该窗口或轮次没有这个主体的已提交决定")
             if action["kind"]=="decision_deferred":
                 chosen=action["data"]
-                for i in range(int(action["id"][1:])-2,-1,-1):
-                    obs=self._events[i]
-                    if obs["window"]!=window: break
-                    if obs["kind"]=="observation" and obs["id"] not in discarded and obs["data"]["actor_id"]==actor_id and obs["data"]["visible"]["round"]==chosen["round"]:
+                for obs in reversed(self._round_observations.get((window,chosen["round"],actor_id),())):
+                    if obs["id"] not in discarded and int(obs["id"][1:])<int(action["id"][1:]):
                         return {"actor_id":actor_id,"window":window,"round":chosen["round"],"rounds":rounds,
                                 "deferred":True,"plan_record":chosen["plan_record"],"review_at":chosen["review_at"],
                                 "observation_id":obs["id"],"deferred_id":action["id"],"observation":decision_view(self._full(obs)["data"]["visible"])}

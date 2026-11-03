@@ -103,9 +103,12 @@ def decision(data):
 
 
 def settle(data):
+    external={(v["entity_id"],v["field_id"]) for event in data.get("external_events",[]) for v in event["assignments"]}
     reviews, consequences = [], []
     for owner, fields in data["state"].items():
         for key, before in fields.items():
+            if (owner,key) in external:
+                continue
             after, reason, ids = before, "本窗缺少改变该字段的证据。", []
             def actions(actor, phrase):
                 return [a["id"] for a in data["actions"] if a["actor_id"] == actor and phrase in a["text"]]

@@ -4,23 +4,24 @@
   function neighborhood(data, current, windowIndex, mode, query = "") {
     const actors = new Map(data.actors.map(a => [a.id, a]));
     const incoming = new Map(), outgoing = new Map();
-    function add(source, target, key, value) {
+    function add(source, target, key, value, count) {
       if (source !== current && target !== current) return;
       const outbound = source === current;
       const peer = outbound ? target : source;
       const map = outbound ? outgoing : incoming;
-      if (!map.has(peer)) map.set(peer, {actor:actors.get(peer), edge:null, messages:[]});
+      if (!map.has(peer)) map.set(peer, {actor:actors.get(peer), edge:null, messages:[],messageCount:0});
       map.get(peer)[key] = value;
+      if(key==="messages")map.get(peer).messageCount=count ?? value.length;
     }
     for (const edge of data.influences) add(edge.source, edge.target, "edge", edge);
     for (const route of data.routes) {
-      if (route.window === windowIndex) add(route.source, route.target, "messages", route.event_ids);
+      if (windowIndex==null || route.window===windowIndex) add(route.source,route.target,"messages",route.event_ids,route.count);
     }
     const needle = query.trim().toLowerCase();
     const rows = map => [...map.values()].filter(item => item.actor &&
       (mode !== "messages" || item.messages.length) && (mode !== "influences" || item.edge) &&
       (item.actor.name + " " + item.actor.id).toLowerCase().includes(needle)).sort((a,b) =>
-        b.messages.length-a.messages.length || (b.edge?.weight ?? -1)-(a.edge?.weight ?? -1) || a.actor.id.localeCompare(b.actor.id));
+      b.messageCount-a.messageCount || (b.edge?.weight ?? -1)-(a.edge?.weight ?? -1) || a.actor.id.localeCompare(b.actor.id));
     return {center:actors.get(current), incoming:rows(incoming), outgoing:rows(outgoing)};
   }
 
@@ -53,18 +54,19 @@
         g.addEventListener("click",()=>focus(actor.id));
         g.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();focus(actor.id);}});
       }
-      const title=svg("title",{},actor.name+" · L"+actor.depth+" · "+caption);
+      const level=actor.level ? "第"+actor.level+"层" : "L"+actor.depth;
+      const title=svg("title",{},actor.name+" · "+level+" · "+caption);
       const chars=Array.from(actor.name), name=chars.length>11?chars.slice(0,10).join("")+"…":actor.name;
       g.append(title,svg("rect",{x:-87,y:-24,width:174,height:48,rx:8}),
         svg("text",{y:-2,"text-anchor":"middle",class:"focus-name"},name),
-        svg("text",{y:15,"text-anchor":"middle",class:"focus-label"},"L"+actor.depth+" · "+caption));
+        svg("text",{y:15,"text-anchor":"middle",class:"focus-label"},level+" · "+caption));
       nodes.append(g);
     }
     function link(start,end,style,weight) {
       const [x1,y1]=start,[x2,y2]=end,half=(x1+x2)/2;
       const color=style==="impact"?"#287267":"#a06730";
       const attrs={d:"M"+x1+" "+y1+" C"+half+" "+y1+" "+half+" "+y2+" "+x2+" "+y2,fill:"none",stroke:color,
-        "stroke-width":style==="impact"?1+2*weight:2,"marker-end":"url(#route-arrow-"+style+")"};
+        "stroke-width":style==="impact" && typeof weight==="number"?1+2*weight:2,"marker-end":"url(#route-arrow-"+style+")"};
       if(style==="message")attrs["stroke-dasharray"]="5 4";
       lines.append(svg("path",attrs));
     }
@@ -76,7 +78,8 @@
         const [from,to]=inbound?[peerPoint,centerPoint]:[centerPoint,peerPoint];
         if(item.edge && mode!=="messages")link([from[0],from[1]-3],[to[0],to[1]-3],"impact",item.edge.weight);
         if(item.messages.length && mode!=="influences")link([from[0],from[1]+4],[to[0],to[1]+4],"message",0);
-        const info=[item.edge?"权重 "+item.edge.weight:"无预设边",item.messages.length+" 条消息"].join(" · ");
+        const relation=item.edge ? (typeof item.edge.weight==="number" ? "权重 "+item.edge.weight : "有向关系") : "无预设边";
+        const info=[relation,item.messageCount+" 条消息"].join(" · ");
         node(item.actor,x,y,item.actor.id===graph.center.id?"自反馈 · "+info:info);
       });
     }

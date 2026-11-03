@@ -220,6 +220,16 @@ class Repository:
         return record, end_state
 
     def run_directory(self, run_id):
+        if re.fullmatch(r"[a-f0-9]{12}",run_id):
+            candidate=self.root/run_id/"events.jsonl"
+            if candidate.is_file():
+                with candidate.open("rb") as stream:
+                    try:
+                        first=json.loads(stream.readline())
+                    except ValueError:
+                        first={}
+                if isinstance(first,dict) and first.get("kind")=="run_created" and isinstance(first.get("data"),dict) and first["data"].get("run_id")==run_id:
+                    return candidate.parent
         match = next((item for item in self.catalog()["runs"] if item["run_id"] == run_id), None)
         if match is None:
             raise FileNotFoundError("运行不存在或记录不完整")

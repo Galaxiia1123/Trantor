@@ -112,14 +112,18 @@ $("model-form").onsubmit = async event => {
 function reading(title, ...content) {
   readingRequest++;
   if ($("reading").open) {
-    readingTrail.push({title:$("reading-title").textContent,nodes:[...$("reading-content").childNodes]});
+    readingTrail.push({title:$("reading-title").textContent,nodes:[...$("reading-content").childNodes],
+      scroll:$("reading").scrollTop,focus:document.activeElement});
     const back = button("← 返回" + $("reading-title").textContent, () => {
-      const prior = readingTrail.pop(); $("reading-title").textContent = prior.title;
+      readingRequest++;const prior = readingTrail.pop(); $("reading-title").textContent = prior.title;
       $("reading-content").replaceChildren(...prior.nodes);
+      if(prior.focus?.isConnected)prior.focus.focus({preventScroll:true});
+      $("reading").scrollTop=prior.scroll;
     }, "link");
     content.unshift(back);
   }
   $("reading-title").textContent = title; $("reading-content").replaceChildren(...content);
+  $("reading").scrollTop=0;
   if (!$("reading").open) $("reading").showModal();
 }
 $("reading").addEventListener("close", () => { if (!$("reading").open) { readingTrail.length = 0; readingRequest++; } });
@@ -640,6 +644,8 @@ function adoptSuggestedField(view, event, suggestion, index) {
 function renderWindow(view) {
   const s = view.status, isCase = playback(), names = Object.fromEntries(view.actors.map(a => [a.id,a.name]));
   currentStateWindow = view.settled_through;
+  $("open-interactions").hidden=isCase;
+  $("open-interactions").onclick=safe(()=>openInteractions(view));
   showExperimentTools(view);
   showFieldWatches(view);
   if ($("all-windows").open && historyThrough !== s.window) safe(drawWindowHistory)();
@@ -650,7 +656,7 @@ function renderWindow(view) {
   if (names[priorScope]) scope.value = priorScope;
   $("watch-title").textContent = view.title;
   $("watch-meta").textContent = (view.mode === "recorded_api" ? "真实接口实录 · 只读回放" : isCase || view.mode === "sample" ? "脚本案例 · 未调用真实模型" : "模型 " + view.model) + "　·　每窗 " + s.window_duration + "　·　" + (statuses[s.status] || s.status);
-  const select = $("window"); select.replaceChildren();
+  const select = $("window"); select.disabled=false;select.replaceChildren();
   const live = h("option", isCase ? "最后一个窗口" : "跟随最新"); live.value = ""; select.append(live);
   for (let i = 0; i <= view.latest; i++) { const option = h("option", i ? "第 " + i + " 窗" : "开局"); option.value = String(i); select.append(option); }
   select.value = selectedWindow === null ? "" : String(selectedWindow);
@@ -911,6 +917,8 @@ async function route() {
     $("changed-windows").checked=false; $("window-order").value="new";
     $("followup").open = false; $("answers").replaceChildren(); $("question-text").value = "";
     $("watch-meta").textContent = ""; ["events","actors","reports","run-actions","window"].forEach(k => $(k).replaceChildren());
+    $("open-interactions").hidden=true;$("window").disabled=$("next-window").disabled=$("previous-window").disabled=true;
+    $("events").append(h("p","正在读取该窗口的推演记录…","hint"));
     await refreshWatch(gen);
   }
   else if (showLibrary) await library(gen);

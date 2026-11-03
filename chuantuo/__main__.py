@@ -31,8 +31,9 @@ def main():
     prepare.add_argument("--no-search",action="store_true")
     prepare.add_argument("--resume-job")
     serve = commands.add_parser("serve", help="启动本地浏览器操作台")
-    serve.add_argument("--port", type=int, default=8765)
+    serve.add_argument("--port", type=int, default=8767)
     serve.add_argument("--runs", type=Path, default=Path("runs"))
+    serve.add_argument("--stop-on-stdin-close",action="store_true",help="由父进程管理时，标准输入关闭后等待在办任务并退出")
     export = commands.add_parser("example", help="将演示场景和运行配置写入新目录")
     export.add_argument("directory", type=Path)
     export.add_argument("--template", choices=sorted(EXAMPLES), default="harbor")
@@ -92,9 +93,17 @@ def main():
             print(json.dumps(result, ensure_ascii=False,indent=2))
             return int(result["status"] == "failed")
     if args.command == "serve":
+        import threading
         import uvicorn
         from .web import create_app
-        uvicorn.run(create_app(args.runs), host="127.0.0.1", port=args.port)
+        server=uvicorn.Server(uvicorn.Config(create_app(args.runs),host="127.0.0.1",port=args.port))
+        if args.stop_on_stdin_close:
+            def wait_for_owner():
+                while sys.stdin.buffer.read(4096):
+                    pass
+                server.should_exit=True
+            threading.Thread(target=wait_for_owner,name="workbench-owner",daemon=True).start()
+        server.run()
         return 0
     if args.command == "example":
         args.directory.mkdir(parents=True, exist_ok=True)

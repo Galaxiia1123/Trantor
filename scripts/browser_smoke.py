@@ -23,8 +23,8 @@ def _server_instance(data, port, installed_python=None):
     log = logfile.open("wb")
     interpreter = [str(installed_python), "-I"] if installed_python else [sys.executable]
     working = data if installed_python else Path(__file__).resolve().parents[1]
-    process = subprocess.Popen([*interpreter, "-m", "chuantuo", "serve", "--port", str(port), "--runs", str(data)],
-                               stdout=log, stderr=log, cwd=working,
+    process = subprocess.Popen([*interpreter, "-m", "chuantuo", "serve", "--port", str(port), "--runs", str(data),"--stop-on-stdin-close"],
+                               stdin=subprocess.PIPE,stdout=log, stderr=log, cwd=working,
                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     try:
         for _ in range(100):
@@ -47,9 +47,15 @@ def _server_instance(data, port, installed_python=None):
             raise RuntimeError("测试服务超时")
         yield url
     finally:
-        process.terminate()
-        process.wait(timeout=15)
-        log.close()
+        try:
+            process.stdin.close()
+            try:
+                process.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                process.terminate()
+                process.wait(timeout=15)
+        finally:
+            log.close()
 
 
 @contextmanager

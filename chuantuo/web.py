@@ -41,6 +41,7 @@ from . import __version__
 from .experiments import Adoption, ExperimentRequest, adopt_suggestion, branch_payload, compare, experiment_comparison, fork_experiment, outcome_groups
 from .recovery import salvage
 from .observatory import FieldWatch, observe_field, observation_notes, ongoing_matters
+from .interactions import interaction_map, conversation
 from .insights import Question, actor_observation, answer_question, event_preview, search_evidence, timeline, watch_window, window_history
 
 
@@ -565,6 +566,15 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
     @app.get("/api/runs/{run_id}/timeline")
     def replay(run_id: str):
         return timeline(get_run(run_id))
+
+    @app.get("/api/runs/{run_id}/interactions")
+    def interaction_focus(run_id:str,start:int=Query(default=0,ge=0),through:int|None=Query(default=None,ge=0),focus:str|None=None):
+        return interaction_map(get_run(run_id),start,through,focus)
+
+    @app.get("/api/runs/{run_id}/conversation")
+    def read_conversation(run_id:str,one:str,two:str,start:int=Query(default=0,ge=0),through:int|None=Query(default=None,ge=0),
+                          q:str=Query(default="",max_length=200),offset:int=Query(default=0,ge=0),limit:int=Query(default=30,ge=1,le=80)):
+        return conversation(get_run(run_id),one,two,start,through,q,offset,limit)
 
     @app.get("/api/runs/{run_id}/watch")
     def observe_window(run_id: str, window: int | None = Query(default=None,ge=0),

@@ -51,8 +51,32 @@
 .trace-row small, .trace-row strong { display: block; }
 .trace-row .link { flex-shrink: 0; }
 .matter-step .link { margin-right: 12px; }
+.map-controls { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:3px 12px; }
+.map-controls label { min-width:0; }
+.map-legend { display:flex;gap:18px;align-items:center;font-size:12px; }
+.map-legend span::before { content:"";display:inline-block;width:24px;border-top:2px solid #287267;vertical-align:middle;margin-right:5px; }
+.map-legend span:last-child::before { border-top:2px dashed #a06730; }
+.communication-map .route-canvas { overflow:auto;background:#f6f5f0;border-radius:9px;max-height:460px; }
+.communication-map svg { display:block;width:100%;min-width:545px; }
+.communication-map .focus-node rect { fill:var(--paper);stroke:#a2b5a8; }
+.communication-map .focus-node[role="button"] { cursor:pointer; }
+.communication-map .focus-node:focus rect,.communication-map .focus-node:hover rect { stroke:var(--violet);stroke-width:2px; }
+.communication-map .core-node rect { fill:#4e6254; }
+.communication-map .core-node text { fill:white; }
+.communication-map .focus-name { font-size:17px;font-weight:650; }
+.communication-map .focus-label,.communication-map .route-caption { font-size:13px; }
+.map-peer { display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid var(--line); }
+.map-peer strong,.map-peer small,.conversation-entry small { display:block; }
+.map-peer p,.conversation-entry p { margin:5px 0; }
+.map-peer button { flex-shrink:0; }
+.conversation-entry { padding:12px 0;border-top:1px solid var(--line); }
+.conversation-entry h3 { margin:0;font-size:15px; }
+.conversation-search { display:flex;gap:8px; }
+.conversation-search input { flex:1; }
+.value-picker { min-width:0;margin:0;padding:0;border:0; }
 .whole-run .feed-filters .check { display: flex; gap: 6px; align-items: center; }
 @media (max-width: 500px) {
+  .map-controls { grid-template-columns:1fr; }
   .watch-fields { grid-template-columns: 1fr; }
   .watchlist-head { flex-wrap: wrap; }
   .field-watches { padding: 12px 15px; }
