@@ -154,6 +154,13 @@ $("read-case").onclick = safe(async()=>{
   reading("案例文稿",h("pre",material.text));
 });
 $("try-letter").onclick = openLetterLab;
+function pickCase(post) {
+  $("letter-case").setAttribute("aria-pressed",String(!post));$("post-case").setAttribute("aria-pressed",String(post));
+  $("sample-heading").textContent=post ? "封存单赶得上交接吗" : "一封签字函，两种结果";
+  $("sample-intro").textContent=post ? "缩短山路邮程，或只寄一封说明。看看收货站何时拿到可以核对的副本。" : "签字函按时送达，申请就会进入复核吗？试着改变谁知道这件事。";
+  $("try-letter").onclick=post ? openPostLab : openLetterLab;
+}
+$("letter-case").onclick=()=>pickCase(false);$("post-case").onclick=()=>pickCase(true);
 $("import-bundle").onchange = safe(async () => {
   const file = $("import-bundle").files[0]; if (!file) return;
   const form = new FormData(); form.append("file", file); $("import-bundle").value = "";
@@ -423,7 +430,7 @@ function renderDraft() {
     }
     root.append(disclosure("待采纳的字段（" + suggestions.length + "）", panel));
   }
-  root.append(disclosure("资料与依据（" + scene.sources.length + "）", sourceReview(record)));
+  root.append(disclosure("资料与依据（" + scene.sources.length + "）", sourceReview(record), draftDocuments(scene,record.document_review)));
   const qs = draft.questions || record.blocking_questions || [];
   if (qs.length) {
     root.append(h("h3", "开局前需要确认"), bullets(qs));
@@ -436,6 +443,7 @@ function renderDraft() {
   const labeled = (text, control) => { const l = h("label", text); l.append(control); return l; };
   const reason = h("input"); reason.placeholder = "变更关系或解决开局冲突时填写";
   adv.append(h("h3","运行方案"),h("p", draft.plan_reason || record.plan_reason, "hint"),plan.node,
+    draftEntryWindows(scene),
     disclosure("编辑完整场景定义", labeled("场景 JSON", sceneEdit)), labeled("修改依据", reason),
     button("校验并保存修改", async () => {
       const editedPlan = plan.read(), editedScene = JSON.parse(sceneEdit.value);
@@ -539,6 +547,8 @@ async function evidence(id, sourceRun = activeRun) {
   if (data.text) body.append(h("p",data.text));
   if (item.kind==="message_delivered") body.append(h("p",data.from+" → "+data.to),h("small","对应行动","quiet"),evidenceLinks([data.action_id],sourceRun));
   if (item.kind==="message_dispatched") body.append(h("p","预计第 "+data.due_window+" 窗开始时到达。"),evidenceLinks([data.action_id],sourceRun));
+  if(["message_delivered","message_dispatched"].includes(item.kind))for(const d of data.enclosures || [])
+    body.append(disclosure("随信副本 · "+d.title,h("p",d.text),h("small","内容指纹 "+d.sha256,"quiet")));
   if (data.dispatch_id)body.append(h("small","原始发件","quiet"),evidenceLinks([data.dispatch_id],sourceRun));
   if (item.kind==="expression" && !playback() && item.commit_status==="committed")
     body.append(button("查看作出决定时的可见信息",()=>openActorContext({id:data.actor_id,name:data.actor_id},item.window,data.round,false,sourceRun),"link"));
@@ -557,7 +567,7 @@ function groupDeliveries(events) {
     const prior = rows.at(-1);
     const action = prior?.kind === "expression" ? prior.id : prior?.data.action_id;
     if (prior && ["expression","message_delivered"].includes(prior.kind) && e.kind === "message_delivered" && action === e.data.action_id &&
-        e.data.text === prior.data.text && prior.commit_status === e.commit_status) {
+        !e.data.enclosures?.length && !prior.data.enclosures?.length && e.data.text === prior.data.text && prior.commit_status === e.commit_status) {
       prior.to.push(e.data.to); prior.receipts.push(e.id);
     } else rows.push({...e, to:e.kind === "message_delivered" ? [e.data.to] : [], receipts:[]});
   }
@@ -571,6 +581,7 @@ function fieldDetails(actor, stateRecord, view) {
     fields.append(h("dt",field.label || id));
     const row = h("dd"), value = field.value === null ? "未知" : typeof field.value === "boolean" ? (field.value ? "是" : "否") : String(field.value) + (field.unit || "");
     row.append(h("strong",value),h("small",field.domain + " · 定义来自" + (origins[definition.kind || "user"] || "已保存设定")));
+    for(const p of field.constraints?.entry_windows || [])row.append(h("small","“"+p.value+"”"+entryText(p)));
     if (!playback()) row.append(button("查阅这项状态的依据",()=>openFieldReason(view,actor.id,id),"link"),
       button("追踪这个字段",()=>openFieldWatch(view,{actor_id:actor.id,field_id:id}),"link"));
     if (definition.quotes?.length) row.append(disclosure("查看定义原句",...definition.quotes.map(q => h("p","“" + q.quote + "”" + (q.page ? " · 第 " + q.page + " 页" : ""),"hint"))));
@@ -596,8 +607,17 @@ async function openActorContext(actor, window, turn, replace = false, run = acti
   } else body.append(disclosure("可见字段",h("pre",json(view.visible_state))));
   if(view.messages?.length) {
     body.append(h("h3","本轮收到的消息"));
-    view.messages.forEach(m=>body.append(h("p",m.from+" → "+m.to+"　"+m.text),evidenceLinks([m.action_id],run)));
+    view.messages.forEach(m=>{
+      body.append(h("p",m.from+" → "+m.to+"　"+m.text),evidenceLinks([m.action_id],run));
+      for(const doc of m.enclosures || [])body.append(disclosure("收到附件 · "+doc.title,h("p",doc.text),evidenceLinks([m.receipt_id].filter(Boolean),run)));
+    });
   }
+  if(view.documents?.length)body.append(disclosure("当时持有的原件或副本",...view.documents.map(d=>{
+    const original=view.visible_materials?.find(m=>m.document?.id===d.id),line=h("div");
+    line.append(h("strong",d.title),h("small",d.first_delivery ? " · 第 "+d.received_window+" 窗取得副本" : " · 开局已持有","quiet"));
+    if(original)line.append(h("p",original.text));if(d.first_delivery)line.append(evidenceLinks([d.first_delivery],run));
+    return line;
+  })));
   if(view.mail_routes?.length) {
     const names=Object.fromEntries(view.roster.map(a=>[a.id,a.name]));
     body.append(disclosure("当时已知的通信时效",...view.mail_routes.map(r=>h("p",(names[r.source]||r.source)+" → "+(names[r.target]||r.target)+"　"+transitText(r.transit_windows)))));
@@ -753,6 +773,8 @@ function renderWindow(view) {
       }
     } else row.append(h("span","运行异常","type"), h("p",data.reason || "本窗口未完成，查看记录了解原因。"));
     row.append(button("记录 " + e.id, () => evidence(e.id), "link"));
+    if(!isCase && e.commit_status==="committed")for(const doc of data.enclosures || [])
+      row.append(button("随信副本 · "+doc.title,()=>openDocuments(view,doc.id),"link"));
     if (!isCase && ["expression","decision_deferred"].includes(e.kind) && e.commit_status==="committed")
       row.append(button("当时知道什么",()=>openActorContext({id:data.actor_id,name:names[data.actor_id]},e.window,data.round),"link"));
     if (e.receipts.length) row.append(disclosure("送达记录（" + e.receipts.length + "）",evidenceLinks(e.receipts)));

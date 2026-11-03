@@ -29,6 +29,8 @@ def event_preview(event):
     elif kind in {"expression", "message_delivered","message_dispatched"}:
         row.update(text=data["text"][:1400], message_count=len(data.get("messages", [])))
         row.update({k:data[k] for k in ("sent_window","sent_round","due_window","dispatch_id") if k in data})
+        if data.get("enclosures"):
+            row["enclosures"]=[{k:d[k] for k in ("id","title")} for d in data["enclosures"]]
     elif kind == "observation":
         view = data["visible"]
         row.update(round=view["round"], field_count=sum(map(len, view["visible_state"].values())),
@@ -112,6 +114,7 @@ def watch_window(simulation, selected=None, offset=0, limit=100, actor_id=None, 
         events = [dict(event_preview(e), commit_status=simulation.event_status(e)) for e in rows]
         return {"title":scene.title, "format_version":getattr(scene,"format_version","1.0"),
                 "scheduled_count":len(getattr(scene,"scheduled_events",[])),"has_mail_routes":bool(getattr(scene,"mail_routes",[])),
+                "document_count":len(simulation._perception.documents.originals),
                 "rounds_per_window":simulation.config.rounds_per_window,
                 "domains":scene.domains, "status":status, "selected":window, "latest":current, "settled_through":committed,
                 "state_record":state_id, "actors":actors, "events":events, "total":total, "next":offset+len(rows),

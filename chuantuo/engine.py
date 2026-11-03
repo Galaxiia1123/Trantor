@@ -14,14 +14,15 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from .bridge import Memory, act_together, make_agent, resolve
-from .continuity import actor_instruction, WORLD_INSTRUCTION, Notebook, objective_input
+from .continuity import actor_instruction, world_instruction, Notebook, objective_input
 from .locking import writer_lock, writer_active
 from .perception import Perception, decision_view
 from .pacing import ReviewPlan, revised_deadlines
 from .models import ModelError, ModelGateway, RetryStopped, measured_call, protect_credentials
 from .schema import Decision, Expression, Influence, RunConfig, RunConfig11, Scenario, Scenario11, Settlement, load_config, load_scenario
 from .settlement import actor_evidence, complete_scheduled_reviews, settled_state, verify_commits
-from .schema import message_scope, validate_outbox
+from .schema import validate_outbox
+from .documents import envelope_scope
 
 
 def encode(value) -> str:
@@ -151,7 +152,7 @@ class Journal:
             for obs in reversed(self._round_observations.get((window,turn,actor),())):
                 if obs["id"] in discarded:
                     continue
-                if any(all(m.get(k)==delivery.get(k) for k in ("action_id","from","to","text","dispatch_id")) for m in obs["data"]["visible"]["messages"]):
+                if any(all(m.get(k)==delivery.get(k) for k in ("action_id","from","to","text","dispatch_id","enclosures")) for m in obs["data"]["visible"]["messages"]):
                     return obs["id"]
         return None
 
@@ -436,6 +437,7 @@ class Simulation:
         if [e["window"] for e in commits] != list(range(1, self.window + 1)) or self.window > self.config.windows:
             raise ValueError("已提交窗口的顺序或数量不合法，无法继续")
         self._inbox = {actor.id: [] for actor in self._scenario.entities}
+        self._perception.documents.reset()
         self.agents = self._make_actors()
         memories = {key:agent.get_component("memory",type_=Memory) for key,agent in self.agents.items()}
         self._observations, self._actions = {}, []
@@ -472,9 +474,9 @@ class Simulation:
             elif event["kind"] == "message_delivered":
                 if ref:=data.get("dispatch_id"):
                     self._in_transit.pop(ref)
-                    if frozen and event["window"]==self._frozen_window:
-                        self._current_mail.append(event)
-                self._inbox[data["to"]].append(deepcopy(data))
+                if (ref or data.get("enclosures")) and frozen and event["window"]==self._frozen_window:
+                    self._current_mail.append(event)
+                self._inbox[data["to"]].append(deepcopy(self._perception.documents.received(event)))
         # Rebuild Concordia entities at their idle phase, then restore only their
         # own observations and expressions. No world/private cross-contamination.
         self.world = make_agent("world", self._world_callback, char_limit=0)
@@ -519,7 +521,7 @@ class Simulation:
             issue = rejected["data"]["reason"]
             try:
                 proposal=complete_scheduled_reviews(self._state,proposal,self._current_events)
-                settled_state(self._scenario, self._state, proposal, set(owners), owners,self._objective_receipts())
+                settled_state(self._scenario, self._state, proposal, set(owners), owners,self._objective_receipts(),window=self.window+1)
             except ValueError as error:
                 issue = str(error)
             self._settlement_correction = {"rejected_proposal":raw,"issue":issue,
@@ -601,6 +603,7 @@ class Simulation:
                 result = schema.model_validate_json(raw)
                 if schema is Decision:
                     validate_outbox(result,self._perception.delivery_limits)
+                    self._perception.documents.validate(result,self._observations[actor_id])
             except ValueError as error:
                 issues = [{key: issue[key] for key in ("type", "loc", "msg")}
                           for issue in error.errors(include_input=False, include_url=False)] if isinstance(error,ValidationError) else [
@@ -634,7 +637,7 @@ class Simulation:
             config_id = self.config.model_id("actor", self.depths[actor_id])
             if self.notebooks:
                 payload = self.notebooks[actor_id].payload(self._observations[actor_id], self.config,self._wake.get(actor_id))
-                return self._call(config_id, "agent", payload, actor_instruction(self.config), actor_id, Decision)
+                return self._call(config_id, "agent", payload, actor_instruction(self.config,bool(payload["observation"].get("documents"))), actor_id, Decision)
             total = memory["total_items"] if isinstance(memory,dict) else len(memory)
             payload = {"task": "agent", "actor_id": actor_id, "window": self.window + 1, "round": self.round,
                        "observation": self._observations[actor_id], "memory": memory["items"] if isinstance(memory,dict) else memory}
@@ -684,7 +687,9 @@ class Simulation:
                     payload["mail"]=[]
                     for e in self._current_mail:
                         d=e["data"]
-                        row={k:d[k] for k in ("from","to","text","sent_window","due_window")}
+                        row={k:d[k] for k in ("from","to","text","sent_window","due_window") if k in d}
+                        if d.get("enclosures"):
+                            row["enclosures"]=[{k:doc[k] for k in ("id","title","origin","sha256")} for doc in d["enclosures"]]
                         if e["kind"]=="message_delivered":
                             row.update(status="arrived",record=e["id"])
                         else:
@@ -701,7 +706,7 @@ class Simulation:
                 payload["settlement_correction"] = self._settlement_correction
             if self._waiting_steps:
                 payload["continued_waits"] = self._waiting_steps
-        instruction=WORLD_INSTRUCTION if self.notebooks else WORLD_SYSTEM
+        instruction=world_instruction(payload["allowed_direct_actions"]) if self.notebooks else WORLD_SYSTEM
         if payload.get("mail_routes"):
             instruction+="\nmail_routes 是本窗口权威的通信时效，优先于旧材料里的预计送达时间。核对实际到件记录，再区分信中内容与收件人自己的决定。"
         if self._waiting_steps:
@@ -718,10 +723,12 @@ class Simulation:
     def _objective_receipts(self):
         return self._current_events+[e for e in self._current_mail if e["kind"]=="message_delivered"]
 
-    def _send_message(self, sender, recipient, text, action_id):
+    def _send_message(self, sender, recipient, message, action_id):
         window=self.window+1
-        data={"from":sender,"to":recipient,"text":text,"action_id":action_id}
-        if scope:=message_scope(text,self._perception.delivery_limits):
+        data={"from":sender,"to":recipient,"text":message.text,"action_id":action_id}
+        if keys:=getattr(message,"enclosures",()):
+            data["enclosures"]=self._perception.documents.envelope(keys)
+        if scope:=envelope_scope(data,self._perception.delivery_limits):
             data["sharing"]=scope
         delay=self._perception.transit(sender,recipient,window)
         if delay:
@@ -730,8 +737,10 @@ class Simulation:
             self._in_transit[dispatch["id"]]=dispatch
             self._current_mail.append(dispatch)
         else:
-            self.journal.append("message_delivered",data,window)
-            self._inbox[recipient].append(data)
+            receipt=self.journal.append("message_delivered",data,window)
+            if data.get("enclosures"):
+                self._current_mail.append(receipt)
+            self._inbox[recipient].append(self._perception.documents.received(receipt))
 
     def _collect_actions(self):
         self._actions = []
@@ -744,7 +753,7 @@ class Simulation:
             data={**dispatch["data"],"dispatch_id":dispatch["id"]}
             receipt=self.journal.append("message_delivered",data,self.window+1)
             self._current_mail.append(receipt)
-            self._inbox[data["to"]].append(data)
+            self._inbox[data["to"]].append(self._perception.documents.received(receipt))
             del self._in_transit[dispatch["id"]]
         for round_index in range(1, self.config.rounds_per_window + 1):
             self.round = round_index
@@ -794,7 +803,7 @@ class Simulation:
                     due=revised_deadlines(prior,expression.matters)
                     next_review=ReviewPlan.next_window(expression,self.window+1,self.config.max_review_interval,due.values())
                 event = self.journal.append("expression", {"actor_id": actor_id, "round": self.round,
-                    "text": expression.text, "messages": [m.model_dump() for m in expression.messages],
+                    "text": expression.text, "messages": [m.model_dump(exclude_defaults=True) for m in expression.messages],
                     **({"model_output_id":self._accepted_outputs[actor_id]} if self.notebooks else {}),
                     **({"resumed_plan":self._wake[actor_id]} if actor_id in self._wake else {}),
                     **({"next_review_window":next_review} if next_review else {}),
@@ -807,7 +816,7 @@ class Simulation:
                     self._remember_plan(actor_id,expression,event["id"])
                 for message in expression.messages:
                     for recipient in dict.fromkeys(message.recipients):
-                        self._send_message(actor_id,recipient,message.text,event["id"])
+                        self._send_message(actor_id,recipient,message,event["id"])
     def _play_window(self):
         if self._frozen_window != self.window + 1:
             self._collect_actions()
@@ -839,7 +848,7 @@ class Simulation:
             try:
                 owners = {action["id"]:action["actor_id"] for action in self._actions}
                 proposal=complete_scheduled_reviews(self._state,proposal,self._current_events)
-                next_state, changes = settled_state(self._scenario,self._state,proposal,action_ids,owners,self._objective_receipts())
+                next_state, changes = settled_state(self._scenario,self._state,proposal,action_ids,owners,self._objective_receipts(),window=window)
             except ValueError as error:
                 raise InvalidSettlement(str(error)) from error
             # Persist the complete commit record before publishing the new state.

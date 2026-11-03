@@ -180,6 +180,9 @@ def prepare_experiment(parent, spec):
         f=next((f for f in actor.fields if f.id==change.field_id),None) if actor else None
         if not f or not f.permits(change.value) or f.constraints and f.constraints.fixed:
             raise ValueError("请选择可以调整的已定义字段，并符合它的类型、范围和约束")
+        period=f.entry_period(change.value)
+        if period and not period.allows(spec.window+1):
+            raise ValueError("分岔后的首个窗口不在该目标值允许转入的期限内")
         if selected["state"][actor.id][f.id]==change.value:
             raise ValueError("目标值与分岔时相同，可选择原样重跑")
         event_key=hashlib.sha256(encode([parent.run_id,spec.model_dump(mode="json")]).encode()).hexdigest()[:12]

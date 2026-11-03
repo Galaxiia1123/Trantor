@@ -141,6 +141,8 @@ def compact_observations(evidence):
                               for a,values in view["visible_state"].items()}
             delta["state"] = {a:values for a,values in delta["state"].items() if values}
             delta["received_actions"] = list(dict.fromkeys(m["action_id"] for m in view["messages"]))
+            if copies:=list(dict.fromkeys(m["receipt_id"] for m in view["messages"] if m.get("enclosures"))):
+                delta["document_receipts"]=copies
             previous[owner] = (event["id"],view)
             data = {"actor_id":owner,"observation_delta":delta}
         elif event["kind"] == "expression":

@@ -57,6 +57,8 @@ def _evidence_row(sim, ref, names):
                        inbox=[{"from":names[m["from"]],"text":m["text"][:260],"action":m["action_id"]} for m in inbox])
     elif e["kind"]=="message_delivered":
         row.update(sender=names[d["from"]],recipient=names[d["to"]],dispatch=d.get("dispatch_id"),action=d["action_id"])
+        if d.get("enclosures"):
+            row["enclosures"]=[doc["title"] for doc in d["enclosures"]]
         if d.get("dispatch_id"):
             row.update(sent_window=d["sent_window"],seen=sim.journal.observation_receipt(d["to"],e["window"],1,d,sim._discarded),
                        recipient_id=d["to"])
@@ -89,6 +91,8 @@ def field_reason(sim, window, actor_id, field_id, offset=0, limit=12):
             result.update(record="e000001",reason=field.provenance.explanation or "开局采用这项字段设定。",total=0,next=0,evidence=[],influences=[])
         prior=next((w for w in range(window-1,0,-1) if any((r["entity_id"],r["field_id"])==(actor_id,field_id)
                    for r in sim.journal.settlement(w)["data"]["changes"])),None)
+        if period:=field.entry_period(after):
+            result["entry_period"]=period.model_dump(mode="json")
         return {**result,"before":before,"after":after,"changed":before!=after,"previous_change":prior,
                 "exact_before":str(before) if field.kind=="number" and before is not None else None,
                 "exact_after":str(after) if field.kind=="number" and after is not None else None}

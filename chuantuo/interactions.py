@@ -67,7 +67,8 @@ def conversation(sim,one,two,start=0,through=None,query="",offset=0,limit=30):
             else: stage="awaiting_observation"
             items.append({"receipt":event["id"],"action":action["id"],"window":action["window"],"arrived_window":w,"dispatch":data.get("dispatch_id"),
                           "round":turn,"from":data["from"],"to":data["to"],
-                          "text":data["text"],"stage":stage,"seen":{"record":seen,"window":next_w,"round":next_turn} if seen else None})
+                          "text":data["text"],"stage":stage,"seen":{"record":seen,"window":next_w,"round":next_turn} if seen else None,
+                          **({"enclosures":[{"id":d["id"],"title":d["title"]} for d in data["enclosures"]]} if data.get("enclosures") else {})})
         return {"start":start,"through":end,"total":len(matches),"next":offset+len(items),"items":items}
 
 

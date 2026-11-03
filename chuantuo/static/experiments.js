@@ -1,21 +1,31 @@
 "use strict";
 
 function openLetterLab() {
-  const body=h("div",null,"letter-choices");
-  body.append(h("p","第一天，维修社提出申请，运营社要求有效签字函。原路线中函件未到。选择第二天发生什么，两条路线都会走到第三天。"));
-  const feedback=h("p","","form-error");
-  for (const [id,title,description] of [
+  return caseChoices("如果签字函按时送达","第一天，维修社提出申请，运营社要求有效签字函。原路线中函件未到。选择第二天发生什么，两条路线都会走到第三天。","letter",[
     ["notified","按时送达，并通知运营社","收件台收到有效签字函，运营社能在本轮核对。"],
     ["unseen","按时送达，暂不通知运营社","世界记录了送达，运营社的观察中还没有这条消息。"],
     ["repeat","维持原条件","不增加送达事件，从相同状态重跑。"]
-  ]) {
+  ]);
+}
+
+function openPostLab() {
+  return caseChoices("封存单赶得上交接吗","山顶发货站持有一张封存单，收货站要在第二个班次结束前登记。通常山路运单耗时两窗。选择一项改动，观察收货站实际拿到了什么。","post",[
+    ["express","提前一个窗口送达","第一窗随信寄出副本，快线在第二窗开始时送到。"],
+    ["notice","只发办理进度","封存单正在补签，信件按原时效送达，正文中没有附寄副本。"],
+    ["repeat","保持原时效重跑","保留两窗的运送时间和同一份登记原件。"]
+  ]);
+}
+
+function caseChoices(heading,intro,path,choices) {
+  const body=h("div",null,"letter-choices"),feedback=h("p","","form-error");body.append(h("p",intro));
+  for (const [id,title,description] of choices) {
     const choice=h("button",null,"letter-choice"); choice.type="button";
     choice.append(h("strong",title),h("small",description));
     choice.onclick=async()=>{
       const buttons=body.querySelectorAll("button"); buttons.forEach(b=>b.disabled=true);
       feedback.textContent="正在本机推演两条路线…";
       try {
-        const result=await api("/api/case/letter/"+id,"POST");
+        const result=await api("/api/case/"+path+"/"+id,"POST");
         if (!body.isConnected || !$("reading").open) return;
         $("reading").close(); location.hash="run/"+result.run_id+"/"+result.window;
       } catch(err) { feedback.textContent=err.message; } finally { buttons.forEach(b=>b.disabled=false); }
@@ -23,7 +33,7 @@ function openLetterLab() {
     body.append(choice);
   }
   body.append(feedback,h("p","三个选项均使用本机规则脚本。结果可回看，整个案例无需调用模型。","hint"));
-  reading("如果签字函按时送达",body);
+  reading(heading,body);
 }
 
 function experimentForm(view) {
@@ -142,6 +152,7 @@ async function experimentShelf(parent) {
 function showExperimentTools(view) {
   const root=$("experiment-tools"), meta=view.status.experiment;
   const letter=view.mode==="sample" && ["letter-desk-v1","letter-desk-v2"].includes(view.model);
+  const post=view.mode==="sample" && view.model==="mountain-post-v1";
   const available=!playback() && view.format_version==="1.1" && view.status.window>(meta?.window || 0);
   const stamp=[activeRun,view.selected,view.status.window,view.settled_through].join("/");
   if (root.dataset.stamp===stamp && root.childElementCount) return;
@@ -153,7 +164,7 @@ function showExperimentTools(view) {
     h("h2",meta ? (meta.condition || "同一开局，再走一次") : "如果有一个条件不同呢？"));
   bar.append(text);
   const choices=h("div",null,"actions");
-  if (available) choices.append(button(meta ? "再开一条路线" : "试一个条件",letter ? openLetterLab : ()=>experimentForm(view),"experiment-start"));
+  if (available) choices.append(button(meta ? "再开一条路线" : "试一个条件",letter ? openLetterLab : post ? openPostLab : ()=>experimentForm(view),"experiment-start"));
   choices.append(button("已有路线",()=>experimentShelf(meta?.parent_id || activeRun),"link")); bar.append(choices);
   root.append(bar);
   if (!meta) {
@@ -172,7 +183,7 @@ function showExperimentTools(view) {
   if (view.settled_through<=meta.window) {summary.textContent="分岔后的首个窗口结算后，这里会显示对照结果。"; return;}
   const run=activeRun, w=view.settled_through;
   api("/api/runs/"+run+"/experiment?window="+w).then(result=>{
-    if (activeRun===run && summary.isConnected) drawExperimentComparison(summary,result,view.actors,letter);
+    if (activeRun===run && summary.isConnected) drawExperimentComparison(summary,result,view.actors,letter||post);
   }).catch(error=>{if(summary.isConnected) summary.replaceChildren(h("p",error.message,"error"));});
 }
 

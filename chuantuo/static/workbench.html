@@ -5,7 +5,7 @@
   <meta name="theme-color" content="#f7f7f4">
   <title>Trantor 川陀 · 推演工作台</title>
   <link rel="stylesheet" href="/static/workbench.css"><link rel="stylesheet" href="/static/observatory.css">
-  <script defer src="/static/route-graph.js"></script><script defer src="/static/interactions.js"></script><script defer src="/static/mail.js"></script><script defer src="/static/calendar.js"></script><script defer src="/static/observatory.js"></script><script defer src="/static/story.js"></script><script defer src="/static/studies.js"></script><script defer src="/static/experiments.js"></script><script defer src="/static/workbench.js"></script>
+  <script defer src="/static/route-graph.js"></script><script defer src="/static/interactions.js"></script><script defer src="/static/mail.js"></script><script defer src="/static/documents.js"></script><script defer src="/static/calendar.js"></script><script defer src="/static/observatory.js"></script><script defer src="/static/story.js"></script><script defer src="/static/studies.js"></script><script defer src="/static/experiments.js"></script><script defer src="/static/workbench.js"></script>
 </head>
 <body>
   <a class="skip" href="#main">跳到正文</a>
@@ -28,7 +28,7 @@
         </article>
         <aside class="case-card">
           <div class="case-art" aria-hidden="true"><svg viewBox="0 0 350 126"><defs><pattern id="dots" width="12" height="12" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#cdc9d9"/></pattern></defs><rect width="350" height="126" fill="url(#dots)"/><g fill="none" stroke="#817b9b" stroke-width="1.5"><path d="M55 86 Q99 88 139 40 T243 67 T322 37"/><path d="M55 86 Q136 59 191 101 L243 67" stroke-dasharray="3 4"/><path d="M139 40 Q178 24 243 67"/></g><g stroke="#fbfaf7" stroke-width="4"><circle cx="55" cy="86" r="8" fill="#8a84aa"/><circle cx="139" cy="40" r="10" fill="#554469"/><circle cx="243" cy="67" r="13" fill="#ad6452"/><circle cx="191" cy="101" r="6" fill="#817b9b"/><circle cx="322" cy="37" r="6" fill="#817b9b"/></g></svg></div>
-          <div class="case-copy"><div class="eyebrow">动手试一次 · 无需密钥</div><h2>一封签字函，两种结果</h2><p>签字函按时送达，申请就会进入复核吗？试着改变谁知道这件事。</p><button id="try-letter" class="link">做一次条件实验 <span aria-hidden="true">↗</span></button></div>
+          <div class="case-copy"><div class="eyebrow">动手试一次 · 无需密钥</div><div class="sample-switch" role="group" aria-label="选择动手案例"><button id="letter-case" aria-pressed="true">签字函</button><button id="post-case" aria-pressed="false">货运封存单</button></div><h2 id="sample-heading">一封签字函，两种结果</h2><p id="sample-intro">签字函按时送达，申请就会进入复核吗？试着改变谁知道这件事。</p><button id="try-letter" class="link">做一次条件实验 <span aria-hidden="true">↗</span></button></div>
         </aside>
       </div>
       <div id="draft" hidden class="card draft"></div>

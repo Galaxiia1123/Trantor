@@ -1,8 +1,10 @@
 """Reconcile unambiguous, explicitly named fields and directional statements with their source text."""
 import re
+import hashlib
 from copy import deepcopy
 
 from .schema import Scenario11
+from .source_windows import apply_entry_tables
 
 
 FIELD = re.compile(r"""(?:字段(?:名(?:为)?)?|(?:state\s+)?field(?:\s+named)?)\s*[“「『"'‘\x60]\s*([^”」』"'’\x60\n]{1,70}?)\s*[”」』"'’\x60]""", re.I)
@@ -42,6 +44,25 @@ def confirm_named_fields(payload):
     defined = {v for a in payload["scenario"]["entities"] for f in a["fields"] if f["provenance"]["kind"]=="user"
                for v in (f.get("label"),f["id"]) if v}
     for record in payload["preparation_records"]:
+        timing=record.get("entry_window_review",{})
+        remaining=timing.get("unresolved",[])
+        resolved_periods={item["question"] for item in remaining for a in payload["scenario"]["entities"]
+            if not item["actor"] or item["actor"] in (a["id"],a["name"])
+            for f in a["fields"] if item["field"] in (f["id"],f.get("label"))
+            for rule in (f.get("constraints") or {}).get("entry_windows",[]) if rule["value"]==item["value"] and rule["provenance"]["kind"]=="user"}
+        if resolved_periods:
+            timing["unresolved"]=[i for i in remaining if i["question"] not in resolved_periods]
+            record["blocking_questions"]=[q for q in record.get("blocking_questions",[]) if q not in resolved_periods]
+            payload["scenario"]["missing_information"]=[q for q in payload["scenario"]["missing_information"] if q not in resolved_periods]
+        doc_review=record.get("document_review",{})
+        explicit={(m["document"]["title"],hashlib.sha256(m["text"].encode()).hexdigest()) for a in payload["scenario"]["entities"]
+                  for m in a["materials"] if m.get("document") and m["provenance"]["kind"]=="user"}
+        unresolved=doc_review.get("unresolved",[])
+        fixed={d["question"] for d in unresolved if (d["title"],d["sha256"]) in explicit}
+        if fixed:
+            doc_review["unresolved"]=[d for d in unresolved if d["question"] not in fixed]
+            record["blocking_questions"]=[q for q in record.get("blocking_questions",[]) if q not in fixed]
+            payload["scenario"]["missing_information"]=[q for q in payload["scenario"]["missing_information"] if q not in fixed]
         check = record.get("source_reconciliation", {})
         missing = check.get("unresolved_fields", [])
         resolved = set(missing) & defined
@@ -92,25 +113,29 @@ def _aliases(entities):
 
 def _sharing_rules(bundle):
     scene, record = bundle["scenario"], bundle["preparation_records"][-1]
-    if record.get("sharing_review",{}).get("version") == 1:
+    version=2 if any(m.get("document") for a in scene["entities"] for m in a["materials"]) else 1
+    if record.get("sharing_review",{}).get("version") == version:
         return bundle
     sources = {s["id"]:s["text"] for s in scene["sources"]}
     defaults = []
     for actor in scene["entities"]:
         for m in actor["materials"]:
-            if not m.get("protected_terms"):
+            if not m.get("protected_terms") and not (m.get("document") and m.get("sharing")):
                 continue
             rule = m.get("sharing")
             provenance = rule.get("provenance",{}) if rule else {}
-            if rule and (m["provenance"]["kind"]=="user" or (
-                provenance.get("kind")=="material" and provenance.get("quotes") and
-                all(q["quote"] in sources.get(q["source_id"],"") for q in provenance["quotes"]))):
-                continue
+            if rule:
+                if m["provenance"]["kind"]=="user":
+                    continue
+                if (provenance.get("kind") in {"material","user"} and provenance.get("quotes") and
+                        all(q["quote"] in sources.get(q["source_id"],"") for q in provenance["quotes"])):
+                    provenance["kind"]="material"
+                    continue
             # Missing evidence cannot grant a future recipient access to a confidential literal.
             m["sharing"] = {"allowed_recipients":list(m["visibility"]["readers"]),
                             "provenance":{"kind":"ai_assumption","explanation":"未提供可核对的对外传播授权，按开局知情名单限制原文投递。"}}
             defaults.append({"actor":actor["id"],"terms":m["protected_terms"]})
-    record["sharing_review"] = {"version":1,"restricted_to_initial_readers":defaults}
+    record["sharing_review"] = {"version":version,"restricted_to_initial_readers":defaults}
     bundle["scenario"] = Scenario11.model_validate(scene).model_dump(mode="json")
     return bundle
 
@@ -161,10 +186,98 @@ def _initial_access(bundle):
     return _sharing_rules(bundle)
 
 
+DECLARED_DOCUMENT=re.compile(
+    r"(?:原件|附件|单据|凭证|文件|document|attachment)\s*(?:的?标题|的?名称|名|title|name)?\s*(?:为|是|叫作|叫|[:：=])?\s*"
+    r"[《“「『\"](?P<title>[^》”」』\"\n]{1,100})[》”」』\"](?:[，,。.;：:\s]|其){0,12}"
+    r"(?:正文|原文|票面文字|body|contents?)\s*(?:为|是|如下|[:：=])?\s*[“「『\"](?P<body>[^”」』\"]{1,1200})[”」』\"]",re.I)
+
+
+def _document_declarations(scene,record):
+    """Rebuild only a named, verbatim original with an unambiguous initial owner and domain."""
+    if record.get("document_review",{}).get("version")==1:
+        return
+    aliases=_aliases(scene["entities"])
+    actors={a["id"]:a for a in scene["entities"]}
+    unresolved,restored=[],[]
+    for source in scene["sources"]:
+        if source.get("public_reference") or source.get("simulation_ref"):
+            continue
+        for paragraph in re.split(r"\n\s*\n",source["text"]):
+            if re.match(r"\s*(?:例如|示例|举例|example\b)",paragraph,re.I):
+                continue
+            matches=list(DECLARED_DOCUMENT.finditer(paragraph))
+            for m in matches:
+                title,body=m["title"].strip(),m["body"]
+                existing=[(a,p) for a in actors.values() for p in a["materials"] if p.get("document") and p["document"]["title"]==title]
+                if any(p["provenance"]["kind"]=="user" for a,p in existing):
+                    continue
+                digest=hashlib.sha256(body.encode()).hexdigest()
+                sentences=[s.group(0) for s in SENTENCES.finditer(paragraph)]
+                holders={}
+                for alias,aid in aliases.items():
+                    name=re.escape(alias)
+                    pattern=rf"(?:开局|初始|最初|起初)(?:时|只有|仅有|仅由|由|仅|，|,|\s)*{name}(?:一方)?(?:持有|保管)|{name}(?:在开局时|最初|初始|开局时)(?:独自|单独)?(?:持有|保管)"
+                    for sentence in sentences:
+                        if re.search(pattern,sentence):
+                            holders[aid]=sentence
+                exact=[(a,p) for a,p in existing if p["text"]==body]
+                if exact and (len(holders)!=1 or (len(existing)==1 and exact[0][0]["id"] in holders and
+                              not exact[0][1]["visibility"]["public"] and not exact[0][1]["visibility"]["readers"])):
+                    continue
+                if len(holders)!=1 or len(matches)!=1 or len(scene["domains"])!=1 or len(existing)!=len(exact) or any(len(q)>1200 for q in holders.values()):
+                    question=f"材料中有《{title}》的正文，请确认它的初始持有人、领域或采用的版本。"
+                    unresolved.append({"title":title,"sha256":digest,"source":source["id"],"question":question})
+                    continue
+                owner,holder_quote=next(iter(holders.items()))
+                permitted,denied={},set()
+                for sentence in sentences:
+                    if len(sentence)>1200 or not (title in sentence or re.search("原件|副本|此单据|该凭证|这份文件",sentence)):
+                        continue
+                    owner_named=any(alias in sentence for alias,aid in aliases.items() if aid==owner)
+                    if not owner_named and not re.search("该原件|此原件|本文件|这份(?:单据|凭证|文件)",sentence):
+                        continue
+                    for alias,aid in aliases.items():
+                        if aid==owner or not re.search(r"(?:寄给|寄送给|发送给|转交给?|交给|转寄给|送给|发给)\s*"+re.escape(alias),sentence):
+                            continue
+                        if re.search(r"不得|禁止|不能|不允许|未获准|无权",sentence):
+                            denied.add(aid)
+                        elif re.search(r"允许|授权|获准|可(?:向|以|随信|将|把|寄|转)",sentence):
+                            permitted[aid]=sentence
+                grants={a:q for a,q in permitted.items() if a not in denied}
+                def provenance(quotes,reason):
+                    return {"kind":"material","source_ids":[source["id"]],"explanation":reason,
+                            "quotes":[{"source_id":source["id"],"quote":q} for q in dict.fromkeys(quotes)]}
+                key="doc_"+hashlib.sha256((source["id"]+"\0"+title+"\0"+body).encode()).hexdigest()[:14]
+                if exact:
+                    key=exact[0][1]["document"]["id"]
+                    for a,p in exact:a["materials"].remove(p)
+                material={"domain":scene["domains"][0],"text":body,"document":{"id":key,"title":title},
+                          "visibility":{"public":False,"readers":[]},"protected_terms":[],
+                          "provenance":provenance([body,holder_quote],"逐字采用材料列出的原件正文及初始持有人。")}
+                if grants:
+                    material["sharing"]={"allowed_recipients":sorted(grants),"provenance":provenance(grants.values(),"采用材料中明确授予的寄送范围。")}
+                actors[owner]["materials"].append(material)
+                public=scene["background"]
+                quoted=r"[,，；;]\s*(?:其)?(?:正文|原文)(?:是|为|如下|[:：])?\s*[“「『\"]"+re.escape(body)+r"[”」』\"]"
+                scoped=re.sub(quoted,"。",public)
+                if len(body)>=8:
+                    scoped=scoped.replace(body,"〔正文随原件保管〕")
+                scene["background"]=scoped
+                restored.append({"id":key,"source":source["id"],"owner":owner,"removed_public_copy":scoped!=public})
+    questions=[item["question"] for item in unresolved]
+    record["document_review"]={"version":1,"restored":restored,"unresolved":unresolved}
+    if questions:
+        record["blocking_questions"]=list(dict.fromkeys([*record.get("blocking_questions",[]),*questions]))
+        scene["missing_information"]=list(dict.fromkeys([*scene["missing_information"],*questions]))
+
+
 def reconcile(result):
     bundle = deepcopy(result)
     scene, record = bundle["scenario"], bundle["preparation_records"][-1]
+    _document_declarations(scene,record)
+    apply_entry_tables(scene,record)
     if record.get("source_reconciliation",{}).get("version") == 1:
+        bundle["questions"]=record.get("blocking_questions",[])
         return _initial_access(bundle)
     materials = [s for s in scene["sources"] if not s.get("public_reference") and not s.get("simulation_ref")]
     named, excluded = _named_fields(materials)

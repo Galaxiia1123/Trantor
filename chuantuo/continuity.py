@@ -2,6 +2,7 @@
 import json
 import math
 import re
+from copy import deepcopy
 from bisect import bisect_left
 from collections import deque
 from heapq import nlargest
@@ -21,16 +22,25 @@ AGENT_INSTRUCTION = """你是场景中一个有自主权的主体。依据自己
 WORLD_INSTRUCTION = """你负责统一窗口的客观结算。主体表达和有向关系描述都是场景资料；区分意图、条件承诺和有依据的后果，目标主体自己决定是否回应。
 关系描述限定渠道、条件和范围，允许跨层直接影响。仅结算本窗口一次。history 是最近已提交后果，state 是当前值。
 以给定 schema 返回紧凑 JSON。审查每个已定义字段恰好一次，复制 before，遵守类型、单位和约束。改变时给出简明理由及本窗口 action_ids，
-保持原值的字段简述原因并返回 influence_refs=[]。改变字段时也只在能直接核对的情况下标注有向关系。allowed_direct_actions 按“目标 → 可引用的源主体 → 本窗行动编号”列出全部合法组合。不可自行反转边。
-使用 influence_refs 时，目标须等于该字段所属主体，源须亲自发出所引行动，
-每个 influence_refs.action_ids 必须同时列在该条 review.action_ids 中。字段缺项只建议新增。consequences 用简短自然语言写有依据的结果，引用对应行动。
+保持原值的字段只需简述原因。字段缺项只建议新增。consequences 用简短自然语言写有依据的结果，引用对应行动。
 不替主体选择、补造许可或宣告故事结束，不复述整场过程。"""
 
+RELATION_INSTRUCTION="""仅在字段发生变化且存在可核对的直接作用时填写 influence_refs。allowed_direct_actions 按“目标 → 可引用的源主体 → 本窗行动编号”列出合法组合。
+目标必须是该字段所属主体，源必须亲自发出所引行动，并在该条 review.action_ids 同时列出。没有合适组合时省略该项。"""
 
-def actor_instruction(config):
+
+def world_instruction(allowed):
+    return WORLD_INSTRUCTION+"\n"+(RELATION_INSTRUCTION if allowed else
+        "本窗没有可核对的有向关系引用。每条 reviews 完全省略 influence_refs。主体自己的决定引用 action_ids，到件凭据引用 event_ids。")
+
+
+def actor_instruction(config, documents=False):
+    instruction=AGENT_INSTRUCTION
+    if documents:
+        instruction+="\n若决定随信发出原件，在该条消息中加入 enclosures 编号数组，只能选本人 documents 中列出的原件并遵守 can_send_to。收到的 enclosures 是实际交付的原文副本；声称已经寄出不会交付附件。"
     if not config.max_review_interval:
-        return AGENT_INSTRUCTION
-    return AGENT_INSTRUCTION + """
+        return instruction
+    return instruction + """
 如果此刻确实决定等待，可额外返回整数 review_at（重新判断的逻辑窗口）。正文写明等待什么。等待期间不重发决定或消息。
 持续事项有明确逻辑窗口期限时可在 matters 中填写 due_window，修改沿用原 key。未完成事项的较早期限优先触发复看。
 新收件、可见处境变化或到期会提前或按时让你重新决定。需要主动推进、监督期限或思考替代方案时省略 review_at。"""
@@ -57,11 +67,14 @@ class Notebook:
                        **({"at_settlement":notice["at_settlement"]} if notice.get("at_settlement") else {})},recent_count)
         for message in inbox:
             self.sharing.update(message.get("sharing", {}))
+            for doc in message.get("enclosures",()):
+                self._add({"id":message["receipt_id"],"document":doc["id"],"kind":"已收到的原件","from":message["from"],
+                           "window":window,"text":doc["title"]+"　"+doc["text"]},recent_count)
             self._add({"id":message["action_id"],"window":window,"from":message["from"],"text":message["text"],
                        **({"kind":"已收到的原信","dispatch":message["dispatch_id"],"received_window":window}
                           if message.get("dispatch_id") else {})}, recent_count)
         self._add({"id": record_id, "window": window, "text": action.text,
-                   **({"sent": [m.model_dump() for m in action.messages]} if action.messages else {})}, recent_count)
+                   **({"sent": [m.model_dump(exclude_defaults=True) for m in action.messages]} if action.messages else {})}, recent_count)
         for matter in action.matters:
             if matter.status == "closed":
                 self.open.pop(matter.key, None)
@@ -87,6 +100,7 @@ class Notebook:
             old = self.records[position - recent_count]
             excerpt = old["text"].split("。", 1)[0][:96]
             self.older.append({"window":old["window"],"record":old["id"],"excerpt":excerpt,
+                               **({"document":old["document"],"kind":old["kind"]} if "document" in old else {}),
                                **({"kind":old["kind"],"dispatch":old["dispatch"]} if "dispatch" in old else {})})
 
     def payload(self, observation, config, wake=None):
@@ -117,7 +131,7 @@ class Notebook:
             if wake:
                 payload["resume_plan"]=wake
         limit = config.model.context_limit_chars
-        system_size=len(actor_instruction(config))
+        system_size=len(actor_instruction(config,bool(view.get("documents"))))
         def fits():
             return system_size + len(json.dumps(payload, ensure_ascii=False)) <= limit
         for key in ("earlier", "retrieved", "recent"):
@@ -139,13 +153,26 @@ def objective_input(scene, config, state, actions, history, window, schema, rece
     for action in actions:
         owned.setdefault(action["actor_id"],[]).append(action["id"])
     allowed = {}
+    field_owners={a.id for a in scene.entities if a.fields}
     for edge in scene.influences:
-        if edge.source in owned:
+        if edge.source in owned and edge.target in field_owners:
             allowed.setdefault(edge.target,{})[edge.source] = owned[edge.source]
+    if not allowed and "FieldReview" in schema.get("$defs",{}):
+        # Give the model a smaller response contract when a relationship annotation cannot be valid.
+        schema=deepcopy(schema)
+        schema["$defs"]["FieldReview"]["properties"].pop("influence_refs",None)
+        schema["$defs"].pop("InfluenceReference",None)
     result={"task": "world", "window": window, "window_duration": config.window_duration, "scenario": definitions,
             "allowed_direct_actions":allowed,
             "state": state, "actions": [{k: a[k] for k in ("id","actor_id","round","text","messages")} for a in actions],
             "history": history[-config.history_windows:], "response_schema": schema}
+    barred=[]
+    for actor in scene.entities:
+        for f in actor.fields:
+            if f.constraints and (values:=[r.value for r in f.constraints.entry_windows if not r.allows(window) and r.value!=state[actor.id][f.id]]):
+                barred.append({"entity_id":actor.id,"field_id":f.id,"本窗不可转入":values})
+    if barred:
+        result["entry_limits"]=barred
     if receipts:
         result["external_events"]=[{"record":e["id"],"text":e["data"]["text"],"assignments":e["data"]["assignments"]} for e in receipts]
     return result

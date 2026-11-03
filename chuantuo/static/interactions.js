@@ -80,6 +80,7 @@ function openConversation(run,one,two,start,end) {
       actions.append(button("发送时的决策现场",()=>openActorContext({id:message.from,name:names[message.from]},message.window,message.round,false,run),"link"),
         button("投递原文",()=>evidence(message.receipt,run),"link"));
       card.append(actions);
+      if(message.enclosures?.length)card.append(button("查阅随信副本 · "+message.enclosures.map(d=>d.title).join("、"),()=>evidence(message.receipt,run),"link"));
       if(message.seen) {
         card.append(button("收件人于"+windowName(message.seen.window)+"第 "+message.seen.round+" 轮看到",()=>openActorContext({id:message.to,name:names[message.to]},message.seen.window,message.seen.round,false,run),"link"));
       } else {

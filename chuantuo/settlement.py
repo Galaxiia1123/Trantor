@@ -7,6 +7,7 @@ from copy import deepcopy
 
 from .schema import Decision, FieldReview, RunConfig11, Scenario11, Settlement, message_scope, validate_outbox, valid_value
 from .perception import Perception
+from .documents import envelope_scope
 from .pacing import ReviewPlan, revised_deadlines
 
 
@@ -39,7 +40,7 @@ def complete_scheduled_reviews(state, proposal, receipts):
     return proposal.model_copy(update={"reviews":[*ordinary,*forced.values()]})
 
 
-def settled_state(scenario, state, proposal, action_ids, action_owners=None, receipts=()):
+def settled_state(scenario, state, proposal, action_ids, action_owners=None, receipts=(), *, window=None):
     definitions = {(a.id, f.id): f for a in scenario.entities for f in a.fields}
     reviews = {(r.entity_id, r.field_id): r for r in proposal.reviews}
     if len(reviews) != len(proposal.reviews) or reviews.keys() != definitions.keys():
@@ -61,6 +62,9 @@ def settled_state(scenario, state, proposal, action_ids, action_owners=None, rec
         field = definitions[key]
         if not field.permits(review.after) or (field.constraints and field.constraints.fixed and review.after != before):
             raise ValueError(f"字段 {actor_id}.{field_id} 的提案超出用户定义的取值范围或修改权限")
+        if before!=review.after and (period:=field.entry_period(review.after)):
+            if window is None or not period.allows(window):
+                raise ValueError(f"第 {window} 窗不能把 {actor_id}.{field_id} 转为“{review.after}”。允许转入的窗口为 {period.first} 至 {period.last or '不限'}。请保留现值或依据行动选择本窗允许的新值")
         if isinstance(review.after,str) and limits:
             readers = set(state) if field.visibility.public else {actor_id,*field.visibility.readers}
             if any(not readers <= set(allowed) for allowed in message_scope(review.after,limits).values()):
@@ -159,7 +163,7 @@ def verify_commits(scenario, config, events):
                     or not _same(data,{**original["data"],"dispatch_id":original["id"]})):
                 raise ValueError("到件与原始发件、预定到达时点或收件内容不符")
             arrivals.append(event)
-            inboxes[data["to"]].append(data)
+            inboxes[data["to"]].append(perception.documents.received(event))
             continue
         if kind=="observation" and not observations and any(e["data"]["due_window"]<=event["window"] for e in in_transit.values()):
             raise ValueError("开始本窗观察前仍有到期未投递的消息")
@@ -186,7 +190,8 @@ def verify_commits(scenario, config, events):
             if perception:
                 original = Decision.model_validate_json(data["raw"])
                 validate_outbox(original,perception.delivery_limits)
-                if original.text != data["text"] or [m.model_dump() for m in original.messages] != data["messages"]:
+                perception.documents.validate(original,visible)
+                if original.text != data["text"] or [m.model_dump(exclude_defaults=True) for m in original.messages] != data["messages"]:
                     raise ValueError("主体表达或发件人与当时的原文不符")
                 deadlines[owner]=revised_deadlines(deadlines.get(owner,{}),original.matters)
                 new_plan=ReviewPlan.from_decision(original,event["id"],visible,config.max_review_interval,deadlines[owner].values())
@@ -201,12 +206,15 @@ def verify_commits(scenario, config, events):
                 for recipient in set(message["recipients"]):
                     if recipient not in actors:
                         raise ValueError("表达包含不存在的收件人")
-                    expected_messages[event["id"], owner, recipient, message["text"]] += 1
+                    expected_messages[event["id"],owner,recipient,message["text"],tuple(message.get("enclosures",()))]+=1
         elif kind in {"message_delivered","message_dispatched"}:
-            key = data["action_id"], data["from"], data["to"], data["text"]
+            doc_ids=tuple(doc["id"] for doc in data.get("enclosures",()))
+            key = data["action_id"], data["from"], data["to"], data["text"], doc_ids
             if outbound[key] >= expected_messages[key]:
                 raise ValueError(f"投递 {event['id']} 与该表达的收件人或内容不符")
-            if perception and data.get("sharing",{}) != message_scope(data["text"],perception.delivery_limits):
+            if doc_ids and (not perception or not _same(data["enclosures"],perception.documents.envelope(doc_ids))):
+                raise ValueError("投递的原件副本与场景登记的正文或内容指纹不符")
+            if perception and data.get("sharing",{}) != envelope_scope(data,perception.delivery_limits):
                 raise ValueError(f"投递 {event['id']} 的通信权限记录不符")
             delay=perception.transit(data["from"],data["to"],event["window"]) if perception else 0
             if bool(delay)!=(kind=="message_dispatched"):
@@ -219,7 +227,9 @@ def verify_commits(scenario, config, events):
                 in_transit[event["id"]]=event
                 dispatched_count+=1
             else:
-                inboxes[data["to"]].append(data)
+                if doc_ids:
+                    arrivals.append(event)
+                inboxes[data["to"]].append(perception.documents.received(event) if perception else data)
         elif kind == "observation":
             viewer, visible = data["actor_id"], data["visible"]
             if viewer not in actors or visible["self"]["id"] != viewer:
@@ -254,7 +264,7 @@ def verify_commits(scenario, config, events):
                     or data.get("deferred_reviews",0)!=sum(schedule.values())-len(action_ids)):
                 raise ValueError(f"窗口 {event['window']} 的主体轮次或投递不完整")
             proposal = Settlement.model_validate({k: data[k] for k in ("reviews","consequences","suggested_fields")})
-            next_state, changes = settled_state(scenario,state,proposal,action_ids,action_owners,receipts+arrivals)
+            next_state, changes = settled_state(scenario,state,proposal,action_ids,action_owners,receipts+arrivals,window=event["window"])
             recorded = [FieldReview.model_validate(c).model_dump(mode="json") for c in data["changes"]]
             if not _same(next_state, data["state"]) or not _same(changes, recorded):
                 raise ValueError(f"提交 {event['id']} 与字段审查重放结果不符")
@@ -263,7 +273,7 @@ def verify_commits(scenario, config, events):
             last_feedback = {"window":last_window,"commit_id":event["id"],"changes":changes}
             total_actions += len(action_ids)
             total_deferred += sum(schedule.values())-len(action_ids)
-            total_messages += sum(outbound.values())-dispatched_count+len(arrivals)
+            total_messages += sum(outbound.values())-dispatched_count+sum("dispatch_id" in r["data"] for r in arrivals)
             dispatched_count=0
             committed_transit=len(in_transit)
             schedule.clear()

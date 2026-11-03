@@ -2,7 +2,7 @@
 from collections import Counter
 
 from .engine import AGENT_SYSTEM, WORLD_SYSTEM, Simulation, encode
-from .continuity import actor_instruction, WORLD_INSTRUCTION, Notebook, objective_input
+from .continuity import actor_instruction, world_instruction, Notebook, objective_input
 from .models import ModelError, credential_ready
 from .perception import Perception
 from .schema import RunConfig11, Settlement
@@ -34,7 +34,7 @@ def preflight(scene, config, depths):
             except ModelError as error:
                 blockers.append(f"{actor.name}（{key}）：{error}")
                 continue
-        size = len(actor_instruction(config) if native else AGENT_SYSTEM) + len(encode(payload))
+        size = len(actor_instruction(config,bool(observation.get("documents"))) if native else AGENT_SYSTEM) + len(encode(payload))
         if size > largest["chars"]:
             largest = {"actor_id":actor.id,"chars":size}
         if size > limit:
@@ -47,7 +47,7 @@ def preflight(scene, config, depths):
         world = objective_input(scene,config,state,[],[],1,Settlement.model_json_schema(),opening_events)
         if routes:=perception.known_routes(None,1):
             world["mail_routes"]=routes
-        world_floor = len(WORLD_INSTRUCTION) + len(encode(world))
+        world_floor = len(world_instruction(world["allowed_direct_actions"])) + len(encode(world))
     world_limit = catalog[world_id].context_limit_chars
     if world_floor > world_limit:
         blockers.append(f"世界模型尚未计入任何行动便需 {world_floor} 字符，上限为 {world_limit}。可选择只发送已审阅定义与原件索引")

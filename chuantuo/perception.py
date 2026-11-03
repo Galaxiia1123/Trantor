@@ -4,6 +4,7 @@ from copy import deepcopy
 from heapq import merge
 
 from .schema import Relation, Scenario11, ScopedRule, message_scope
+from .documents import Documents
 
 
 def state_sentences(visible_fields):
@@ -33,6 +34,9 @@ def state_sentences(visible_fields):
                     limits.append("固定值")
                 if rule.get("choices"):
                     limits.append("可取" + "、".join(rule["choices"]))
+                for entry in rule.get("entry_windows",()):
+                    limits.append("“"+entry["value"]+"”从第 "+str(entry.get("first",1))+" 窗"+
+                                  ("至第 "+str(entry["last"])+" 窗" if entry.get("last") else "起")+"可转入")
                 if limits:
                     line += "（" + "，".join(limits) + "）"
             facts.append(line)
@@ -64,6 +68,7 @@ class Perception:
         self.depths = depths
         self.config = config
         self.delivery_limits = scenario.delivery_limits() if isinstance(scenario,Scenario11) else {}
+        self.documents=Documents(scenario,self.delivery_limits)
         self.mail_routes = defaultdict(list)
         for route in sorted(getattr(scenario,"mail_routes",()),key=lambda r:r.active_from):
             self.mail_routes[route.source,route.target].append(route)
@@ -128,11 +133,13 @@ class Perception:
             fields.setdefault(owner,{})[field.id] = {"value":state[owner][field.id], "domain":field.domain,
                 "kind":field.kind,"unit":field.unit,"provenance":{"kind":field.provenance.kind}}
             if field.constraints:
-                fields[owner][field.id]["constraints"] = field.constraints.model_dump(exclude_defaults=True)
+                fields[owner][field.id]["constraints"] = field.constraints.model_dump(exclude_defaults=True,exclude={"entry_windows":{"__all__":{"provenance"}}})
             if field.label:
                 fields[owner][field.id]["label"] = field.label
         for _, owner, material in merge(self.public_materials, self.granted_materials[actor_id]):
             info = {"owner_id":owner,"domain":material.domain,"text":material.text,"provenance":{"kind":material.provenance.kind}}
+            if material.document:
+                info["document"]=material.document.model_dump()
             if scope := message_scope(material.text,self.delivery_limits):
                 info["sharing"] = scope
             materials.append(info)
@@ -161,6 +168,8 @@ class Perception:
             "roster":[{"id":a.id,"name":a.name,"subsystem_id":a.subsystem_id, **({"parent_id":a.parent_id} if a.parent_id else {})} for a in roster],
             "subsystems":[s.model_dump(exclude={"interaction"}) if s.owner_id != actor_id and actor.subsystem_id != s.id else s.model_dump() for s in subsystems],
             "visible_state":fields, "visible_materials":materials, "influences":[dict(e) for e in self.edges[actor_id]], "messages":deepcopy(inbox)}
+        if papers:=self.documents.cabinet(actor_id):
+            result["documents"]=papers
         if routes:
             result["mail_routes"]=routes
             result["mail_timing"]="定向线路的 transit_windows 是从发出至到达的窗口数。大于零时在到达窗口的第一轮前交付；零表示本轮结束后交付。"

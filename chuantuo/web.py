@@ -44,6 +44,7 @@ from .observatory import FieldWatch, observe_field, observation_notes, ongoing_m
 from .interactions import interaction_map, conversation, dispatch_ledger
 from .studies import Studies, StudyRequest
 from .story import field_reason, window_strip
+from .documents import document_history
 from .insights import Question, actor_observation, answer_question, event_preview, search_evidence, timeline, watch_window, window_history
 
 
@@ -237,9 +238,7 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
         filename,title,_=material_templates[key]
         return {"id":key+"_brief","name":title+".md","text":case_assets[filename].decode("utf-8")}
 
-    @app.post("/api/case/letter/{choice}")
-    def letter_experiment(choice: Literal["notified","unseen","repeat"]):
-        from .letter_case import run_example
+    def playable_case(run_example,choice):
         # This sample uses the built-in script independently of the user's current profile.
         with letter_lock:
             sample = ModelGateway()
@@ -247,6 +246,16 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
                 return run_example(root,choice,sample)
             finally:
                 sample.close()
+
+    @app.post("/api/case/letter/{choice}")
+    def letter_experiment(choice: Literal["notified","unseen","repeat"]):
+        from .letter_case import run_example
+        return playable_case(run_example,choice)
+
+    @app.post("/api/case/post/{choice}")
+    def post_experiment(choice: Literal["express","notice","repeat"]):
+        from .mountain_case import run_example
+        return playable_case(run_example,choice)
 
     @app.put("/api/model")
     def save_model(request: ProfileInput):
@@ -579,6 +588,11 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
     def read_conversation(run_id:str,one:str,two:str,start:int=Query(default=0,ge=0),through:int|None=Query(default=None,ge=0),
                           q:str=Query(default="",max_length=200),offset:int=Query(default=0,ge=0),limit:int=Query(default=30,ge=1,le=80)):
         return conversation(get_run(run_id),one,two,start,through,q,offset,limit)
+
+    @app.get("/api/runs/{run_id}/documents")
+    def document_copies(run_id:str,through:int|None=Query(default=None,ge=0),document:str|None=None,
+                        offset:int=Query(default=0,ge=0),limit:int=Query(default=30,ge=1,le=100)):
+        return document_history(get_run(run_id),through,document,offset,limit)
 
     @app.get("/api/runs/{run_id}/mail")
     def historical_mail(run_id:str,through:int|None=Query(default=None,ge=0),actor:str|None=None,stage:Literal["pending","arrived"]|None=None,

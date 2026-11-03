@@ -1,10 +1,8 @@
 """A deterministic counterfactual visitors can operate without a model account."""
-import uuid
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
-from .engine import Simulation
-from .experiments import ExperimentRequest, fork_experiment
+from .case_runs import sample_pair
+from .experiments import ExperimentRequest
 from .schema import RunConfig11, Scenario11
 
 
@@ -75,32 +73,10 @@ def _response(payload):
 
 
 def run_example(root: Path, choice, gateway):
-    """Publish each local route once, including after refresh or service restart."""
-    def identifier(label):
-        return uuid.uuid5(uuid.NAMESPACE_URL,"trantor:"+MODEL+":"+label).hex[:12]
-    def obtain(label, factory):
-        rid=identifier(label)
-        destination=root/rid
-        if destination.is_dir():
-            existing=Simulation.restore(destination,gateway)
-            if existing.run_id!=rid or existing.config.model.model!=MODEL or existing.status!="completed":
-                raise ValueError("同名案例记录不完整，请保留原件并使用其他资料目录")
-            return existing
-        with TemporaryDirectory(dir=root,prefix="_letter-") as folder:
-            stage=Path(folder)/"run"
-            sim=factory(rid,stage)
-            if sim.run()["status"]!="completed":
-                raise ValueError("本地函件案例未完成："+str(sim.error))
-            stage.rename(destination)
-            sim.journal.directory=destination
-            return sim
-    root.mkdir(parents=True,exist_ok=True)
     config=RunConfig11.model_validate({"model":{"provider":"demo","model":MODEL},"windows":3,"max_review_interval":2,
                                        "window_duration":"1 个工作日","rounds_per_window":1})
-    parent=obtain("baseline",lambda rid,path:Simulation(opening(),config,gateway,path,_run_id=rid))
     observed=choice=="notified"
     spec=ExperimentRequest(window=1,through=3,kind="repeat" if choice=="repeat" else "condition",
                            condition="" if choice=="repeat" else SIGNED,audience="readers" if observed else "world",
                            readers=["desk"] if observed else [])
-    variant=obtain(choice,lambda rid,path:fork_experiment(parent,spec,rid,None,path))
-    return {"run_id":variant.run_id,"parent_id":parent.run_id,"window":2}
+    return sample_pair(root,gateway,opening(),config,spec,choice,2)

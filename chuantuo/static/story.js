@@ -101,6 +101,8 @@ function openFieldReason(view,actorId,fieldId,window=view.settled_through) {
       const phrase=r.changed ? value(r.before,r.exact_before)+" → "+value(r.after,r.exact_after) : value(r.after,r.exact_after);
       hero.append(h("span",windowName(window)+" · "+(window===0 ? "开局设定" : r.changed ? "字段发生变化" : "保持原值"),"eyebrow"),h("h3",phrase),
         h("p",r.reason));content.replaceChildren(hero);
+      if(r.entry_period)hero.append(disclosure("这个值的转入期限",h("p",entryText(r.entry_period)+"，以后可以保持。"),
+        ...(r.entry_period.provenance?.quotes || []).map(q=>h("small","“"+q.quote+"”","quiet"))));
       if(r.previous_change)content.append(button("查阅上一次变化 · "+windowName(r.previous_change),()=>openFieldReason(view,r.actor_id,r.field_id,r.previous_change),"link"));
       content.append(h("h3",r.total ? "结算引用的记录（"+r.total+"）" : window===0 ? "开局来源" : "这项审查没有引用行动或事件"));
       if(r.definition?.quotes?.length)content.append(disclosure("字段定义的原文",...r.definition.quotes.map(q=>h("p","“"+q.quote+"”","hint"))));
@@ -119,6 +121,7 @@ function openFieldReason(view,actorId,fieldId,window=view.settled_through) {
         card.append(h("small",windowName(e.sent_window)+"寄出，"+windowName(e.window)+"窗首到达。","quiet"),
           button("查看收件人的首次观察",()=>openActorContext({id:e.recipient_id,name:e.recipient},e.window,1,false,run),"link"));
       }
+      if(e.enclosures?.length)card.append(button("查看随信副本 · "+e.enclosures.join("、"),()=>evidence(e.id,run),"link"));
       card.append(evidenceLinks([e.id],run));content.append(card);
     }
     if(r.next<r.total)content.append(button("继续读取引用",()=>load(r.next),"more-reasons"));

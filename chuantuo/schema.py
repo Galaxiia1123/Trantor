@@ -98,12 +98,31 @@ def valid_value(kind: str, value: Value) -> bool:
     return (kind == "string" and type(value) is str) or (kind == "boolean" and type(value) is bool)
 
 
+class EntryWindow(Record):
+    value: StrictStr
+    first: int = Field(default=1,ge=1,strict=True)
+    last: int | None = Field(default=None,ge=1,strict=True)
+    provenance: Provenance = Field(default_factory=Provenance)
+
+    @model_validator(mode="after")
+    def valid_interval(self):
+        if self.last is not None and self.last<self.first:
+            raise ValueError("允许转入该值的最后一窗须不早于第一窗")
+        if self.provenance.kind not in {"material","user"} or (self.provenance.kind=="material" and not self.provenance.quotes):
+            raise ValueError("字段值的转入期限需要用户设定或可核对的原文")
+        return self
+
+    def allows(self, window):
+        return self.first<=window and (self.last is None or window<=self.last)
+
+
 class FieldConstraints(Record):
     minimum: StrictInt | StrictFloat | None = None
     maximum: StrictInt | StrictFloat | None = None
     choices: list[StrictStr] = Field(default_factory=list)
     allow_unknown: bool = True
     fixed: bool = False
+    entry_windows: list[EntryWindow] = Field(default_factory=list)
 
 
 class StateField(Record):
@@ -116,6 +135,9 @@ class StateField(Record):
     visibility: Visibility = Field(default_factory=Visibility)
     provenance: Provenance = Field(default_factory=Provenance)
     constraints: FieldConstraints | None = None
+
+    def entry_period(self,value):
+        return next((r for r in self.constraints.entry_windows if r.value==value),None) if self.constraints else None
 
     def permits(self, value):
         if not valid_value(self.kind,value):
@@ -142,6 +164,9 @@ class StateField(Record):
                 raise ValueError("字段下界大于上界")
             if rule.choices and (self.kind != "string" or len(set(rule.choices)) != len(rule.choices)):
                 raise ValueError("候选值仅用于文字字段，且不能重复")
+            bounds=[r.value for r in rule.entry_windows]
+            if len(bounds)!=len(set(bounds)) or not set(bounds)<=set(rule.choices):
+                raise ValueError("转入期限只能分别设在本字段已经定义的文字候选值上")
             if not self.permits(self.value):
                 raise ValueError(f"字段 {self.id} 的初始值不符合所设约束")
         return self
@@ -153,6 +178,11 @@ class SharingRule(Record):
     provenance: Provenance = Field(default_factory=Provenance)
 
 
+class DocumentLabel(Record):
+    id: Identifier
+    title: str = Field(min_length=1,max_length=100,pattern=r"\S")
+
+
 class Material(Record):
     domain: str
     text: str
@@ -160,6 +190,7 @@ class Material(Record):
     provenance: Provenance = Field(default_factory=Provenance)
     protected_terms: list[str] = Field(default_factory=list, max_length=32)
     sharing: SharingRule | None = None
+    document: DocumentLabel | None = None
 
     @model_validator(mode="after")
     def literal_private_terms(self):
@@ -167,8 +198,14 @@ class Material(Record):
             raise ValueError("保密短语须逐字出现在该资料中")
         if self.protected_terms and self.visibility.public:
             raise ValueError("含保密短语的资料需明确知情范围")
-        if self.sharing is not None and not self.protected_terms:
+        if self.sharing is not None and not self.protected_terms and self.document is None:
             raise ValueError("通信保密范围需要可核对的资料原文短语")
+        if self.document:
+            if not self.text.strip() or len(self.text)>1200:
+                raise ValueError("可寄送的原件正文须为 1 至 1200 字，长文可选取一段完整的凭证原文")
+            if self.provenance.kind not in {"material","user"} or (self.provenance.kind=="material" and
+                    not any(self.text in q.quote for q in self.provenance.quotes)):
+                raise ValueError("原件正文需要操作者明确提供，或逐字包含在所引用的材料中")
         return self
 
 
@@ -253,6 +290,9 @@ class Scenario(Record):
             raise ValueError("主体和子系统 ID 必须分别唯一")
         if len(source_ids) != len(self.sources) or len(set(self.domains)) != len(self.domains):
             raise ValueError("材料 ID 和领域名称必须分别唯一")
+        documents=[m.document.id for a in self.entities for m in a.materials if m.document]
+        if documents and (getattr(self,"format_version",None)!="1.1" or len(set(documents))!=len(documents)):
+            raise ValueError("可寄送的原件需使用单模型场景，每份原件在整个场景中有独立编号")
         for system in self.subsystems:
             if system.owner_id not in actors:
                 raise ValueError(f"子系统 {system.id} 的 owner_id 不存在")
@@ -278,7 +318,8 @@ class Scenario(Record):
         if len({(e.source, e.target) for e in self.influences}) != len(self.influences):
             raise ValueError("同一有向边重复；反向边可以独立配置")
         for obj in [*self.entities, *self.influences, *self.rules, *getattr(self,"scheduled_events",[]), *getattr(self,"mail_routes",[]), *[f for a in self.entities for f in [*a.fields, *a.materials]],
-                    *(m.sharing for a in self.entities for m in a.materials if m.sharing)]:
+                    *(m.sharing for a in self.entities for m in a.materials if m.sharing),
+                    *(period for a in self.entities for f in a.fields if f.constraints for period in f.constraints.entry_windows)]:
             if not set(obj.provenance.source_ids) <= source_ids:
                 raise ValueError("来源引用不存在")
             for quote in obj.provenance.quotes:
@@ -379,6 +420,9 @@ class Scenario11(Scenario):
                 field=fields.get((effect.entity_id,effect.field_id))
                 if not field or not field.permits(effect.value) or (field.constraints and field.constraints.fixed and effect.value!=field.value):
                     raise ValueError(f"外部事件 {event.id} 的字段不存在、越界或与固定值冲突")
+                period=field.entry_period(effect.value)
+                if period and not period.allows(event.window):
+                    raise ValueError(f"外部事件 {event.id} 强制赋值的时点不在该字段值的转入期限内")
                 key=(event.window,effect.entity_id,effect.field_id)
                 if key in seen:
                     raise ValueError("同一窗口的同一字段不能接受两次预定赋值")
@@ -591,7 +635,18 @@ class MatterUpdate(Record):
         return self
 
 
+class AgentMessage(Message):
+    enclosures: list[Identifier] = Field(default_factory=list,max_length=4)
+
+    @model_validator(mode="after")
+    def separate_enclosures(self):
+        if len(set(self.enclosures))!=len(self.enclosures):
+            raise ValueError("同一封信中无需重复附寄一份原件")
+        return self
+
+
 class Decision(Expression):
+    messages: list[AgentMessage] = Field(default_factory=list)
     review_at: int | None = Field(default=None,ge=1,strict=True)
     matters: list[MatterUpdate] = Field(default_factory=list, max_length=12)
 

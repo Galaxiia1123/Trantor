@@ -78,6 +78,9 @@ def _objects(data):
         for collection in ("fields", "materials"):
             for item in actor.get(collection, []):
                 yield (collection, actor["id"]), item
+                if collection=="fields":
+                    for period in (item.get("constraints") or {}).get("entry_windows",[]):
+                        yield ("value_entry",actor["id"]+"."+item["id"]),period
 
 
 def _without_provenance(item):

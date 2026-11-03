@@ -112,3 +112,38 @@ async function openRunCalendar(view) {
   }
   reading("外部事件日历",h("p","全局观察者可预览全部安排。主体只在指定窗口收到对自己可见的通知。","hint"),body);
 }
+function entryText(period) {
+  const first=period.first || 1;
+  if(!period.last && first===1)return "各窗均可转入";
+  return period.last ? "第 "+first+" 至 "+period.last+" 窗可转入" : "第 "+first+" 窗起可转入";
+}
+
+function draftEntryWindows(scene) {
+  const panel=h("div"),fields=[];
+  for(const a of scene.entities)for(const f of a.fields)if(f.constraints?.choices?.length)fields.push({a,f});
+  if(!fields.length)return h("span");
+  for(const {a,f} of fields)for(const p of f.constraints.entry_windows || [])
+    panel.append(h("p",a.name+" · "+(f.label || f.id)+"　“"+p.value+"”"+entryText(p),"hint"));
+  panel.append(button("编辑某个候选值的期限",()=>{
+    const form=h("form",null,"experiment-form"),field=h("select"),value=h("select"),first=h("input"),last=h("input");
+    const error=h("p",null,"form-error");
+    function label(text,ctl){const l=h("label",text);ctl.setAttribute("aria-label",text);l.append(ctl);form.append(l);}
+    field.append(...fields.map(({a,f},i)=>new Option(a.name+" · "+(f.label||f.id),i)));
+    first.type=last.type="number";first.min=last.min="1";first.required=true;last.placeholder="不限";
+    label("选择文字字段",field);label("转入哪个候选值",value);label("最早转入窗口",first);label("最晚转入窗口",last);
+    function show(){const p=fields[Number(field.value)].f.constraints.entry_windows?.find(r=>r.value===value.value);first.value=p?.first||1;last.value=p?.last||"";}
+    function options(){value.replaceChildren(...fields[Number(field.value)].f.constraints.choices.map(v=>new Option(v,v)));show();}
+    field.onchange=options;value.onchange=show;options();
+    const submit=h("button","保存转入期限","primary");submit.type="submit";
+    form.append(h("p","期限只约束从其他值转入。已登记的值可以在后面的窗口保持。","hint"),error,submit);
+    form.onsubmit=async e=>{e.preventDefault();if(submit.disabled)return;submit.disabled=true;
+      const f=fields[Number(field.value)].f,prev=f.constraints.entry_windows||[];
+      const p={value:value.value,first:Number(first.value),last:last.value ? Number(last.value) : null,provenance:{kind:"user",explanation:"操作者设定该值的转入期限。"}};
+      f.constraints.entry_windows=[...prev.filter(v=>v.value!==p.value),p];
+      try{await saveProject("修改候选值的转入期限");$("reading").close();renderDraft();}
+      catch(err){f.constraints.entry_windows=prev;error.textContent=err.message;}finally{submit.disabled=false;}
+    };
+    reading("字段值的转入期限",form);
+  },"link"));
+  return disclosure("字段值的转入期限",panel);
+}

@@ -359,12 +359,14 @@ class ModelGateway:
         if config.provider == "demo":
             try:
                 from .demo import respond
+                answer=None
                 if config.model in {"letter-desk-v1","letter-desk-v2"}:
                     from .letter_case import scripted_response
-                    answer = scripted_response(json.loads(copied[-1]["content"]))
-                    result = respond(copied) if answer is None else json.dumps(answer,ensure_ascii=False)
-                else:
-                    result = respond(copied)
+                    answer=scripted_response(json.loads(copied[-1]["content"]))
+                elif config.model=="mountain-post-v1":
+                    from .mountain_case import respond as post_response
+                    answer=post_response(json.loads(copied[-1]["content"]))
+                result=respond(copied) if answer is None else json.dumps(answer,ensure_ascii=False)
             except Exception:
                 raise _failure(config, "demo_error", "demo response failed") from None
             if not isinstance(result, str) or not result.strip():
