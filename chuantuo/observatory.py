@@ -54,7 +54,7 @@ class FieldWatch(Record):
         return value == target
 
 
-def observe_field(simulation, question, through=None, *, details=True):
+def observe_field(simulation, question, through=None, *, details=True, close_horizon=False):
     actor, field, target = question.resolve(simulation._scenario,simulation.config.catalog.values())
     with simulation._lock:
         latest=simulation.window
@@ -90,7 +90,7 @@ def observe_field(simulation, question, through=None, *, details=True):
                                      "events":review.get("event_ids",[]) if review else []})
                 else:
                     segments[-1]["end"]=window
-        terminal=simulation.status in {"completed","stopped"} and selected==latest
+        terminal=close_horizon or simulation.status in {"completed","stopped"} and selected==latest
         deadline_reached=question.deadline is not None and selected>=question.deadline
         early=terminal and question.deadline is not None and selected<question.deadline
         closed=deadline_reached or terminal

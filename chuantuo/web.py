@@ -42,6 +42,7 @@ from .experiments import Adoption, ExperimentRequest, adopt_suggestion, branch_p
 from .recovery import salvage
 from .observatory import FieldWatch, observe_field, observation_notes, ongoing_matters
 from .interactions import interaction_map, conversation
+from .studies import Studies, StudyRequest
 from .insights import Question, actor_observation, answer_question, event_preview, search_evidence, timeline, watch_window, window_history
 
 
@@ -102,6 +103,7 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
             try:
                 yield
             finally:
+                studies.shutdown()
                 jobs.pool.shutdown(wait=True)
                 for worker in list(workers.values()):
                     worker.join()
@@ -196,7 +198,8 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
     @app.get("/api/health")
     def health():
         return {"app":"chuantuo", "version":__version__, "status":"ok","store":str(root.resolve()),"assets":revision,"build":build_id,
-                "active_runs":sum(w.is_alive() for w in list(workers.values())),"active_jobs":len(jobs.active)}
+                "active_runs":sum(w.is_alive() for w in list(workers.values())),"active_jobs":len(jobs.active)+len(studies.workers),
+                "active_studies":len(studies.workers)}
 
     @app.get("/api/demo")
     def demo():
@@ -640,24 +643,48 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
     def branch(run_id: str, request: BranchRequest):
         return repository.save_project(branch_payload(get_run(run_id),request.window,request.title))
 
-    @app.post("/api/jobs/{job_id}/experiment/{parent_id}")
-    def experiment_job(job_id: str, parent_id: str, request: ExperimentRequest):
-        parent = get_run(parent_id)
+    def check_experiment_parent(parent):
         if not isinstance(parent.config, RunConfig11) or profile.model != parent.config.model:
             raise ValueError("对照实验需要绑定与原路线相同的 v1.1 模型配置")
         if owns_gateway and not credential_ready(profile.model):
             raise ValueError("请先配置当前模型的凭据")
+
+    def fork_run(parent, request, run_id, job_id, **options):
+        with TemporaryDirectory(dir=root,prefix="_creating-") as temporary:
+            stage = Path(temporary)/"run"
+            alternate = fork_experiment(parent,request,run_id,job_id,stage,**options)
+            stage.rename(root/run_id)
+            alternate.journal.directory = root/run_id
+        with guard:
+            return remember(alternate)
+
+    studies = Studies(root, get_run, fork_run, check_experiment_parent)
+
+    @app.get("/api/studies")
+    def list_studies():
+        return studies.catalog()
+
+    @app.put("/api/runs/{parent_id}/studies/{study_id}")
+    def start_study(parent_id:str, study_id:str, request:StudyRequest):
+        return studies.create(study_id, get_run(parent_id), request)
+
+    @app.get("/api/studies/{study_id}")
+    def read_study(study_id:str):
+        return studies.view(study_id)
+
+    @app.post("/api/studies/{study_id}/{action}")
+    def control_study(study_id:str, action:Literal["pause","stop","resume"]):
+        return studies.control(study_id,action)
+
+    @app.post("/api/jobs/{job_id}/experiment/{parent_id}")
+    def experiment_job(job_id: str, parent_id: str, request: ExperimentRequest):
+        parent = get_run(parent_id)
+        check_experiment_parent(parent)
         protect_credentials(request.model_dump(mode="json"),parent.config.catalog.values())
         run_id = uuid.uuid5(uuid.NAMESPACE_URL,"chuantuo:experiment:"+job_id).hex[:12]
         def launch(progress):
             progress("fork","正在恢复分岔窗口的状态、记忆和已投递消息")
-            with TemporaryDirectory(dir=root,prefix="_creating-") as temporary:
-                stage = Path(temporary)/"run"
-                alternate = fork_experiment(parent,request,run_id,job_id,stage)
-                stage.rename(root/run_id)
-                alternate.journal.directory = root/run_id
-            with guard:
-                remember(alternate)
+            alternate = fork_run(parent,request,run_id,job_id)
             start(alternate)
             return alternate.snapshot()
         return jobs.submit(job_id,"experiment",{"run_id":run_id,"parent_id":parent_id,"spec":request.model_dump(mode="json")},launch)
@@ -760,9 +787,15 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
     def report_plan(run_id:str, reuse:bool=True):
         return plan_report(get_run(run_id),reuse)
 
+    def manual_run(run_id):
+        simulation = get_run(run_id)
+        if (simulation.experiment or {}).get("study"):
+            raise VersionConflict("这条路线属于重复实验，请在实验组中控制进度和调用上限")
+        return simulation
+
     @app.post("/api/runs/{run_id}/pause")
     def pause(run_id: str):
-        simulation = get_run(run_id)
+        simulation = manual_run(run_id)
         if simulation.status not in ("ready", "running"):
             raise HTTPException(status_code=409, detail="当前状态不可暂停")
         simulation.request_pause()
@@ -770,19 +803,19 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
 
     @app.post("/api/runs/{run_id}/resume")
     def resume(run_id: str):
-        simulation = get_run(run_id)
+        simulation = manual_run(run_id)
         start(simulation)
         return simulation.snapshot()
 
     @app.post("/api/runs/{run_id}/recover")
     def recover_run(run_id: str):
-        simulation = get_run(run_id)
+        simulation = manual_run(run_id)
         start(simulation, recover=True)
         return simulation.snapshot()
 
     @app.post("/api/runs/{run_id}/stop")
     def stop(run_id: str):
-        simulation = get_run(run_id)
+        simulation = manual_run(run_id)
         simulation.request_stop()
         return simulation.snapshot()
 

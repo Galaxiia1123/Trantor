@@ -59,7 +59,7 @@ let extraAnswers = "", overrides = {}, currentStateWindow = 0;
 let requestedWindows = 40, historyThrough = -1;
 let historyRequest = 0;
 let savedLibrary = null;
-let libraryLimits = {projects:20,runs:20};
+let libraryLimits = {projects:20,runs:20,studies:20};
 const readingTrail = [];
 let readingRequest = 0;
 function persistSeed() {
@@ -506,14 +506,18 @@ function recordRow(title, sub, action, label = "打开") {
   row.append(meta, button(label, action)); return row;
 }
 async function library(gen) {
-  const [projects, catalog] = await Promise.all([api("/api/projects"),api("/api/runs")]); if (gen !== routeGeneration) return;
-  savedLibrary = {projects,catalog}; drawLibrary();
+  const [projects,catalog,studies] = await Promise.all([api("/api/projects"),api("/api/runs"),api("/api/studies")]); if (gen !== routeGeneration) return;
+  savedLibrary = {projects,catalog,studies}; drawLibrary();
 }
 function drawLibrary() {
   if (!savedLibrary) return;
-  const {projects,catalog} = savedLibrary, query = $("library-search").value.trim().toLocaleLowerCase();
+  const {projects,catalog,studies} = savedLibrary, query = $("library-search").value.trim().toLocaleLowerCase();
   const matches = (...parts) => parts.some(x => String(x || "").toLocaleLowerCase().includes(query));
-  const selections = {projects:projects.filter(p => matches(p.title,p.id,p.goal)),runs:catalog.runs.filter(r => matches(r.title,r.run_id,statuses[r.status],r.status,r.experiment?.condition,r.experiment && experimentKind(r.experiment)))};
+  const selections = {projects:projects.filter(p => matches(p.title,p.id,p.goal)),runs:catalog.runs.filter(r => matches(r.title,r.run_id,statuses[r.status],r.status,r.experiment?.condition,r.experiment && experimentKind(r.experiment))),
+    studies:studies.filter(s=>matches(s.title,s.condition,s.id,studyStatus[s.status],"重复实验"))};
+  $("studies").parentElement.hidden=!selections.studies.length;
+  $("studies").replaceChildren(...selections.studies.slice(0,libraryLimits.studies).map(s=>recordRow(s.condition || s.title+" · 原条件重跑",
+    studyStatus[s.status]+" · "+s.completed+"/"+s.count+" 条完成",()=>{location.hash="study/"+s.id;},"比较结果")));
   $("projects").replaceChildren(...selections.projects.slice(0,libraryLimits.projects).map(p => recordRow(p.title, p.actors + " 个主体 · 第 " + p.version + " 版", () => {location.hash = "project/" + p.id;})));
   $("runs").replaceChildren(...selections.runs.slice(0,libraryLimits.runs).map(r => recordRow(r.experiment ? experimentKind(r.experiment)+" · "+(r.experiment.condition || r.title) : r.title, (statuses[r.status] || r.status) + " · " + r.window + "/" + r.windows + " 窗 · " + (r.mode === "demo" ? "脚本" : "模型接口"), () => {location.hash = "run/" + r.run_id;}, "回看")));
   if (!selections.projects.length) $("projects").append(h("p",query ? "没有匹配的场景。" : "整理后的场景会保存在这里。","empty"));
@@ -523,7 +527,7 @@ function drawLibrary() {
   }
   catalog.warnings.forEach(w => $("runs").append(h("p",w.message,"error")));
 }
-$("library-search").oninput = () => {libraryLimits={projects:20,runs:20};drawLibrary();};
+$("library-search").oninput = () => {libraryLimits={projects:20,runs:20,studies:20};drawLibrary();};
 async function evidence(id, sourceRun = activeRun) {
   const ticket=++readingRequest, run=activeRun;
   const item = playback() && sourceRun === run ? example.evidence[id] : await api("/api/runs/" + sourceRun + "/events/" + encodeURIComponent(id));
@@ -667,7 +671,9 @@ function renderWindow(view) {
   const control = (label, action) => button(label, async () => {
     await api("/api/runs/" + activeRun + "/" + action, "POST"); lastView = ""; await refreshWatch(routeGeneration);
   });
-  if (!isCase) {
+  if(s.experiment?.study) {
+    const link=h("a","返回实验组 · 路线 "+s.experiment.study.index);link.href="#study/"+s.experiment.study.id;controls.append(link);
+  } else if (!isCase) {
     if (s.status === "running" && !s.pause_requested && !s.stop_requested) controls.append(control("暂停","pause"));
     if (s.status === "paused" && s.can_resume) controls.append(control("继续","resume"));
     if (["failed","interrupted"].includes(s.status) && s.can_resume) controls.append(control("从上次提交重试","recover"));
@@ -903,9 +909,10 @@ async function route() {
   readingRequest++; if ($("reading").open) $("reading").close();
   const gen = ++routeGeneration; clearTimeout(timer); notice(""); lastView = reportsSignature = "";
   const [kind = "new", id, pinned] = location.hash.slice(1).split("/"); activeRun = null; selectedWindow = null; eventLimit = 100;
-  const showWatch = ["run","case","recording"].includes(kind), showLibrary = kind === "library";
-  $("watch-page").hidden = !showWatch; $("library-page").hidden = !showLibrary; $("prepare-page").hidden = showWatch || showLibrary;
-  $("nav-new").classList.toggle("active", !showWatch && !showLibrary); $("nav-library").classList.toggle("active", showWatch || showLibrary);
+  const showWatch = ["run","case","recording"].includes(kind), showLibrary = kind === "library", showStudy=kind==="study";
+  const showSaved=showWatch || showLibrary || showStudy;
+  $("watch-page").hidden = !showWatch; $("library-page").hidden = !showLibrary; $("study-page").hidden=!showStudy; $("prepare-page").hidden = showSaved;
+  $("nav-new").classList.toggle("active", !showSaved); $("nav-library").classList.toggle("active", showSaved);
   if (showWatch) {
     activeRun = kind === "run" ? id : kind; $("watch-title").textContent = "正在打开记录";
     const at=kind==="run" ? pinned : id;
@@ -921,6 +928,7 @@ async function route() {
     $("events").append(h("p","正在读取该窗口的推演记录…","hint"));
     await refreshWatch(gen);
   }
+  else if (showStudy) await studyPage(id,gen);
   else if (showLibrary) await library(gen);
   else if (kind === "project" && id) {
     const p = await api("/api/projects/" + encodeURIComponent(id));

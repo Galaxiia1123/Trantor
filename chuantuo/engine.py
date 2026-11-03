@@ -810,17 +810,17 @@ class Simulation:
                 self.status = "stopped"
                 self.journal.append("run_status", self.snapshot(), self.window)
 
-    def run(self):
+    def run(self, *, pause_at_boundary=None):
         if not self._runner_lock.acquire(blocking=False):
             raise ValueError("已有运行中的调度器")
         try:
             directory = self.journal.directory
             with writer_lock(directory / ".running.lock") if directory else nullcontext():
-                return self._run_windows()
+                return self._run_windows(pause_at_boundary)
         finally:
             self._runner_lock.release()
 
-    def _run_windows(self):
+    def _run_windows(self, pause_at_boundary=None):
         with self._lock:
             if self.status not in ("ready", "paused"):
                 raise ValueError("只能启动未运行或已暂停的运行")
@@ -829,7 +829,8 @@ class Simulation:
             self.journal.append("run_started", {}, self.window)
             self.status = "running"
         try:
-            while self.window < self.config.windows and not self._stop.is_set() and not self._pause.is_set():
+            while (self.window < self.config.windows and not self._stop.is_set() and not self._pause.is_set()
+                   and not (pause_at_boundary and pause_at_boundary.is_set())):
                 self._play_window()
             with self._lock:
                 self.status = "completed" if self.window == self.config.windows else "stopped" if self._stop.is_set() else "paused"

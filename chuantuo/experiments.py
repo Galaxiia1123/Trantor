@@ -158,8 +158,8 @@ class ExperimentRequest(Record):
         return self
 
 
-def fork_experiment(parent, spec, run_id, job_id, directory: Path):
-    """Copy a sealed prefix once. Stable event positions preserve private inboxes and citations."""
+def prepare_experiment(parent, spec):
+    """Validate the intervention before scheduling any model work."""
     if not isinstance(parent.config, RunConfig11):
         raise ValueError("历史版本的场景可另存开局，条件对照需要 v1.1 场景")
     if spec.through > parent.window:
@@ -177,7 +177,8 @@ def fork_experiment(parent, spec, run_id, job_id, directory: Path):
             raise ValueError("请选择可以调整的已定义字段，并符合它的类型、范围和约束")
         if selected["state"][actor.id][f.id]==change.value:
             raise ValueError("目标值与分岔时相同，可选择原样重跑")
-        scene["scheduled_events"].append({"id":"variation_"+run_id,"window":spec.window+1,
+        event_key=hashlib.sha256(encode([parent.run_id,spec.model_dump(mode="json")]).encode()).hexdigest()[:12]
+        scene["scheduled_events"].append({"id":"variation_"+event_key,"window":spec.window+1,
             "text":condition or "本窗有一项外部调整，将在结算时生效。",
             "visibility":{"public":spec.audience=="public","readers":spec.readers},
             "assignments":[change.model_dump(mode="json")],"provenance":{"kind":"user","explanation":"操作者在字段对照中指定。"}})
@@ -190,10 +191,21 @@ def fork_experiment(parent, spec, run_id, job_id, directory: Path):
             "provenance":{"kind":"user","explanation":f"对照实验设定，自第 {spec.window + 1} 窗起生效。"}})
     scene = Scenario11.model_validate(scene)
     protect_credentials(scene.model_dump(mode="json"), parent.config.catalog.values())
+    return selected, scene, condition
+
+
+def fork_experiment(parent, spec, run_id, job_id, directory: Path, *, study=None, call_limit=None):
+    """Copy a sealed prefix once. Stable event positions preserve private inboxes and citations."""
+    selected, scene, condition = prepare_experiment(parent,spec)
     config = parent.config.model_copy(update={"windows":spec.through})
+    if call_limit is not None:
+        limits=[v for v in (config.model_call_limit,call_limit) if v is not None]
+        config=config.model_copy(update={"model_call_limit":min(limits)})
     marker = {**spec.model_dump(mode="json"), "condition":condition, "parent_id":parent.run_id,
               "parent_event":selected["event_id"],
               "state_sha256":hashlib.sha256(encode(selected["state"]).encode()).hexdigest()}
+    if study:
+        marker["study"]=study
     directory.mkdir(parents=True, exist_ok=False)
     cutoff = int(selected["event_id"][1:])
     with (parent.journal.directory/"events.jsonl").open("rb") as source, (directory/"events.jsonl").open("xb") as dest:

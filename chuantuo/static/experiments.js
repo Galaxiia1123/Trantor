@@ -53,9 +53,11 @@ function experimentForm(view) {
     const label = h("label",null,"check"), box = h("input"); box.type="checkbox"; box.value=actor.id;
     label.append(box,document.createTextNode(actor.name)); group.append(label);
   }
+  const repeats=select("新路线数量",[[1,"1 条"],[2,"2 条"],[3,"3 条"],[5,"5 条"],[8,"8 条"],[16,"16 条"]]);
+  const study=studyOptions(view,run);
   const cost=h("p",null,"experiment-estimate");
   const submit=h("button","启动新路线","primary"); submit.type="submit";
-  form.append(group,cost,warning,submit);
+  form.append(group,study.node,cost,warning,submit);
   function limits() {
     const from=Number(split.value), prior=Number(through.value);
     through.replaceChildren(...range.map(w=>w+1).filter(w=>w>from).map(w=>new Option("第 "+w+" 窗",w)));
@@ -68,10 +70,14 @@ function experimentForm(view) {
     group.hidden=!changed || audience.value!=="readers";
     const windows=Number(through.value)-Number(split.value);
     const calls=windows*(view.actors.length*view.rounds_per_window+1);
-    cost.textContent="只重跑新路线的 "+windows+" 个窗口。逐轮判断需要 "+calls+" 次基础模型调用，纠正或重试另计。"+
-      (view.status.max_review_interval ? "主体可选择延续等待，实际请求可能更少。" : "")+"原路线使用已提交记录。";
+    const count=Number(repeats.value);
+    study.update(count,calls);
+    submit.textContent=count===1 ? "启动新路线" : "启动这组实验";
+    cost.textContent=(count===1 ? "只重跑新路线的 "+windows+" 个窗口。" : count+" 条路线依次各跑 "+windows+" 个窗口。")+
+      "全部主体逐轮判断约需 "+(calls*count)+" 次基础调用，纠正与重试会增加用量。"+
+      (view.status.max_review_interval ? "主体可选择延续等待。" : "")+"原路线使用已提交记录。";
   }
-  split.onchange=()=>{limits();update();}; through.onchange=kind.onchange=audience.onchange=update;
+  split.onchange=()=>{limits();update();}; through.onchange=kind.onchange=audience.onchange=repeats.onchange=update;
   limits(); update();
   form.onsubmit=async event=>{
     event.preventDefault(); if (busy || submit.disabled || activeRun!==run) return;
@@ -81,10 +87,13 @@ function experimentForm(view) {
     if (kind.value==="condition" && !prompt.value.trim()) {warning.textContent="请写下要改变的条件。";prompt.focus();return;}
     submit.disabled=true; warning.textContent="";
     try {
-      await job("experiment","/api/jobs/{id}/experiment/"+run,
-        {window:Number(split.value),through:Number(through.value),kind:kind.value,condition:kind.value==="condition" ? prompt.value.trim() : "",
-         assignment:kind.value==="field" ? picker.read() : null,audience:scope,readers},
-        async result=>{ $("reading").close(); location.hash="run/"+result.run_id; });
+      const spec={window:Number(split.value),through:Number(through.value),kind:kind.value,condition:kind.value==="condition" ? prompt.value.trim() : "",
+                  assignment:kind.value==="field" ? picker.read() : null,audience:scope,readers};
+      if(Number(repeats.value)>1) {
+        const result=await study.submit(spec,Number(repeats.value));
+        if(activeRun===run && form.isConnected && $("reading").open) {$("reading").close(); location.hash="study/"+result.id;}
+      } else await job("experiment","/api/jobs/{id}/experiment/"+run,spec,
+                async result=>{ $("reading").close(); location.hash="run/"+result.run_id; });
     } catch (err) {warning.textContent=err.message;} finally {submit.disabled=false;}
   };
   reading("从同一时刻再走一次",h("p","两条路线在分岔前拥有相同的状态、私人记忆和已送达消息。新的条件从下一窗开始生效。","hint"),form);

@@ -229,10 +229,33 @@ def main():
                 assert page.request.get(url+"/api/runs/"+variant_id+"/watches").json()[0]["first_hit"]["window"]==8
                 filtered=page.request.get(url+"/api/runs/"+variant_id+"/watch?window=9&actor=engineer&kind=expression&limit=1").json()
                 assert filtered["total"]==2 and filtered["settlement"]["kind"]=="window_committed"
-            assert len([task for _,task in endpoint.calls if task=="agent"]) == 100
-            assert len(endpoint.calls)==113 and {m for m,_ in endpoint.calls}=={"local-script-http"},endpoint.calls
+                page.goto(run_url); page.get_by_role("button",name="试一个条件",exact=True).click()
+                page.get_by_label("探索方式").select_option("repeat")
+                page.get_by_label("从哪里分岔").select_option("8"); page.get_by_label("新路线数量").select_option("2")
+                question=page.get_by_label("想比较什么",exact=True)
+                question.select_option(label="市议会 · 资金缺口的终值")
+                page.get_by_label("全组模型调用上限",exact=True).fill("22")
+                page.get_by_role("button",name="启动这组实验").click()
+                expect(page.locator(".study-progress")).to_contain_text("2 / 2 条完成",timeout=35000)
+                expect(page.locator(".study-progress")).to_contain_text("22 / 22")
+                page.get_by_role("button",name="2 次 · 查看路线").click()
+                expect(page.locator(".study-members .study-member")).to_have_count(2)
+                expect(page.locator(".study-result")).to_contain_text("2000万元")
+                assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
+                sid=page.url.split("#study/")[1]
+                if args.screenshots:
+                    page.set_viewport_size({"width":1300,"height":820})
+                    page.locator("#study-page").screenshot(path=args.screenshots/"study.png")
+                page.get_by_role("link",name="回看路线 1",exact=True).click()
+                page.get_by_role("link",name="返回实验组 · 路线 1").click()
+                assert page.url.endswith("#study/"+sid)
+                page.get_by_role("link",name="回到项目与记录").click()
+                page.locator("#studies").get_by_role("button",name="比较结果").first.click()
+                expect(page.locator(".study-progress")).to_contain_text("2 / 2 条完成")
+            assert len([task for _,task in endpoint.calls if task=="agent"]) == 120
+            assert len(endpoint.calls)==135 and {m for m,_ in endpoint.calls}=={"local-script-http"},endpoint.calls
             assert not errors and not endpoint.errors,(errors,endpoint.errors)
-            browser.close(); print("Browser acceptance passed: offline letter experiment, Markdown intake, 9 windows, 113 local HTTP calls including a one-window fork, linked comparison, report, private interview and mobile.")
+            browser.close(); print("Browser acceptance passed: Markdown intake, nine windows, field experiment, private interview, report and two budgeted repetitions; 135 local HTTP calls including mobile navigation.")
     finally:
         endpoint.shutdown(); endpoint.server_close()
 
