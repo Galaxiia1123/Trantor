@@ -4,6 +4,7 @@ from copy import deepcopy
 import pytest
 
 from chuantuo.engine import Simulation
+from chuantuo.contrast import actor_contrast, field_contrast
 from chuantuo.experiments import ExperimentRequest, experiment_comparison, fork_experiment
 from chuantuo.interactions import conversation, dispatch_ledger
 from chuantuo.models import ModelError
@@ -71,6 +72,13 @@ def test_mail_in_flight_is_inherited_private_and_settled_once(tmp_path):
     assert child.run()["status"]=="completed"
     letters=conversation(Simulation.restore(tmp_path/"branch",g),"a","b")["items"]
     assert [(m["text"],m["arrived_window"],m["seen"]["round"]) for m in letters]==[("票号2",2,2),("票号1",3,1)]
+    assert actor_contrast(run,child,"a",1)["perception"] is None
+    sight=actor_contrast(run,child,"a")["perception"]
+    assert sight["window"]==2 and "已知通信时效" in {g["category"] for g in sight["groups"]}
+    outsider=actor_contrast(run,child,"c")
+    assert outsider["perception"] is None and "票号" not in str(outsider)
+    focus=field_contrast(run,child,"b","registered",3)
+    assert sum(focus["counts"].values())==2 and focus["counts"]["unknown"]==0
     history=deepcopy(run.journal.selected(transport_details=False))
     next(e for e in history if e["kind"]=="message_dispatched")["data"]["due_window"]=2
     with pytest.raises(ValueError,match="到达时间"):

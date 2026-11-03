@@ -794,6 +794,16 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
                      right_window: int | None = Query(default=None,ge=0)):
         return compare(get_run(run_id),get_run(other_id),left_window,right_window)
 
+    @app.get("/api/runs/{run_id}/compare/{other_id}/actor/{actor_id}")
+    def compare_actor_history(run_id:str,other_id:str,actor_id:str,through:int|None=Query(default=None,ge=0)):
+        from .contrast import actor_contrast
+        return actor_contrast(get_run(run_id),get_run(other_id),actor_id,through)
+
+    @app.get("/api/runs/{run_id}/compare/{other_id}/field")
+    def compare_field_history(run_id:str,other_id:str,actor:str,field:str,through:int|None=Query(default=None,ge=0)):
+        from .contrast import field_contrast
+        return field_contrast(get_run(run_id),get_run(other_id),actor,field,through)
+
     @app.get("/api/runs/{run_id}/actors/{actor_id}/journey")
     def actor_journey(run_id:str, actor_id:str, window:int|None=Query(default=None,ge=1),
                       turn:int|None=Query(default=None,ge=1), news_only:bool=False, through:int|None=Query(default=None,ge=1)):

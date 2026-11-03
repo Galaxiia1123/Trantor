@@ -23,7 +23,8 @@ def decision_evidence(simulation, actor_id, anchor_id):
     pieces = [(anchor_id, action["kind"], "这一轮的等待安排" if deferred else "这一轮的决定和发信", decision)]
     view = context["observation"]
     labels = {"messages": "本轮实际收件", "documents": "当时持有的文书", "state": "可见处境",
-              "external_events": "本轮收到的外部通知", "visible_materials": "可见资料", "rules": "当时可见的规则"}
+              "external_events": "本轮收到的外部通知", "visible_materials": "可见资料", "rules": "当时可见的规则",
+              "field_definitions":"可选结果及其成立条件"}
     # Include empty inboxes and document lists. An empty list can answer a receipt question.
     kind = "observation" if deferred else "model_input"
     for key, value in sorted(view.items(), key=lambda item: item[0] not in labels):

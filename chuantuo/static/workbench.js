@@ -584,6 +584,8 @@ function fieldDetails(actor, stateRecord, view) {
     fields.append(h("dt",field.label || id));
     const row = h("dd"), value = field.value === null ? "未知" : typeof field.value === "boolean" ? (field.value ? "是" : "否") : String(field.value) + (field.unit || "");
     row.append(h("strong",value),h("small",field.domain + " · 定义来自" + (origins[definition.kind || "user"] || "已保存设定")));
+    if(field.constraints?.choices?.length)row.append(h("small","可用的记录值　"+field.constraints.choices.join("、")));
+    for(const m of field.constraints?.meanings || [])row.append(h("small","“"+m.value+"”指"+m.text));
     for(const p of field.constraints?.entry_windows || [])row.append(h("small","“"+p.value+"”"+entryText(p)));
     if (!playback()) row.append(button("查阅这项状态的依据",()=>openFieldReason(view,actor.id,id),"link"),
       button("追踪这个字段",()=>openFieldWatch(view,{actor_id:actor.id,field_id:id}),"link"));
@@ -616,6 +618,12 @@ async function openActorContext(actor, window, turn, replace = false, run = acti
     const names=Object.fromEntries(view.roster.map(a=>[a.id,a.name]));
     body.append(h("h3","可见处境"),bullets(Object.entries(view.state).map(([id,text])=>(names[id]||id)+" · "+text)));
   } else body.append(disclosure("可见字段",h("pre",json(view.visible_state))));
+  if(view.field_definitions?.length)body.append(disclosure("当时可见的候选值和判定条件",...view.field_definitions.map(f=>{
+    const card=h("div");card.append(h("strong",f.label),h("p",(f.choices || []).join("、"),"hint"));
+    for(const m of f.meanings || [])card.append(h("p","“"+m.value+"”指"+m.text));
+    for(const p of f.entry_windows || [])card.append(h("p","“"+p.value+"”"+entryText(p)));
+    return card;
+  })));
   if(view.messages?.length) {
     body.append(h("h3","本轮收到的消息"));
     view.messages.forEach(m=>{

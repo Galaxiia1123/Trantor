@@ -130,6 +130,11 @@
 .study-table-scroll{max-width:100%;overflow-x:auto}.study-table-scroll th,.study-table-scroll td{min-width:4rem}
 .reading-result{padding:1rem;border:1px solid #dad4de;border-radius:10px;background:#fbf8fc;margin:1rem 0}
 .reading-result section{border-top:1px solid #e3dce4;margin:.65rem 0;padding:.2rem 0}.reading-result section>strong{color:#62466c}
+.contrast-mark{border-top:1px solid #dbd8dc;padding:14px 0}.contrast-mark h3{margin:.15rem 0}
+.contrast-time{font-size:13px;color:#685072}.contrast-column{padding:10px;background:#f8f5f9;border-radius:10px;min-width:0}
+.contrast-column h4,.contrast-column p{margin:.35rem 0}.contrast-column small{display:block;margin-top:.55rem}
+.contrast-focus{padding:12px 16px;margin:.8rem 0;border-left:3px solid #64827a;background:#f2f6f3}
+.contrast-focus h3,.contrast-focus p{margin:.35rem 0}.contrast-focus .link{margin-right:.45rem}
 .comparison-ideas{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,245px),1fr));gap:.7rem}
 .comparison-idea{padding:12px 15px;border:1px solid #d6cedb;border-radius:10px;background:#fffdfa;margin-top:.65rem;overflow-wrap:anywhere}
 .comparison-idea h3{margin:.4rem 0;font-size:16px}.comparison-idea p{margin:.3rem 0;color:#514a55}

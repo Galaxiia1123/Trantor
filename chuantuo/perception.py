@@ -32,13 +32,6 @@ def state_sentences(visible_fields):
                     limits.append(f"上限{rule['maximum']}{field.get('unit') or ''}")
                 if rule.get("fixed"):
                     limits.append("固定值")
-                if rule.get("choices"):
-                    limits.append("可取" + "、".join(rule["choices"]))
-                for m in rule.get("meanings",()):
-                    limits.append("“"+m["value"]+"”指"+m["text"])
-                for entry in rule.get("entry_windows",()):
-                    limits.append("“"+entry["value"]+"”从第 "+str(entry.get("first",1))+" 窗"+
-                                  ("至第 "+str(entry["last"])+" 窗" if entry.get("last") else "起")+"可转入")
                 if limits:
                     line += "（" + "，".join(limits) + "）"
             facts.append(line)
@@ -50,6 +43,14 @@ def state_sentences(visible_fields):
 def decision_view(observation):
     view = {k: v for k, v in observation.items() if k not in {"visible_state", "roster_scope", "world_feedback"}}
     view["state"] = state_sentences(observation["visible_state"])
+    definitions=[]
+    for owner,fields in observation["visible_state"].items():
+        for fid,field in fields.items():
+            rules=field.get("constraints") or {}
+            if rules.get("choices"):
+                definitions.append({"owner":owner,"field":fid,"label":field.get("label") or fid,
+                                    **{k:rules[k] for k in ("choices","meanings","entry_windows") if rules.get(k)}})
+    if definitions:view["field_definitions"]=definitions
     if routes:=observation.get("mail_routes"):
         window=observation["window"]
         view["mail_timing"]="下面是本窗生效的线路时效，旧材料与来信中的预计日期只代表当时的说法。"

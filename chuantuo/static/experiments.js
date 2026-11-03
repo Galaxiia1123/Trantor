@@ -290,6 +290,8 @@ function drawExperimentComparison(root, result, actors, isLetter, options={}) {
     else{const link=h("a",caption);link.href="#run/"+result.right.run_id+"/"+first;intro.append(link);}
   } else intro.append(h("small",first ? "首次状态分化" : "截至共同终点，字段值一致","quiet"));
   root.append(intro);
+  if(result.focus)root.append(fieldContrastCard(result.focus,result,[leftLabel,rightLabel]));
+  else root.append(fieldContrastPicker(result,names,[leftLabel,rightLabel]));
   if(result.first_event_difference){
     const at=result.first_event_difference,txt="两条路线的外部事件在"+windowName(at)+"首次不同";
     if(at===w)root.append(h("p",txt+"。","hint"));
@@ -313,6 +315,7 @@ function drawExperimentComparison(root, result, actors, isLetter, options={}) {
   root.append(grid);
   const details=h("div"), select=h("select"); select.setAttribute("aria-label","选择要比较决定的主体");
   select.append(...actors.map(a=>new Option(a.name,a.id))); const decisions=h("div"); details.append(select,decisions);
+  details.append(button("查找这个主体从哪一轮开始不同",()=>showActorContrast(result,select.value,names[select.value],[leftLabel,rightLabel]),"link"));
   const redraw=()=>{
     decisions.replaceChildren();
     for (const [label,proof,head] of [[leftLabel,result.baseline,result.left],[rightLabel,result.variant,result.right]]) {

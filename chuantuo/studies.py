@@ -296,6 +296,9 @@ class Studies:
         if any(left.experiment[k]!=right.experiment[k] for k in ("parent_id","parent_event","state_sha256","window","through")):
             raise ValueError("所选路线的分岔起点或观察终点不一致")
         result=trajectory_comparison(left,right,left.experiment["window"],window)
+        if watch:=record["request"].get("watch"):
+            from .contrast import field_contrast
+            result["focus"]=field_contrast(left,right,watch["actor_id"],watch["field_id"],result["right"]["window"])
         return {**result,"actors":[{"id":a.id,"name":a.name} for a in left._scenario.entities]}
 
     def catalog(self):
