@@ -571,7 +571,8 @@ function fieldDetails(actor, stateRecord, view) {
     fields.append(h("dt",field.label || id));
     const row = h("dd"), value = field.value === null ? "未知" : typeof field.value === "boolean" ? (field.value ? "是" : "否") : String(field.value) + (field.unit || "");
     row.append(h("strong",value),h("small",field.domain + " · 定义来自" + (origins[definition.kind || "user"] || "已保存设定")));
-    if (!playback()) row.append(button("追踪这个字段",()=>openFieldWatch(view,{actor_id:actor.id,field_id:id}),"link"));
+    if (!playback()) row.append(button("查阅这项状态的依据",()=>openFieldReason(view,actor.id,id),"link"),
+      button("追踪这个字段",()=>openFieldWatch(view,{actor_id:actor.id,field_id:id}),"link"));
     if (definition.quotes?.length) row.append(disclosure("查看定义原句",...definition.quotes.map(q => h("p","“" + q.quote + "”" + (q.page ? " · 第 " + q.page + " 页" : ""),"hint"))));
     fields.append(row);
   }
@@ -656,6 +657,9 @@ function renderWindow(view) {
   currentStateWindow = view.settled_through;
   $("open-interactions").hidden=isCase;
   $("open-interactions").onclick=safe(()=>openInteractions(view));
+  const experimentSlot=$(s.experiment ? "comparison-lead" : "experiment-follow");
+  if($("experiment-tools").parentElement!==experimentSlot)experimentSlot.append($("experiment-tools"));
+  safe(()=>showWindowStrip(view))();
   showExperimentTools(view);
   showFieldWatches(view);
   if ($("all-windows").open && historyThrough !== s.window) safe(drawWindowHistory)();
@@ -668,7 +672,13 @@ function renderWindow(view) {
   $("watch-meta").textContent = (view.mode === "recorded_api" ? "真实接口实录 · 只读回放" : isCase || view.mode === "sample" ? "脚本案例 · 未调用真实模型" : "模型 " + view.model) + "　·　每窗 " + s.window_duration + "　·　" + (statuses[s.status] || s.status);
   const select = $("window"); select.disabled=false;select.replaceChildren();
   const live = h("option", isCase ? "最后一个窗口" : "跟随最新"); live.value = ""; select.append(live);
-  for (let i = 0; i <= view.latest; i++) { const option = h("option", i ? "第 " + i + " 窗" : "开局"); option.value = String(i); select.append(option); }
+  const near=new Set([0,view.latest]);
+  const first=view.latest<=150 ? 0 : Math.max(0,view.selected-3);
+  const last=view.latest<=150 ? view.latest : Math.min(view.latest,view.selected+3);
+  for(let i=first;i<=last;i++)near.add(i);
+  for(const i of [...near].sort((a,b)=>a-b))select.append(new Option(windowName(i),String(i)));
+  if(view.latest>150)select.append(new Option("跳到指定窗口…","jump"));
+  select.dataset.latest=view.latest;
   select.value = selectedWindow === null ? "" : String(selectedWindow);
   $("previous-window").disabled=view.selected===0; $("next-window").disabled=view.selected>=view.latest;
   $("previous-window").onclick=safe(()=>pinWindow(view.selected-1)); $("next-window").onclick=safe(()=>pinWindow(view.selected+1));
@@ -700,7 +710,7 @@ function renderWindow(view) {
   if (settlement) {
     const highlights=settlement.data.consequences || [], changes=settlement.data.changes || [];
     outcome.append(h("strong","本窗结果 · "+changes.length+" 项字段变化"),h("p",highlights[0]?.text || changes[0]?.reason || "本窗已结算，已定义字段保持原值。"),
-      button("查看结算依据",()=>evidence(settlement.id),"link"));
+      button(changes.length ? "为什么发生变化" : "查看结算依据",()=>openFieldReason(view),"link"));
   }
   let group = null, grouped = 0;
   for (const e of groupDeliveries(view.events)) {
@@ -853,7 +863,16 @@ async function pinWindow(n) {
   history.replaceState(null,"","#"+base+(n===null ? "" : "/"+n));
   await refreshWatch(routeGeneration);
 }
-$("window").onchange = safe(() => pinWindow($("window").value === "" ? null : Number($("window").value)));
+$("window").onchange = safe(() => {
+  const select=$("window");
+  if(select.value!=="jump")return pinWindow(select.value==="" ? null : Number(select.value));
+  select.value=selectedWindow===null ? "" : String(selectedWindow);
+  const form=h("form",null,"experiment-form"),label=h("label","跳到第几窗"),n=h("input");
+  n.type="number";n.min="0";n.max=select.dataset.latest;n.step="1";n.required=true;n.value=String(selectedWindow ?? currentStateWindow);
+  const submit=h("button","回看这一窗","primary");submit.type="submit";label.append(n);form.append(label,submit);
+  form.onsubmit=safe(async e=>{e.preventDefault();$("reading").close();await pinWindow(Number(n.value));});
+  reading("按编号回看",form);n.select();
+});
 $("feed-actor").onchange=$("feed-kind").onchange=safe(async()=>{eventLimit=100; lastView=""; await refreshWatch(routeGeneration);});
 async function drawWindowHistory() {
   const run = activeRun, root = $("window-list"), ticket=++historyRequest;
@@ -928,6 +947,7 @@ async function route() {
     const at=kind==="run" ? pinned : id;
     if (/^\d{1,9}$/.test(at || "")) selectedWindow = Number(at);
     $("experiment-tools").hidden = true; $("experiment-tools").replaceChildren();
+    stripState=null;$("window-strip").hidden=true;$("window-strip").replaceChildren();delete $("window-strip").dataset.stamp;
     $("field-watches").hidden=true; $("field-watches").replaceChildren(); delete $("field-watches").dataset.stamp;
     $("window-outcome").hidden=true; $("feed-actor").replaceChildren(new Option("全部主体","")); $("feed-kind").value=""; actorLimit=8;
     $("all-windows").open = false; historyThrough = -1; requestedWindows = 40; $("window-list").replaceChildren();

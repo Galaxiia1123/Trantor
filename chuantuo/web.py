@@ -43,6 +43,7 @@ from .recovery import salvage
 from .observatory import FieldWatch, observe_field, observation_notes, ongoing_matters
 from .interactions import interaction_map, conversation, dispatch_ledger
 from .studies import Studies, StudyRequest
+from .story import field_reason, window_strip
 from .insights import Question, actor_observation, answer_question, event_preview, search_evidence, timeline, watch_window, window_history
 
 
@@ -589,6 +590,15 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
                        offset: int = Query(default=0,ge=0), limit: int = Query(default=100,ge=1,le=300),
                        actor: str | None = None, kind: Literal["expression","decision_deferred","external_event","message_dispatched","message_delivered","window_committed","settlement_rejected","model_failure"] | None = None):
         return watch_window(get_run(run_id), window, offset, limit, actor, kind)
+
+    @app.get("/api/runs/{run_id}/window-strip")
+    def strip(run_id:str,start:int=Query(default=1,ge=1),through:int|None=Query(default=None,ge=0),slots:int=Query(default=32,ge=2,le=64)):
+        return window_strip(get_run(run_id),start,through,slots)
+
+    @app.get("/api/runs/{run_id}/field-reason")
+    def explain_field(run_id:str,window:int=Query(ge=0),actor:str=Query(),field:str=Query(),
+                      offset:int=Query(default=0,ge=0),limit:int=Query(default=12,ge=1,le=40)):
+        return field_reason(get_run(run_id),window,actor,field,offset,limit)
 
     @app.get("/api/runs/{run_id}/calendar")
     def event_calendar(run_id:str):

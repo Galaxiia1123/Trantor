@@ -155,6 +155,16 @@ class Journal:
                     return obs["id"]
         return None
 
+    def inbox_before(self, action, discarded):
+        data=action["data"]
+        key=(action["window"],data["round"],data["actor_id"])
+        with self._lock:
+            for obs in reversed(self._round_observations.get(key,())):
+                if obs["id"] not in discarded and int(obs["id"][1:])<int(action["id"][1:]):
+                    inbox=obs["data"]["visible"]["messages"]
+                    return obs["id"],len(inbox),inbox[:3]
+        return None
+
     def usage(self):
         with self._lock:
             return deepcopy(self._usage)
@@ -346,6 +356,7 @@ class Simulation:
         self._actions: list[dict] = []
         self._accepted_outputs = {}
         self._committed: set[int] = set()
+        self._window_marks = {}
         self._history: list[dict] = []
         self._call_count = 0
         self._settlement_correction = None
