@@ -41,7 +41,7 @@ from . import __version__
 from .experiments import Adoption, ExperimentRequest, adopt_suggestion, branch_payload, compare, experiment_comparison, fork_experiment, outcome_groups
 from .recovery import salvage
 from .observatory import FieldWatch, observe_field, observation_notes, ongoing_matters
-from .interactions import interaction_map, conversation
+from .interactions import interaction_map, conversation, dispatch_ledger
 from .studies import Studies, StudyRequest
 from .insights import Question, actor_observation, answer_question, event_preview, search_evidence, timeline, watch_window, window_history
 
@@ -579,10 +579,15 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
                           q:str=Query(default="",max_length=200),offset:int=Query(default=0,ge=0),limit:int=Query(default=30,ge=1,le=80)):
         return conversation(get_run(run_id),one,two,start,through,q,offset,limit)
 
+    @app.get("/api/runs/{run_id}/mail")
+    def historical_mail(run_id:str,through:int|None=Query(default=None,ge=0),actor:str|None=None,stage:Literal["pending","arrived"]|None=None,
+                        offset:int=Query(default=0,ge=0),limit:int=Query(default=30,ge=1,le=100)):
+        return dispatch_ledger(get_run(run_id),through,actor,stage,offset,limit)
+
     @app.get("/api/runs/{run_id}/watch")
     def observe_window(run_id: str, window: int | None = Query(default=None,ge=0),
                        offset: int = Query(default=0,ge=0), limit: int = Query(default=100,ge=1,le=300),
-                       actor: str | None = None, kind: Literal["expression","decision_deferred","external_event","message_delivered","window_committed","settlement_rejected","model_failure"] | None = None):
+                       actor: str | None = None, kind: Literal["expression","decision_deferred","external_event","message_dispatched","message_delivered","window_committed","settlement_rejected","model_failure"] | None = None):
         return watch_window(get_run(run_id), window, offset, limit, actor, kind)
 
     @app.get("/api/runs/{run_id}/calendar")
@@ -687,7 +692,8 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
             alternate = fork_run(parent,request,run_id,job_id)
             start(alternate)
             return alternate.snapshot()
-        return jobs.submit(job_id,"experiment",{"run_id":run_id,"parent_id":parent_id,"spec":request.model_dump(mode="json")},launch)
+        spec=request.model_dump(mode="json",exclude={"route"} if request.route is None else set())
+        return jobs.submit(job_id,"experiment",{"run_id":run_id,"parent_id":parent_id,"spec":spec},launch)
 
     @app.get("/api/runs/{run_id}/experiment")
     def experiment_result(run_id: str, window: int | None = Query(default=None,ge=0)):
@@ -833,7 +839,8 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
     assets = {p.name:p.read_bytes() for p in sorted(static.iterdir()) if p.is_file()}
     material_templates={"tidal":("tidal-port.md","潮汐港 · 跨层协商 · 9 窗","case"),
                         "rehearsal":("rehearsal-room.md","北廊排练室 · 排期交换 · 3 窗",None),
-                        "roof":("roof-calendar.md","钟楼天台 · 外部事件 · 3 窗",None)}
+                        "roof":("roof-calendar.md","钟楼天台 · 外部事件 · 3 窗",None),
+                        "mail":("mountain-mail.md","山线货运站 · 跨窗通信 · 3 窗",None)}
     asset_names=[row[0] for row in material_templates.values()]+["tidal-replay.json","verified-replay.json"]
     case_assets = {name:(static.parent/"templates"/name).read_bytes() for name in asset_names}
     revision = hashlib.sha256(b"".join(assets.values())).hexdigest()[:12]

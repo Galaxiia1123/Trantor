@@ -45,6 +45,8 @@ def preflight(scene, config, depths):
     world_floor = len(WORLD_SYSTEM) + len(encode(world))
     if isinstance(config, RunConfig11):
         world = objective_input(scene,config,state,[],[],1,Settlement.model_json_schema(),opening_events)
+        if routes:=perception.known_routes(None,1):
+            world["mail_routes"]=routes
         world_floor = len(WORLD_INSTRUCTION) + len(encode(world))
     world_limit = catalog[world_id].context_limit_chars
     if world_floor > world_limit:

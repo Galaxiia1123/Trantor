@@ -5,7 +5,7 @@
   <meta name="theme-color" content="#f7f7f4">
   <title>Trantor 川陀 · 推演工作台</title>
   <link rel="stylesheet" href="/static/workbench.css"><link rel="stylesheet" href="/static/observatory.css">
-  <script defer src="/static/route-graph.js"></script><script defer src="/static/interactions.js"></script><script defer src="/static/calendar.js"></script><script defer src="/static/observatory.js"></script><script defer src="/static/studies.js"></script><script defer src="/static/experiments.js"></script><script defer src="/static/workbench.js"></script>
+  <script defer src="/static/route-graph.js"></script><script defer src="/static/interactions.js"></script><script defer src="/static/mail.js"></script><script defer src="/static/calendar.js"></script><script defer src="/static/observatory.js"></script><script defer src="/static/studies.js"></script><script defer src="/static/experiments.js"></script><script defer src="/static/workbench.js"></script>
 </head>
 <body>
   <a class="skip" href="#main">跳到正文</a>
@@ -46,7 +46,7 @@
       <div class="watch-grid"><article class="card"><div class="card-top"><h2>事件经过</h2><button id="open-interactions" class="link" hidden>查看通信图</button></div>
         <div id="window-outcome" class="window-outcome" hidden></div>
         <div class="feed-filters"><label>关注主体<select id="feed-actor"><option value="">全部主体</option></select></label>
-          <label>记录类型<select id="feed-kind"><option value="">全部记录</option><option value="expression">主体决定</option><option value="message_delivered">已送达消息</option><option value="decision_deferred">延续等待</option><option value="external_event">外部事件</option><option value="window_committed">世界结算</option><option value="settlement_rejected">结算被拒</option></select></label></div>
+          <label>记录类型<select id="feed-kind"><option value="">全部记录</option><option value="expression">主体决定</option><option value="message_dispatched">在途发件</option><option value="message_delivered">已送达消息</option><option value="decision_deferred">延续等待</option><option value="external_event">外部事件</option><option value="window_committed">世界结算</option><option value="settlement_rejected">结算被拒</option></select></label></div>
         <div id="events" class="feed"></div></article><aside class="card"><h2>主体处境</h2><p class="hint" id="state-time"></p><div id="actors"></div></aside></div>
       <article id="report-panel" class="card draft"><div class="card-top"><h2>推演报告</h2><button id="write-report">生成报告</button></div><div id="reports"></div></article>
       <details id="followup" class="foot-tools"><summary>追问记录或从此窗口另开场景</summary><div class="card advanced"><h2>向记录提问</h2><label>证据范围<select id="question-scope"></select></label>

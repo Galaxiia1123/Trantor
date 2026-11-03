@@ -8,6 +8,8 @@ def situation(observation):
     # An inbox temporarily adds senders and their containers to the contact list.
     # Its disappearance next round does not change the underlying situation.
     stable={k:observation[k] for k in ("self","background","rules","visible_state","visible_materials","influences")}
+    if observation.get("mail_routes"):
+        stable["mail_routes"]=observation["mail_routes"]
     return hashlib.sha256(json.dumps(stable,ensure_ascii=False,sort_keys=True,separators=(",",":")).encode()).digest()
 
 

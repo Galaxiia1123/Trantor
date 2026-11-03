@@ -120,7 +120,7 @@ class Journal:
         if kind=="observation":
             key=(event["window"],data["visible"]["round"],data["actor_id"])
             self._round_observations.setdefault(key,[]).append(event)
-        if event["kind"] in {"expression","decision_deferred","message_delivered","window_committed","settlement_rejected","model_failure","external_event"}:
+        if event["kind"] in {"expression","decision_deferred","message_dispatched","message_delivered","window_committed","settlement_rejected","model_failure","external_event"}:
             self._window_rows.setdefault(event["window"], []).append(event)
         if event["kind"] == "window_committed":
             self._settlements[event["window"]] = event
@@ -151,7 +151,7 @@ class Journal:
             for obs in reversed(self._round_observations.get((window,turn,actor),())):
                 if obs["id"] in discarded:
                     continue
-                if any(all(m.get(k)==delivery[k] for k in ("action_id","from","to","text")) for m in obs["data"]["visible"]["messages"]):
+                if any(all(m.get(k)==delivery.get(k) for k in ("action_id","from","to","text","dispatch_id")) for m in obs["data"]["visible"]["messages"]):
                     return obs["id"]
         return None
 
@@ -339,6 +339,8 @@ class Simulation:
         self._wake = {}
         self._waiting_steps = []
         self._current_events = []
+        self._in_transit = {}
+        self._current_mail = []
         self._deferred_count = 0
         self._inbox: dict[str, list[dict]] = {a.id: [] for a in scenario.entities}
         self._actions: list[dict] = []
@@ -428,6 +430,7 @@ class Simulation:
         self._observations, self._actions = {}, []
         self._plans, self._wake, self._waiting_steps = {}, {}, []
         self._current_events=[]
+        self._in_transit, self._current_mail = {}, []
         for event in events[:cutoff]:
             if event["id"] in discarded:
                 continue
@@ -451,13 +454,21 @@ class Simulation:
                 self._waiting_steps.append({"actor_id":data["actor_id"],"round":data["round"]})
             elif event["kind"]=="external_event" and frozen and event["window"]==self._frozen_window:
                 self._current_events.append(event)
+            elif event["kind"]=="message_dispatched":
+                self._in_transit[event["id"]]=event
+                if frozen and event["window"]==self._frozen_window:
+                    self._current_mail.append(event)
             elif event["kind"] == "message_delivered":
+                if ref:=data.get("dispatch_id"):
+                    self._in_transit.pop(ref)
+                    if frozen and event["window"]==self._frozen_window:
+                        self._current_mail.append(event)
                 self._inbox[data["to"]].append(deepcopy(data))
         # Rebuild Concordia entities at their idle phase, then restore only their
         # own observations and expressions. No world/private cross-contamination.
         self.world = make_agent("world", self._world_callback, char_limit=0)
         return [event["id"] for event in events[cutoff:] if event["id"] not in discarded and event["kind"] in
-                {"observation","expression","decision_deferred","external_event","message_delivered","model_input","model_output","model_validation_error","model_failure"}]
+                {"observation","expression","decision_deferred","external_event","message_dispatched","message_delivered","model_input","model_output","model_validation_error","model_failure"}]
 
     def recover(self):
         with self._lock:
@@ -497,7 +508,7 @@ class Simulation:
             issue = rejected["data"]["reason"]
             try:
                 proposal=complete_scheduled_reviews(self._state,proposal,self._current_events)
-                settled_state(self._scenario, self._state, proposal, set(owners), owners,self._current_events)
+                settled_state(self._scenario, self._state, proposal, set(owners), owners,self._objective_receipts())
             except ValueError as error:
                 issue = str(error)
             self._settlement_correction = {"rejected_proposal":raw,"issue":issue,
@@ -538,7 +549,7 @@ class Simulation:
                 return "discarded"
             if event["kind"] == "settlement_rejected":
                 return "rejected"
-            if event["kind"] in {"observation","expression","decision_deferred","external_event","message_delivered","model_input","model_output"}:
+            if event["kind"] in {"observation","expression","decision_deferred","external_event","message_dispatched","message_delivered","model_input","model_output"}:
                 return "committed" if event["window"] in self._committed else "uncommitted"
             return None
 
@@ -656,6 +667,20 @@ class Simulation:
             if self.notebooks:
                 payload = objective_input(self._scenario, self.config, self._state, self._actions, self._history,
                                           self.window+1,Settlement.model_json_schema(),self._current_events)
+                if routes:=self._perception.known_routes(None,self.window+1):
+                    payload["mail_routes"]=routes
+                if self._current_mail:
+                    payload["mail"]=[]
+                    for e in self._current_mail:
+                        d=e["data"]
+                        row={k:d[k] for k in ("from","to","text","sent_window","due_window")}
+                        if e["kind"]=="message_delivered":
+                            row.update(status="arrived",record=e["id"])
+                        else:
+                            row.update(status="in_transit",source_action=d["action_id"])
+                        payload["mail"].append(row)
+                    payload["this_window_refs"]={"action_ids":[a["id"] for a in self._actions],
+                                                 "event_ids":[e["id"] for e in self._objective_receipts()]}
             else:
                 payload = {"task": "world", "window": self.window + 1,
                     "window_duration": self.config.window_duration, "scenario": self._scenario.world_view(self.config.world_source_policy == "defined"),
@@ -666,20 +691,50 @@ class Simulation:
             if self._waiting_steps:
                 payload["continued_waits"] = self._waiting_steps
         instruction=WORLD_INSTRUCTION if self.notebooks else WORLD_SYSTEM
+        if payload.get("mail_routes"):
+            instruction+="\nmail_routes 是本窗口权威的通信时效，优先于旧材料里的预计送达时间。核对实际到件记录，再区分信中内容与收件人自己的决定。"
         if self._waiting_steps:
             instruction+="\ncontinued_waits 只表示主体延续此前的等待。本轮没有由此产生的新承诺、行动或消息。结算可保持原值。"
         if self._current_events:
             instruction+="\nexternal_events 是本窗实际发生的预定外部事件。assignments 指定的字段由引擎直接审查，请省略这些字段的 reviews。外部事实可用 event_ids 引用其 record，主体行动仍用 action_ids。"
+        if self._current_mail:
+            instruction+="\nmail 中 in_transit 表示刚寄出，不能按送达结算。arrived 才是本窗实际送达。用其 record 作 event_ids 引用，用收件人本窗的决定作 action_ids 引用。每处引用都必须在 this_window_refs 的对应列表内，勿复制信里提及的旧行动编号。"
         return self._call(self.config.model_id("world"), "world", payload,instruction,schema=Settlement)
 
     def observation(self, actor_id: str) -> dict:
         return self._perception.observe(actor_id,self._state,self._inbox[actor_id],self.window+1,self.round,self._last_feedback,self._current_events)
+
+    def _objective_receipts(self):
+        return self._current_events+[e for e in self._current_mail if e["kind"]=="message_delivered"]
+
+    def _send_message(self, sender, recipient, text, action_id):
+        window=self.window+1
+        data={"from":sender,"to":recipient,"text":text,"action_id":action_id}
+        if scope:=message_scope(text,self._perception.delivery_limits):
+            data["sharing"]=scope
+        delay=self._perception.transit(sender,recipient,window)
+        if delay:
+            data.update(sent_window=window,sent_round=self.round,due_window=window+delay)
+            dispatch=self.journal.append("message_dispatched",data,window)
+            self._in_transit[dispatch["id"]]=dispatch
+            self._current_mail.append(dispatch)
+        else:
+            self.journal.append("message_delivered",data,window)
+            self._inbox[recipient].append(data)
 
     def _collect_actions(self):
         self._actions = []
         self._waiting_steps = []
         self._current_events=[self.journal.append("external_event",event.model_dump(mode="json"),self.window+1)
                               for event in self._perception.calendar.get(self.window+1,())]
+        self._current_mail=[]
+        due=[e for e in self._in_transit.values() if e["data"]["due_window"]==self.window+1]
+        for dispatch in due:
+            data={**dispatch["data"],"dispatch_id":dispatch["id"]}
+            receipt=self.journal.append("message_delivered",data,self.window+1)
+            self._current_mail.append(receipt)
+            self._inbox[data["to"]].append(data)
+            del self._in_transit[dispatch["id"]]
         for round_index in range(1, self.config.rounds_per_window + 1):
             self.round = round_index
             due, deferred = {}, {}
@@ -741,11 +796,7 @@ class Simulation:
                     self._remember_plan(actor_id,expression,event["id"])
                 for message in expression.messages:
                     for recipient in dict.fromkeys(message.recipients):
-                        delivered = {"from": actor_id, "to": recipient, "text": message.text, "action_id": event["id"]}
-                        if scope := message_scope(message.text,self._perception.delivery_limits):
-                            delivered["sharing"] = scope
-                        self._inbox[recipient].append(delivered)
-                        self.journal.append("message_delivered", delivered, self.window + 1)
+                        self._send_message(actor_id,recipient,message.text,event["id"])
     def _play_window(self):
         if self._frozen_window != self.window + 1:
             self._collect_actions()
@@ -777,7 +828,7 @@ class Simulation:
             try:
                 owners = {action["id"]:action["actor_id"] for action in self._actions}
                 proposal=complete_scheduled_reviews(self._state,proposal,self._current_events)
-                next_state, changes = settled_state(self._scenario,self._state,proposal,action_ids,owners,self._current_events)
+                next_state, changes = settled_state(self._scenario,self._state,proposal,action_ids,owners,self._objective_receipts())
             except ValueError as error:
                 raise InvalidSettlement(str(error)) from error
             # Persist the complete commit record before publishing the new state.
@@ -791,6 +842,7 @@ class Simulation:
             self._deferred_count+=len(self._waiting_steps)
             self._waiting_steps=[]
             self._current_events=[]
+            self._current_mail=[]
             self._last_feedback = {"window":window, "commit_id":event["id"], "changes":changes}
             self._history.append({"id": event["id"], "window": window, "consequences": event["data"]["consequences"]})
             self.window = window

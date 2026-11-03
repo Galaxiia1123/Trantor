@@ -277,7 +277,7 @@ class Scenario(Record):
                 raise ValueError("AI 估计的权重必须包含理由")
         if len({(e.source, e.target) for e in self.influences}) != len(self.influences):
             raise ValueError("同一有向边重复；反向边可以独立配置")
-        for obj in [*self.entities, *self.influences, *self.rules, *getattr(self,"scheduled_events",[]), *[f for a in self.entities for f in [*a.fields, *a.materials]],
+        for obj in [*self.entities, *self.influences, *self.rules, *getattr(self,"scheduled_events",[]), *getattr(self,"mail_routes",[]), *[f for a in self.entities for f in [*a.fields, *a.materials]],
                     *(m.sharing for a in self.entities for m in a.materials if m.sharing)]:
             if not set(obj.provenance.source_ids) <= source_ids:
                 raise ValueError("来源引用不存在")
@@ -335,15 +335,35 @@ class Scenario(Record):
         return result
 
 
+class RouteTiming(Record):
+    source: Identifier
+    target: Identifier
+    transit_windows: int = Field(ge=0,le=365,strict=True)
+
+
+class MailRoute(RouteTiming):
+    active_from: int = Field(default=1,ge=1)
+    provenance: Provenance = Field(default_factory=Provenance)
+
+
 class Scenario11(Scenario):
     format_version: Literal["1.1"] = "1.1"
     influences: list[Relation] = Field(default_factory=list)
     rules: list[ScopedRule] = Field(default_factory=list)
     scheduled_events: list[ScheduledEvent] = Field(default_factory=list,max_length=256)
+    mail_routes: list[MailRoute] = Field(default_factory=list,max_length=256)
 
     @model_validator(mode="after")
     def validate_calendar(self):
         actors={a.id for a in self.entities}
+        slots=set()
+        for route in self.mail_routes:
+            key=(route.source,route.target,route.active_from)
+            if route.source==route.target or not {route.source,route.target}<=actors or key in slots:
+                raise ValueError("通信时效需要两个不同的已定义主体，同一方向和生效窗口只能设定一次")
+            if route.provenance.kind not in {"user","material"} or (route.provenance.kind=="material" and not route.provenance.quotes):
+                raise ValueError("通信时效需要明确设定或带原文出处的材料")
+            slots.add(key)
         fields={(a.id,f.id):f for a in self.entities for f in a.fields}
         seen=set()
         if len({s.id for s in self.scheduled_events})!=len(self.scheduled_events):

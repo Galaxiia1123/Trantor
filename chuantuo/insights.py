@@ -26,8 +26,9 @@ def event_preview(event):
         row["scenario"] = {"title": data["scenario"]["title"]}
     elif kind=="external_event":
         row.update(text=data["text"],assignments=data["assignments"],visibility=data["visibility"],origin=data["provenance"]["kind"])
-    elif kind in {"expression", "message_delivered"}:
+    elif kind in {"expression", "message_delivered","message_dispatched"}:
         row.update(text=data["text"][:1400], message_count=len(data.get("messages", [])))
+        row.update({k:data[k] for k in ("sent_window","sent_round","due_window","dispatch_id") if k in data})
     elif kind == "observation":
         view = data["visible"]
         row.update(round=view["round"], field_count=sum(map(len, view["visible_state"].values())),
@@ -110,7 +111,7 @@ def watch_window(simulation, selected=None, offset=0, limit=100, actor_id=None, 
         rows, total = simulation.journal.window_rows(window,offset,limit,actor=actor_id,kind=kind)
         events = [dict(event_preview(e), commit_status=simulation.event_status(e)) for e in rows]
         return {"title":scene.title, "format_version":getattr(scene,"format_version","1.0"),
-                "scheduled_count":len(getattr(scene,"scheduled_events",[])),
+                "scheduled_count":len(getattr(scene,"scheduled_events",[])),"has_mail_routes":bool(getattr(scene,"mail_routes",[])),
                 "rounds_per_window":simulation.config.rounds_per_window,
                 "domains":scene.domains, "status":status, "selected":window, "latest":current, "settled_through":committed,
                 "state_record":state_id, "actors":actors, "events":events, "total":total, "next":offset+len(rows),
@@ -213,8 +214,8 @@ def _search_items(event):
 def search_evidence(simulation, query, limit=30, actor_id=None, cutoff=None, *, char_budget=None):
     if actor_id is not None and actor_id not in simulation.depths:
         raise ValueError("主体不存在")
-    kinds = {"observation","expression","decision_deferred","message_delivered","run_recovered"} if actor_id else {
-        "run_created","window_committed","observation","expression","decision_deferred","external_event","message_delivered","runtime_verification","run_error","run_recovered"}
+    kinds = {"observation","expression","decision_deferred","message_dispatched","message_delivered","run_recovered"} if actor_id else {
+        "run_created","window_committed","observation","expression","decision_deferred","external_event","message_dispatched","message_delivered","runtime_verification","run_error","run_recovered"}
     events = simulation.journal.private_history(actor_id,cutoff) if actor_id else simulation.journal.snapshot(kinds)
     discarded = discarded_ids(events)
     terms = set(re.findall(r"[a-z0-9_.-]+", query.lower()))

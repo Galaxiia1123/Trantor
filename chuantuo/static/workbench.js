@@ -402,7 +402,7 @@ function renderDraft() {
     }
     root.append(disclosure("准备追踪的问题（"+selected.length+"）",panel));
   }
-  root.append(disclosure("参与者与有向关系", relationExplorer(scene)));
+  root.append(disclosure("参与者与有向关系", relationExplorer(scene),draftMailRoutes(scene)));
   root.append(disclosure("外部事件（"+(scene.scheduled_events || []).length+"）",draftCalendar(scene)));
   if (scene.assumptions.length || scene.missing_information.length) root.append(disclosure("假设与缺项（" + (scene.assumptions.length + scene.missing_information.length) + "）", bullets([...scene.assumptions,...scene.missing_information])));
   const check = record.source_reconciliation || {};
@@ -534,10 +534,12 @@ async function evidence(id, sourceRun = activeRun) {
   if (ticket !== readingRequest || run !== activeRun) return;
   if (!item) throw new Error("这份回放未收录该记录。");
   const body = h("div");
-  const data=item.data || {}, labels={expression:"主体决定",message_delivered:"定向消息",window_committed:"窗口结算",observation:"当时的观察",run_created:"开局材料",external_event:"预定外部事件",decision_deferred:"延续等待"};
+  const data=item.data || {}, labels={expression:"主体决定",message_delivered:"消息送达",message_dispatched:"消息寄出",window_committed:"窗口结算",observation:"当时的观察",run_created:"开局材料",external_event:"预定外部事件",decision_deferred:"延续等待"};
   body.append(h("small",(item.window ? "第 "+item.window+" 窗" : "开局")+" · "+(labels[item.kind] || item.kind),"quiet"));
   if (data.text) body.append(h("p",data.text));
   if (item.kind==="message_delivered") body.append(h("p",data.from+" → "+data.to),h("small","对应行动","quiet"),evidenceLinks([data.action_id],sourceRun));
+  if (item.kind==="message_dispatched") body.append(h("p","预计第 "+data.due_window+" 窗开始时到达。"),evidenceLinks([data.action_id],sourceRun));
+  if (data.dispatch_id)body.append(h("small","原始发件","quiet"),evidenceLinks([data.dispatch_id],sourceRun));
   if (item.kind==="expression" && !playback() && item.commit_status==="committed")
     body.append(button("查看作出决定时的可见信息",()=>openActorContext({id:data.actor_id,name:data.actor_id},item.window,data.round,false,sourceRun),"link"));
   if (item.kind==="window_committed") {
@@ -594,6 +596,10 @@ async function openActorContext(actor, window, turn, replace = false, run = acti
   if(view.messages?.length) {
     body.append(h("h3","本轮收到的消息"));
     view.messages.forEach(m=>body.append(h("p",m.from+" → "+m.to+"　"+m.text),evidenceLinks([m.action_id],run)));
+  }
+  if(view.mail_routes?.length) {
+    const names=Object.fromEntries(view.roster.map(a=>[a.id,a.name]));
+    body.append(disclosure("当时已知的通信时效",...view.mail_routes.map(r=>h("p",(names[r.source]||r.source)+" → "+(names[r.target]||r.target)+"　"+transitText(r.transit_windows)))));
   }
   if(view.external_events?.length) {
     body.append(h("h3","本轮收到的外部通知"));
@@ -703,6 +709,10 @@ function renderWindow(view) {
     if (e.to.length) {
       const sender = data.from || data.actor_id;
       row.append(h("span",(names[sender] || sender) + " → " + e.to.map(id => names[id] || id).join("、") + phase,"type"),h("p",data.text));
+      if(data.dispatch_id)row.append(h("small","第 "+data.sent_window+" 窗寄出，本窗已送达。","quiet"));
+    } else if(e.kind==="message_dispatched") {
+      row.append(h("span",(names[data.from]||data.from)+" → "+(names[data.to]||data.to)+" · 已寄出"+phase,"type"),h("p",data.text),
+        h("small","预计第 "+data.due_window+" 窗首送达。","quiet"),evidenceLinks([data.action_id]));
     } else if (e.kind === "expression") {
       row.append(h("span",(names[data.actor_id] || data.actor_id) + " · 决定" + phase,"type"), h("p",data.text));
       if(data.resumed_plan)row.append(h("small",wakeText(data.resumed_plan.reason),"quiet"));

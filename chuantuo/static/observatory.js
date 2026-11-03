@@ -35,6 +35,7 @@ function showFieldWatches(view) {
   if(hasFields) menu.append(button("添加关注",()=>openFieldWatch(view),"link"));
   if(view.format_version==="1.1") menu.append(button("主体持续事项",()=>openMatters(view),"link"));
   if(view.scheduled_count)menu.append(button("外部事件日历",()=>openRunCalendar(view),"link"));
+  if(view.has_mail_routes)menu.append(button("查询在途与到件",()=>openRunMail(view),"link"));
   const list=h("div",null,"watch-cards"); root.replaceChildren(head,list);
   api("/api/runs/"+run+"/watches?through="+view.settled_through).then(rows=>{
     if (!list.isConnected) return;

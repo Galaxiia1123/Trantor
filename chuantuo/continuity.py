@@ -57,7 +57,9 @@ class Notebook:
                        **({"at_settlement":notice["at_settlement"]} if notice.get("at_settlement") else {})},recent_count)
         for message in inbox:
             self.sharing.update(message.get("sharing", {}))
-            self._add({"id": message["action_id"], "window": window, "from": message["from"], "text": message["text"]}, recent_count)
+            self._add({"id":message["action_id"],"window":window,"from":message["from"],"text":message["text"],
+                       **({"kind":"已收到的原信","dispatch":message["dispatch_id"],"received_window":window}
+                          if message.get("dispatch_id") else {})}, recent_count)
         self._add({"id": record_id, "window": window, "text": action.text,
                    **({"sent": [m.model_dump() for m in action.messages]} if action.messages else {})}, recent_count)
         for matter in action.matters:
@@ -84,7 +86,8 @@ class Notebook:
         if position >= recent_count:
             old = self.records[position - recent_count]
             excerpt = old["text"].split("。", 1)[0][:96]
-            self.older.append({"window": old["window"], "record": old["id"], "excerpt": excerpt})
+            self.older.append({"window":old["window"],"record":old["id"],"excerpt":excerpt,
+                               **({"kind":old["kind"],"dispatch":old["dispatch"]} if "dispatch" in old else {})})
 
     def payload(self, observation, config, wake=None):
         view = decision_view(observation)
@@ -126,7 +129,7 @@ class Notebook:
 
 
 def objective_input(scene, config, state, actions, history, window, schema, receipts=()):
-    definitions = scene.model_dump(mode="json", exclude={"sources","scheduled_events"}, exclude_defaults=True)
+    definitions = scene.model_dump(mode="json", exclude={"sources","scheduled_events","mail_routes"}, exclude_defaults=True)
     if "rules" in definitions:
         definitions["rules"] = [rule for rule in definitions["rules"] if rule.get("active_from", 1) <= window]
     for actor in definitions["entities"]:

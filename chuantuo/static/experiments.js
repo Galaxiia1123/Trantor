@@ -38,6 +38,8 @@ function experimentForm(view) {
   const picker=scheduledValuePicker(view.actors,false);
   const modes=[["condition","改变一个条件"]];
   if(picker.count)modes.push(["field","设定一个字段的新值"]);
+  const timing=routeTimingPicker(view.actors);
+  if(view.actors.length>=2)modes.push(["transit","改变一条线路的送达时间"]);
   modes.push(["repeat","按相同条件再运行一次"]);
   const kind = select("探索方式",modes);
   const range = Array.from({length:committed - earliest}, (_,i) => earliest + i);
@@ -46,7 +48,7 @@ function experimentForm(view) {
   const through = select("比较到哪个窗口",[]);
   const prompt = h("textarea",null,"editor"); prompt.maxLength = 1600; prompt.rows = 3;
   prompt.placeholder = "例如：运营社在本窗开始时收到一份有效签字函。";
-  const label = h("label","改变的条件"); label.append(prompt); form.append(label,picker.node);
+  const label = h("label","改变的条件"); label.append(prompt); form.append(label,picker.node,timing.node);
   const audience = select("开始时谁知道这个条件",[["world","仅世界系统"],["public","所有主体"],["readers","指定主体和世界系统"]]);
   const group = h("fieldset"); group.append(h("legend","知情主体"));
   for (const actor of view.actors) {
@@ -64,8 +66,9 @@ function experimentForm(view) {
     through.value=String(prior>from && prior<=committed ? prior : committed);
   }
   function update() {
-    const changed=kind.value!=="repeat", fieldMode=kind.value==="field";
-    label.hidden=!changed || fieldMode;audience.parentElement.hidden=!changed;prompt.required=kind.value==="condition";
+    const changed=["condition","field"].includes(kind.value), fieldMode=kind.value==="field";
+    label.hidden=kind.value!=="condition";audience.parentElement.hidden=!changed;prompt.required=kind.value==="condition";
+    timing.node.hidden=timing.node.disabled=kind.value!=="transit";
     picker.node.hidden=picker.node.disabled=!fieldMode;
     group.hidden=!changed || audience.value!=="readers";
     const windows=Number(through.value)-Number(split.value);
@@ -81,14 +84,14 @@ function experimentForm(view) {
   limits(); update();
   form.onsubmit=async event=>{
     event.preventDefault(); if (busy || submit.disabled || activeRun!==run) return;
-    const changed=kind.value!=="repeat", scope=changed ? audience.value : "world";
+    const changed=["condition","field"].includes(kind.value), scope=changed ? audience.value : "world";
     const readers=scope==="readers" ? [...group.querySelectorAll("input:checked")].map(el=>el.value) : [];
     if (scope==="readers" && !readers.length) { warning.textContent="请选择至少一个知情主体。"; return; }
     if (kind.value==="condition" && !prompt.value.trim()) {warning.textContent="请写下要改变的条件。";prompt.focus();return;}
     submit.disabled=true; warning.textContent="";
     try {
       const spec={window:Number(split.value),through:Number(through.value),kind:kind.value,condition:kind.value==="condition" ? prompt.value.trim() : "",
-                  assignment:kind.value==="field" ? picker.read() : null,audience:scope,readers};
+                  assignment:kind.value==="field" ? picker.read() : null,route:kind.value==="transit" ? timing.read() : null,audience:scope,readers};
       if(Number(repeats.value)>1) {
         const result=await study.submit(spec,Number(repeats.value));
         if(activeRun===run && form.isConnected && $("reading").open) {$("reading").close(); location.hash="study/"+result.id;}
@@ -99,7 +102,7 @@ function experimentForm(view) {
   reading("从同一时刻再走一次",h("p","两条路线在分岔前拥有相同的状态、私人记忆和已送达消息。新的条件从下一窗开始生效。","hint"),form);
 }
 
-const experimentKind = meta => meta.kind==="repeat" ? "原样重跑" : meta.kind==="field" ? "字段实验" : "条件实验";
+const experimentKind = meta => ({repeat:"原样重跑",field:"字段实验",transit:"线路实验"}[meta.kind] || "条件实验");
 const wakeText = reason => ({message:"收到定向消息，重新判断。",external_event:"收到外部事件通知，重新判断。",visible_change:"可见处境发生变化，重新判断。",due:"到达复看窗口或事项期限，重新判断。"}[reason] || "主体重新判断。");
 
 async function experimentShelf(parent) {
@@ -121,7 +124,8 @@ async function experimentShelf(parent) {
       const s=group.spec, card=h("article",null,"cohort");
       card.append(h("small","第 "+s.window+" 窗后 → 第 "+s.through+" 窗 · "+group.completed+"/"+group.runs.length+" 条完成","quiet"),
         h("h3",s.condition || "原条件重跑"));
-      if(s.kind!=="repeat") card.append(h("small","初始知情范围："+(s.audience==="public" ? "所有主体" : s.audience==="world" ? "仅世界系统" : s.readers.map(id=>result.actors[id] || id).join("、")+"与世界系统"),"quiet"));
+      if(s.kind==="transit")card.append(h("small","通信双方知道线路时效。分岔前已经寄出的消息仍按原定日期送达。","quiet"));
+      else if(s.kind!=="repeat") card.append(h("small","初始知情范围："+(s.audience==="public" ? "所有主体" : s.audience==="world" ? "仅世界系统" : s.readers.map(id=>result.actors[id] || id).join("、")+"与世界系统"),"quiet"));
       if (result.selected) {
         card.append(h("p","原路线终值为"+format(group.baseline)+"。"));
         for (const o of group.outcomes) card.append(h("span",format(o.value)+" · "+o.count+" 次","outcome-count"));
@@ -157,7 +161,8 @@ function showExperimentTools(view) {
   }
   const source=h("a","回看原路线"); source.href="#run/"+meta.parent_id+"/"+meta.window;
   const origin=h("p",null,"hint"); origin.append("第 "+meta.window+" 窗后分岔，比较至第 "+meta.through+" 窗。 ",source);
-  if (meta.kind!=="repeat") {
+  if(meta.kind==="transit")origin.append("　新时效只用于分岔后的新发件。通信双方能看到这个时效。");
+  else if (meta.kind!=="repeat") {
     const allowed=view.actors.filter(a=>meta.readers.includes(a.id)).map(a=>a.name);
     origin.append("　最初知情范围为"+(meta.audience==="public" ? "所有主体" : meta.audience==="world" ? "仅世界系统" : allowed.join("、")+"与世界系统")+"。");
   }

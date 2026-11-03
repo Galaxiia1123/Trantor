@@ -57,12 +57,48 @@ def conversation(sim,one,two,start=0,through=None,query="",offset=0,limit=30):
             data=event["data"];w=event["window"]
             action=sim.journal.event(data["action_id"]);turn=action["data"]["round"]
             next_w,next_turn=(w,turn+1) if turn<sim.config.rounds_per_window else (w+1,1)
+            if data.get("dispatch_id"):
+                next_w,next_turn=w,1
             seen=sim.journal.observation_receipt(data["to"],next_w,next_turn,data,sim._discarded) if next_w<=end else None
             if seen: stage="observed"
             elif next_w<=end: stage="unverified"
             elif next_w<=sim.window and next_w>end: stage="beyond_range"
             elif next_w>sim.window and sim.status in {"stopped","completed"}: stage="no_next_observation"
             else: stage="awaiting_observation"
-            items.append({"receipt":event["id"],"action":action["id"],"window":w,"round":turn,"from":data["from"],"to":data["to"],
+            items.append({"receipt":event["id"],"action":action["id"],"window":action["window"],"arrived_window":w,"dispatch":data.get("dispatch_id"),
+                          "round":turn,"from":data["from"],"to":data["to"],
                           "text":data["text"],"stage":stage,"seen":{"record":seen,"window":next_w,"round":next_turn} if seen else None})
         return {"start":start,"through":end,"total":len(matches),"next":offset+len(items),"items":items}
+
+
+def dispatch_ledger(sim, through=None, actor=None, stage=None, offset=0, limit=30):
+    """Reconstruct postal status at the selected boundary, using only receipts up to that point."""
+    with sim._lock:
+        end=_range(sim,0,through)
+        if actor and actor not in sim.depths:
+            raise ValueError("找不到所选主体")
+        items={}
+        for window in range(1,end+1):
+            for kind in ("message_dispatched","message_delivered"):
+                rows,_=sim.journal.window_rows(window,0,actor=actor,kind=kind)
+                for e in rows:
+                    d=e["data"]
+                    if e["id"] in sim._discarded:
+                        continue
+                    if kind=="message_dispatched":
+                        items[e["id"]]={"dispatch":e["id"],"receipt":None,"seen":None,"stage":"pending",**d}
+                    elif ref:=d.get("dispatch_id"):
+                        item=items[ref]
+                        item.update(stage="arrived",receipt=e["id"])
+        pending=sum(i["stage"]=="pending" for i in items.values())
+        done=end==sim.window and sim.status in {"completed","stopped"}
+        ordered=sorted((i for i in items.values() if stage is None or i["stage"]==stage),
+                       key=lambda i:(i["stage"]!="pending",i["due_window"] if i["stage"]=="pending" else -i["due_window"],i["dispatch"]))
+        page=ordered[offset:offset+limit]
+        for item in page:
+            if item["receipt"]:
+                envelope={**item,"dispatch_id":item["dispatch"]}
+                item["seen"]=sim.journal.observation_receipt(item["to"],item["due_window"],1,envelope,sim._discarded)
+        return {"through":end,"ended":done,"pending":pending,"arrived":len(items)-pending,"total":len(ordered),
+                "items":page,"next":min(offset+limit,len(ordered)),
+                "routes":sim._perception.known_routes(actor,max(1,end))}

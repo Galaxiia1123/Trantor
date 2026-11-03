@@ -157,7 +157,7 @@ def _report_inputs(simulation):
              "message_delivered", "window_committed", "model_validation_error", "runtime_verification", "run_error",
              "run_status", "run_recovered", "provider_attempt"}
     if isinstance(simulation.config, RunConfig11):
-        kinds.update({"settlement_rejected","settlement_resume_requested","experiment_forked","decision_deferred","external_event"})
+        kinds.update({"settlement_rejected","settlement_resume_requested","experiment_forked","decision_deferred","external_event","message_dispatched"})
     snapshot, events = simulation.report_snapshot(kinds)
     discarded = {eid for event in events if event["kind"] == "run_recovered" for eid in event["data"].get("discarded_event_ids", [])}
     # Remove duplicated transport prompts from report input, not from the audit
@@ -285,7 +285,7 @@ def generate_report(simulation: Simulation, gateway=None, progress=None, *, max_
                             else:
                                 problems.append(where + "缺少能核对所引材料的开局或准备记录")
                     snapshot_source = any(sources[sid].simulation_ref for sid in claim.source_ids) and any(e["kind"] == "run_created" for e in records)
-                    if claim.basis == "simulation" and not snapshot_source and not any(e["kind"] in {"window_committed","expression","observation","message_delivered","external_event"} and e["window"] <= cutoff_window for e in records):
+                    if claim.basis == "simulation" and not snapshot_source and not any(e["kind"] in {"window_committed","expression","observation","message_dispatched","message_delivered","external_event"} and e["window"] <= cutoff_window for e in records):
                         problems.append(where + "：模拟事件结论缺少已提交窗口内的证据。字段结果应引用提交 " + "、".join(commit_refs[-6:]) + "。若实际讨论请求、错误或完成状态，改用 method；若讨论局限，改用 interpretation")
                     if claim.basis == "source" and any(sources[sid].simulation_ref for sid in claim.source_ids):
                         problems.append(where + "的派生项目状态快照必须标注为模拟来源")

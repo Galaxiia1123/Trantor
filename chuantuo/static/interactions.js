@@ -74,7 +74,7 @@ function openConversation(run,one,two,start,end) {
     summary.textContent=windowName(start)+"至"+windowName(end)+" · "+result.total+" 条匹配的定向投递";
     for(const message of result.items) {
       const card=h("article",null,"conversation-entry");
-      card.append(h("small",windowName(message.window)+" · 第 "+message.round+" 轮","quiet"),
+      card.append(h("small",windowName(message.window)+" · 第 "+message.round+" 轮发出"+(message.dispatch ? "　→　"+windowName(message.arrived_window)+"窗首送达" : ""),"quiet"),
         h("h3",names[message.from]+" → "+names[message.to]),h("p",message.text));
       const actions=h("div",null,"actions");
       actions.append(button("发送时的决策现场",()=>openActorContext({id:message.from,name:names[message.from]},message.window,message.round,false,run),"link"),

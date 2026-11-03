@@ -13,7 +13,7 @@ from .engine import Simulation, encode
 from pydantic import Field, model_validator
 
 from .models import protect_credentials
-from .schema import Identifier, Provenance, Record, RunConfig11, Scenario11, ScheduledValue, Source, StateField, load_scenario
+from .schema import Identifier, Provenance, Record, RouteTiming, RunConfig11, Scenario11, ScheduledValue, Source, StateField, load_scenario
 
 
 def boundary(simulation, window=None):
@@ -137,9 +137,10 @@ def compare(left, right, left_window=None, right_window=None):
 class ExperimentRequest(Record):
     window: int = Field(ge=0)
     through: int = Field(ge=1)
-    kind: Literal["condition","field","repeat"] = "condition"
+    kind: Literal["condition","field","transit","repeat"] = "condition"
     condition: str = Field(default="", max_length=1600)
     assignment: ScheduledValue | None = None
+    route: RouteTiming | None = None
     audience: Literal["public", "readers", "world"] = "world"
     readers: list[Identifier] = Field(default_factory=list)
 
@@ -151,6 +152,10 @@ class ExperimentRequest(Record):
             raise ValueError("改变条件时请填写具体情境，原样重跑时请留空")
         if (self.kind=="field")!=(self.assignment is not None):
             raise ValueError("字段实验只能选择一个已定义的字段和目标值")
+        if (self.kind=="transit")!=(self.route is not None):
+            raise ValueError("线路实验需要一个发送方、一个收件方和送达时间")
+        if self.kind=="transit" and (self.audience!="world" or self.condition.strip()):
+            raise ValueError("线路实验只改变指定方向的通信时效，时效由通信双方知晓")
         if (self.audience == "readers") != bool(self.readers) or len(set(self.readers)) != len(self.readers):
             raise ValueError("请选择实际获知条件的主体")
         if self.kind == "repeat" and self.audience != "world":
@@ -185,6 +190,19 @@ def prepare_experiment(parent, spec):
         if not condition:
             value="未知" if change.value is None else ("是" if change.value else "否") if isinstance(change.value,bool) else str(change.value)+(f.unit or "")
             condition=f"{actor.name}的{f.label or f.id}在第 {spec.window+1} 窗末设为{value}"
+    elif spec.kind=="transit":
+        r=spec.route
+        names={a.id:a.name for a in parent._scenario.entities}
+        if not {r.source,r.target}<=names.keys() or r.source==r.target:
+            raise ValueError("请选择不同的发送方和收件方")
+        start=spec.window+1
+        if r.transit_windows==parent._perception.transit(r.source,r.target,start):
+            raise ValueError("指定方向原本就是这个时效，可选择原样重跑")
+        scene["mail_routes"]=[old for old in scene["mail_routes"] if (old["source"],old["target"],old["active_from"])!=(r.source,r.target,start)]
+        scene["mail_routes"].append({**r.model_dump(),"active_from":start,
+            "provenance":{"kind":"user","explanation":"操作者在对照实验中指定新发件的送达时效。"}})
+        timing=f"发出后第 {r.transit_windows} 窗的窗首送达" if r.transit_windows else "发出当轮结束时送达"
+        condition=f"{names[r.source]}发给{names[r.target]}的新消息，{timing}"
     elif condition:
         scene["rules"].append({"text":condition, "active_from":spec.window + 1,
             "visibility":{"public":spec.audience == "public","readers":spec.readers},
@@ -283,7 +301,7 @@ def outcome_groups(parent, catalog, actor_id=None, field_id=None):
         spec = row.get("experiment")
         if not spec or spec["parent_id"] != parent.run_id:
             continue
-        key = (spec["parent_event"],spec["state_sha256"],spec["through"],spec["kind"],spec["condition"],spec["audience"],tuple(sorted(spec["readers"])),encode(spec.get("assignment")))
+        key = (spec["parent_event"],spec["state_sha256"],spec["through"],spec["kind"],spec["condition"],spec["audience"],tuple(sorted(spec["readers"])),encode(spec.get("assignment")),encode(spec.get("route")))
         if key not in groups:
             original = boundary(parent,spec["through"])
             groups[key] = {"spec":spec,"baseline":original["state"][selected["actor"]][selected["field"]] if selected else None,

@@ -13,7 +13,7 @@ from .pacing import ReviewPlan, revised_deadlines
 def scheduled_reviews(state, receipts):
     rows={}
     for event in receipts:
-        for effect in event["data"]["assignments"]:
+        for effect in event["data"].get("assignments",()):
             owner,field=effect["entity_id"],effect["field_id"]
             rows[owner,field]=FieldReview(entity_id=owner,field_id=field,before=state[owner][field],after=effect["value"],
                 reason="按本窗外部事件的预定值结算："+event["data"]["text"],event_ids=[event["id"]])
@@ -49,6 +49,7 @@ def settled_state(scenario, state, proposal, action_ids, action_owners=None, rec
     limits = scenario.delivery_limits() if isinstance(scenario,Scenario11) else {}
     forced=scheduled_reviews(state,receipts)
     event_ids={event["id"] for event in receipts}
+    arrivals={e["id"] for e in receipts if e.get("kind")=="message_delivered"}
     changes = []
     for key, review in reviews.items():
         actor_id, field_id = key
@@ -65,9 +66,10 @@ def settled_state(scenario, state, proposal, action_ids, action_owners=None, rec
             if any(not readers <= set(allowed) for allowed in message_scope(review.after,limits).values()):
                 raise ValueError(f"字段 {actor_id}.{field_id} 的新值含有超出该字段读者范围的保密短语")
         if not set(review.action_ids) <= action_ids:
-            raise ValueError("结算引用了本窗口之外的行动")
+            invalid=sorted(set(review.action_ids)-action_ids)
+            raise ValueError(f"字段 {actor_id}.{field_id} 的 action_ids 含本窗之外的行动 {', '.join(invalid)}。只能选本窗行动；跨窗到件用本窗送达凭据计入 event_ids")
         if not set(review.event_ids)<=event_ids:
-            raise ValueError("结算引用了未在本窗口发生的外部事件")
+            raise ValueError("结算引用了未在本窗口发生的外部事件或送达记录")
         if key in forced and review!=forced[key]:
             raise ValueError(f"字段 {actor_id}.{field_id} 与本窗明确的外部设定不符")
         for ref in review.influence_refs:
@@ -76,18 +78,19 @@ def settled_state(scenario, state, proposal, action_ids, action_owners=None, rec
                 allowed = sorted(a for a,b in edges if b == actor_id)
                 choices = "允许的源主体只有 " + "、".join(allowed) if allowed else "该字段所属主体没有登记入边"
                 raise ValueError(f"{location} 不匹配开局的有向边。{choices}。保持原值或没有可核对的直接作用时请返回 influence_refs=[]")
+            if not action_owners or any(action_owners.get(eid) != ref.source for eid in ref.action_ids):
+                valid=[eid for eid,owner in (action_owners or {}).items() if owner==ref.source]
+                raise ValueError(f"{location} 只可引用源主体 {ref.source} 本窗的行动 {', '.join(valid) or '（无）'}。早先寄件在本窗到达时请引用本窗到件的 event_ids；没有可核对的直接作用就移除该 influence_ref")
             missing = sorted(set(ref.action_ids) - set(review.action_ids))
             if missing:
                 raise ValueError(f"{location} 的 {', '.join(missing)} 未列入同一字段的 action_ids。若确有影响，同时在该字段列出这些行动；无直接作用则移除这条 influence_refs")
-            if not action_owners or any(action_owners.get(eid) != ref.source for eid in ref.action_ids):
-                raise ValueError(f"{location} 只可引用源主体 {ref.source} 在本窗口亲自发出的行动")
         if before != review.after:
-            if not review.action_ids and key not in forced:
+            if not review.action_ids and key not in forced and not arrivals.intersection(review.event_ids):
                 raise ValueError("状态变更必须关联窗口行动")
             next_state[actor_id][field_id] = review.after
             changes.append(review.model_dump(mode="json"))
     if any(not set(item.action_ids) <= action_ids for item in proposal.consequences):
-        raise ValueError("客观后果引用不存在的行动")
+        raise ValueError("客观后果引用不存在的行动。consequences.action_ids 只能包含本窗口的行动，已到达的旧信应引用本窗送达凭据 event_ids")
     if any(not set(item.event_ids)<=event_ids for item in proposal.consequences):
         raise ValueError("客观后果引用了未在本窗口发生的外部事件")
     return next_state, changes
@@ -113,7 +116,7 @@ def verify_commits(scenario, config, events):
             last_commit_index = index
         elif e["kind"] == "run_recovered":
             candidates = {prior["id"] for prior in events[last_commit_index + 1:index]
-                          if prior["kind"] in {"observation","expression","decision_deferred","external_event","message_delivered","model_input","model_output","model_validation_error","model_failure"}}
+                          if prior["kind"] in {"observation","expression","decision_deferred","external_event","message_dispatched","message_delivered","model_input","model_output","model_validation_error","model_failure"}}
             dropped = set(e["data"]["discarded_event_ids"])
             if not dropped <= candidates or discarded & dropped:
                 raise ValueError(f"恢复记录 {e['id']} 引用了当前未提交尝试之外的事件")
@@ -121,7 +124,10 @@ def verify_commits(scenario, config, events):
     schedule = Counter()
     observations = Counter()
     expected_messages = Counter()
-    deliveries = Counter()
+    outbound = Counter()
+    in_transit, action_turns = {}, {}
+    dispatched_count = committed_transit = 0
+    arrivals = []
     action_ids = set()
     action_owners = {}
     inboxes = {owner: [] for owner in actors}
@@ -135,7 +141,7 @@ def verify_commits(scenario, config, events):
         if event["id"] in discarded:
             continue
         kind, data = event["kind"], event["data"]
-        if kind not in {"expression","decision_deferred","external_event","observation","message_delivered","window_committed"}:
+        if kind not in {"expression","decision_deferred","external_event","observation","message_dispatched","message_delivered","window_committed"}:
             continue
         if event["window"] != last_window + 1:
             raise ValueError(f"事件 {event['id']} 的窗口与提交边界不一致")
@@ -147,6 +153,16 @@ def verify_commits(scenario, config, events):
             continue
         if len(receipts)!=len(scheduled):
             raise ValueError("主体观察或窗口提交之前缺少预定的外部事件")
+        if kind=="message_delivered" and "dispatch_id" in data:
+            original=in_transit.pop(data["dispatch_id"],None)
+            if (not original or original["data"]["due_window"]!=event["window"] or observations
+                    or not _same(data,{**original["data"],"dispatch_id":original["id"]})):
+                raise ValueError("到件与原始发件、预定到达时点或收件内容不符")
+            arrivals.append(event)
+            inboxes[data["to"]].append(data)
+            continue
+        if kind=="observation" and not observations and any(e["data"]["due_window"]<=event["window"] for e in in_transit.values()):
+            raise ValueError("开始本窗观察前仍有到期未投递的消息")
         if kind in {"expression","decision_deferred"}:
             owner = data["actor_id"]
             if owner not in actors or not 1 <= data["round"] <= config.rounds_per_window:
@@ -180,19 +196,30 @@ def verify_commits(scenario, config, events):
                 else: plans.pop(owner,None)
             action_ids.add(event["id"])
             action_owners[event["id"]] = owner
+            action_turns[event["id"]]=data["round"]
             for message in data["messages"]:
                 for recipient in set(message["recipients"]):
                     if recipient not in actors:
                         raise ValueError("表达包含不存在的收件人")
                     expected_messages[event["id"], owner, recipient, message["text"]] += 1
-        elif kind == "message_delivered":
+        elif kind in {"message_delivered","message_dispatched"}:
             key = data["action_id"], data["from"], data["to"], data["text"]
-            if deliveries[key] >= expected_messages[key]:
+            if outbound[key] >= expected_messages[key]:
                 raise ValueError(f"投递 {event['id']} 与该表达的收件人或内容不符")
             if perception and data.get("sharing",{}) != message_scope(data["text"],perception.delivery_limits):
                 raise ValueError(f"投递 {event['id']} 的通信权限记录不符")
-            deliveries[key] += 1
-            inboxes[data["to"]].append(data)
+            delay=perception.transit(data["from"],data["to"],event["window"]) if perception else 0
+            if bool(delay)!=(kind=="message_dispatched"):
+                raise ValueError("这条消息没有按发送时生效的线路时效处理")
+            outbound[key] += 1
+            if delay:
+                if (data.get("sent_window")!=event["window"] or data.get("sent_round")!=action_turns[data["action_id"]]
+                        or data.get("due_window")!=event["window"]+delay):
+                    raise ValueError("在途消息的发件时间或预定到达时间不符")
+                in_transit[event["id"]]=event
+                dispatched_count+=1
+            else:
+                inboxes[data["to"]].append(data)
         elif kind == "observation":
             viewer, visible = data["actor_id"], data["visible"]
             if viewer not in actors or visible["self"]["id"] != viewer:
@@ -223,11 +250,11 @@ def verify_commits(scenario, config, events):
             inboxes[viewer] = []
         else:
             if (event["window"] > config.windows or len(schedule) != expected_actions or any(n != 1 for n in schedule.values())
-                    or observations != schedule or deliveries != expected_messages
+                    or observations != schedule or outbound != expected_messages
                     or data.get("deferred_reviews",0)!=sum(schedule.values())-len(action_ids)):
                 raise ValueError(f"窗口 {event['window']} 的主体轮次或投递不完整")
             proposal = Settlement.model_validate({k: data[k] for k in ("reviews","consequences","suggested_fields")})
-            next_state, changes = settled_state(scenario,state,proposal,action_ids,action_owners,receipts)
+            next_state, changes = settled_state(scenario,state,proposal,action_ids,action_owners,receipts+arrivals)
             recorded = [FieldReview.model_validate(c).model_dump(mode="json") for c in data["changes"]]
             if not _same(next_state, data["state"]) or not _same(changes, recorded):
                 raise ValueError(f"提交 {event['id']} 与字段审查重放结果不符")
@@ -236,21 +263,25 @@ def verify_commits(scenario, config, events):
             last_feedback = {"window":last_window,"commit_id":event["id"],"changes":changes}
             total_actions += len(action_ids)
             total_deferred += sum(schedule.values())-len(action_ids)
-            total_messages += sum(deliveries.values())
+            total_messages += sum(outbound.values())-dispatched_count+len(arrivals)
+            dispatched_count=0
+            committed_transit=len(in_transit)
             schedule.clear()
             observations.clear()
             observed_per_round.clear()
             acted_per_round.clear()
             expected_messages.clear()
-            deliveries.clear()
+            outbound.clear()
+            action_turns.clear()
+            arrivals=[]
             action_ids.clear()
             action_owners.clear()
             receipts=[]
     outputs = verify_references(events)
     complete_pending = (len(schedule) == expected_actions and all(n == 1 for n in schedule.values())
-                        and observations == schedule and deliveries == expected_messages)
+                        and observations == schedule and outbound == expected_messages)
     return {"committed_windows": last_window, "verified_expressions": total_actions, "verified_deferred":total_deferred,"verified_deliveries": total_messages,
-            "pending_actions_complete":complete_pending,
+            "pending_actions_complete":complete_pending,"in_transit_at_boundary":committed_transit,
             **outputs,
             "discarded_records": len(discarded), "uncommitted_expressions": len(action_ids), "state": state}
 
@@ -259,6 +290,8 @@ def actor_evidence(event, actor_id):
     data = event["data"]
     if event["kind"] in {"expression","decision_deferred","observation"}:
         return data.get("actor_id") == actor_id
+    if event["kind"]=="message_dispatched":
+        return data.get("from")==actor_id
     return event["kind"] == "message_delivered" and data.get("to") == actor_id
 
 

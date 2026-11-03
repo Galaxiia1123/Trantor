@@ -58,7 +58,8 @@ class Studies:
         with self.lock:
             if self.path(study_id).exists():
                 existing = self.read(study_id)
-                if existing["parent_id"] != parent.run_id or existing["request"] != payload:
+                prior=StudyRequest.model_validate(existing["request"]).model_dump(mode="json")
+                if existing["parent_id"] != parent.run_id or prior != payload:
                     raise VersionConflict("这个实验组编号已经用于其他条件")
                 return self.view(study_id)
             self.check_parent(parent)

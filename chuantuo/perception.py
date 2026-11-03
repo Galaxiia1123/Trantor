@@ -44,6 +44,13 @@ def state_sentences(visible_fields):
 def decision_view(observation):
     view = {k: v for k, v in observation.items() if k not in {"visible_state", "roster_scope", "world_feedback"}}
     view["state"] = state_sentences(observation["visible_state"])
+    if routes:=observation.get("mail_routes"):
+        window=observation["window"]
+        view["mail_timing"]="下面是本窗生效的线路时效，旧材料与来信中的预计日期只代表当时的说法。"
+        view["mail_routes"]=[{**r,"本窗发件的送达时点":f"第 {window+r['transit_windows']} 窗开始" if r["transit_windows"] else "本轮结束"} for r in routes]
+    if any(m.get("dispatch_id") for m in observation["messages"]):
+        view["messages"]=[{**m,"到件记录":f"第 {m['due_window']} 窗首已实际进入你的收件箱；text 为收到的原信。"}
+                          if m.get("dispatch_id") else m for m in observation["messages"]]
     if feedback := observation.get("world_feedback"):
         # Current values are already in the profile. Show which changed and when.
         view["changes"] = {"window": feedback["window"], "record": feedback["commit_id"],
@@ -57,6 +64,9 @@ class Perception:
         self.depths = depths
         self.config = config
         self.delivery_limits = scenario.delivery_limits() if isinstance(scenario,Scenario11) else {}
+        self.mail_routes = defaultdict(list)
+        for route in sorted(getattr(scenario,"mail_routes",()),key=lambda r:r.active_from):
+            self.mail_routes[route.source,route.target].append(route)
         self.actors = {actor.id: actor for actor in scenario.entities}
         self.calendar=defaultdict(list)
         for event in getattr(scenario,"scheduled_events",()):
@@ -82,6 +92,20 @@ class Perception:
                 self.edges[viewer].append(item)
         self.public_fields, self.granted_fields = self._index("fields")
         self.public_materials, self.granted_materials = self._index("materials")
+
+    def transit(self, source, target, window):
+        routes=self.mail_routes.get((source,target),())
+        return next((r.transit_windows for r in reversed(routes) if r.active_from<=window),0)
+
+    def known_routes(self, actor_id, window):
+        result=[]
+        for (source,target),versions in self.mail_routes.items():
+            if actor_id is not None and actor_id not in (source,target):
+                continue
+            route=next((r for r in reversed(versions) if r.active_from<=window),None)
+            if route:
+                result.append({"source":source,"target":target,"transit_windows":route.transit_windows})
+        return result
 
     def _index(self, attribute):
         public, granted = [], defaultdict(list)
@@ -112,8 +136,10 @@ class Perception:
             if scope := message_scope(material.text,self.delivery_limits):
                 info["sharing"] = scope
             materials.append(info)
+        routes = self.known_routes(actor_id,window)
         if self.config.roster_policy == "neighbors":
             included = self.contacts[actor_id] | fields.keys() | {m["owner_id"] for m in materials} | {m["from"] for m in inbox}
+            included.update(k for r in routes for k in (r["source"],r["target"]))
             systems = set()
             for member in tuple(included):
                 current = self.actors[member]
@@ -135,6 +161,9 @@ class Perception:
             "roster":[{"id":a.id,"name":a.name,"subsystem_id":a.subsystem_id, **({"parent_id":a.parent_id} if a.parent_id else {})} for a in roster],
             "subsystems":[s.model_dump(exclude={"interaction"}) if s.owner_id != actor_id and actor.subsystem_id != s.id else s.model_dump() for s in subsystems],
             "visible_state":fields, "visible_materials":materials, "influences":[dict(e) for e in self.edges[actor_id]], "messages":deepcopy(inbox)}
+        if routes:
+            result["mail_routes"]=routes
+            result["mail_timing"]="定向线路的 transit_windows 是从发出至到达的窗口数。大于零时在到达窗口的第一轮前交付；零表示本轮结束后交付。"
         if self.config.roster_policy == "neighbors":
             result["roster_scope"] = {"mode":"neighbors","total":len(self.actors),"included":len(roster),
                 "note":"此表仅列与本主体有关的层级、直接关系、可见资料和收件来源。其他已知主体仍可作为定向收件人。"}
