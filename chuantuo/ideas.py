@@ -28,10 +28,10 @@ def _grounded_quote(quote,scene):
     return any(p.number==quote.page and quote.quote in source.text[p.text_start:p.text_end] for p in source.pages)
 
 
-def _explicit_date_question(scene,config,earliest):
+def _explicit_date_question(scene,config,earliest,sources):
     move=re.compile(r"(?:从|由|原定)(?:在)?\s*第?\s*(\d{1,6})\s*窗(?:口)?\s*(?:推迟|延后|延迟|提前|挪|移|调整|改)(?:到|至|为)\s*第?\s*(\d{1,6})\s*窗")
     ordinary={"如果","同一","一次","原定","计划","安排","事件","日期","发生","窗口","提前","推迟","这个","这项","时候"}
-    for source in scene.sources:
+    for source in sources:
         if source.public_reference or source.simulation_ref:
             continue
         for match in re.finditer(r"(?:如果|假如|若)[^。？！!?\n]{1,500}[？?]?",source.text):
@@ -52,10 +52,10 @@ def _explicit_date_question(scene,config,earliest):
                                  "event_move":{"event_id":matched[0].id,"new_window":new}},"watch":watch}
 
 
-def _explicit_levels(scene,config,earliest):
+def _explicit_levels(scene,config,earliest,sources,default_split):
     fields=[(a,f) for a in scene.entities for f in a.fields]
     number=r"[-+]?\d+(?:\.\d+)?"
-    for source in scene.sources:
+    for source in sources:
         if source.public_reference or source.simulation_ref:continue
         for sentence in re.findall(r"[^。！？!?\n]{1,450}[。！？!?]?",source.text):
             mark=re.search(r"(?:分别|逐档)(?:设为|设置为|设成|取|测试|试试|试)\s*",sentence)
@@ -73,7 +73,7 @@ def _explicit_levels(scene,config,earliest):
             numbers=[float(v) if "." in v else int(v) for v in re.findall(number,values.group())]
             start=re.search(r"第\s*(\d+)\s*窗(?:口)?(?:末|结束时)",sentence[:mark.start()])
             stop=re.search(r"(?:比较|观察|到|至)[^。！？]{0,12}?第\s*(\d+)\s*窗",rest)
-            split=int(start[1])-1 if start else earliest
+            split=int(start[1])-1 if start else default_split
             if split<earliest:continue
             watch=[(a,f) for a,f in fields if (a.id,f.id)!=(actor.id,field.id) and (f.label or f.id) in rest]
             yield {"question":sentence.strip()[:160],"reason":"文稿列出了同一字段的多个取值。每档在同一窗末设置，默认只在结算后通过字段的可见范围体现。可编辑通知对象和终点。",
@@ -82,6 +82,10 @@ def _explicit_levels(scene,config,earliest):
                                  "assignment":{"entity_id":actor.id,"field_id":field.id,"value":numbers[0]}},
                    "additional_values":numbers[1:],
                    "watch":{"actor_id":watch[0][0].id,"field_id":watch[0][1].id,"title":watch[0][1].label or watch[0][1].id} if len(watch)==1 else None}
+
+
+def explicit_ideas(scene,config,earliest,sources,default_split):
+    return chain(_explicit_date_question(scene,config,earliest,sources),_explicit_levels(scene,config,earliest,sources,default_split))
 
 
 def useful_ideas(scene,config,proposals=(),watches=(),*,earliest=0,reviewed=False):
@@ -125,7 +129,7 @@ def useful_ideas(scene,config,proposals=(),watches=(),*,earliest=0,reviewed=Fals
         if origin=="material" and not grounded:return
         data.update(quote=data["quote"] if grounded else None,origin=origin,condition=condition)
         ideas.append(data)
-    for item in chain(_explicit_date_question(scene,config,earliest),_explicit_levels(scene,config,earliest)):
+    for item in explicit_ideas(scene,config,earliest,scene.sources,earliest):
         add(item,"material")
         if len(ideas)>=2:break
     for raw in proposals:

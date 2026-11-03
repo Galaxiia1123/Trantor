@@ -44,6 +44,7 @@ from .observatory import FieldWatch, observe_field, observation_notes, ongoing_m
 from .interactions import interaction_map, conversation, dispatch_ledger
 from .studies import Studies, StudyRequest, study_notes
 from .readings import ReadingRequest, read_field
+from .asking import PlanQuestion, plan_question
 from .story import field_reason, window_strip
 from .documents import document_history
 from .ideas import useful_ideas
@@ -425,7 +426,7 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
             original,_ = materials.load(job_id)
             return jobs.reconcile(job_id,{"source":original.model_dump(mode="json")})
         rid = context.get("run_id")
-        if not rid or kind not in {"launch","experiment","report","question","field_reading"}:
+        if not rid or kind not in {"launch","experiment","report","question","field_reading","experiment_plan"}:
             return receipt
         try:
             sim = get_run(rid)
@@ -433,7 +434,7 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
             return receipt
         if kind in {"launch","experiment"} and sim.journal.event("e000001")["data"].get("launch_job_id")==job_id:
             return jobs.reconcile(job_id,sim.snapshot())
-        record_kind = {"report":"report_created","field_reading":"analysis_reading"}.get(kind,"analysis_answer")
+        record_kind = {"report":"report_created","field_reading":"analysis_reading","experiment_plan":"analysis_plan"}.get(kind,"analysis_answer")
         for e in sim.journal.snapshot({record_kind}):
             if e["data"].get("job_id")==job_id:
                 result = saved_report(rid,e["id"]) if kind=="report" else {**e["data"],"record_id":e["id"]}
@@ -752,6 +753,17 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
             return alternate.snapshot()
         spec=request.model_dump(mode="json",exclude={name for name in ("route","event_move","extension_limit") if getattr(request,name) is None})
         return jobs.submit(job_id,"experiment",{"run_id":run_id,"parent_id":parent_id,"spec":spec},launch)
+
+    @app.post("/api/runs/{run_id}/jobs/{job_id}/experiment-plan")
+    def plan_for_question(run_id:str,job_id:str,request:PlanQuestion):
+        sim=get_run(run_id);protect_credentials(request.question,sim.config.catalog.values())
+        return jobs.submit(job_id,"experiment_plan",{"run_id":run_id,**request.model_dump()},
+                           lambda progress:plan_question(sim,request,progress,job_id=job_id,before_model=lambda:check_experiment_parent(sim)))
+
+    @app.get("/api/runs/{run_id}/experiment-plans")
+    def asked_experiments(run_id:str):
+        rows=get_run(run_id).journal.snapshot({"analysis_plan"})
+        return [{"record_id":e["id"],**e["data"]} for e in reversed(rows[-20:])]
 
     @app.get("/api/runs/{run_id}/ideas")
     def study_ideas(run_id:str):

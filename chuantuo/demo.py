@@ -95,7 +95,7 @@ def respond(messages: list[dict[str, str]]) -> str:
         engineer_ids = [a["id"] for a in actions if a["actor_id"] == "engineer"
                         and any("city" in msg["recipients"] for msg in a.get("messages",[]))]
         port_example = {"city","engineer","port","company","community"} <= payload["state"].keys()
-        edge = next((e for e in payload["scenario"]["influences"] if e["source"]=="engineer" and e["target"]=="city"),None)
+        edge = next((e for e in payload["scenario"].get("influences",()) if e["source"]=="engineer" and e["target"]=="city" and type(e.get("weight")) in (int,float)),None)
         delta = ((Decimal("6.25") * Decimal(str(edge["weight"]))).quantize(Decimal(".01"),rounding=ROUND_HALF_UP)
                  if port_example and edge and engineer_ids else Decimal(0))
         reviews = []

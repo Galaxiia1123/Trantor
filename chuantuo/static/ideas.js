@@ -38,14 +38,14 @@ function eventShiftPicker(run,seed=null) {
 }
 
 function ideaPreview(idea) {
-  const card=h("article",null,"comparison-idea"),origin={material:"文稿中的对照问题",calendar:"依据已设日历",route:"依据线路时效",model:"场景模型建议"};
+  const card=h("article",null,"comparison-idea"),origin={material:"文稿中的对照问题",calendar:"依据已设日历",route:"依据线路时效",model:"模型拟定的方案",observer:"从所提问题直接识别"};
   card.append(h("small",origin[idea.origin] || "待试设想","eyebrow"),h("h3",idea.question));
   if(idea.reason)card.append(h("p",idea.reason));
   if(idea.condition && idea.condition!==idea.reason)card.append(h("small",idea.condition,"hint"));
   const e=idea.experiment;
   if(idea.additional_values?.length)card.append(h("p","研究取值　"+[e.assignment.value,...idea.additional_values].join(" / ")));
   card.append(h("small","从"+windowName(e.window)+"至"+windowName(e.through)+" · "+(idea.watch?.title || "比较过程和终点状态"),"quiet"));
-  if(idea.quote)card.append(disclosure("展开材料原句",h("p","“"+idea.quote.quote+"”","hint")));
+  if(idea.quote)card.append(disclosure(idea.quote.source_id==="observer_question" ? "展开提问原句" : "展开材料原句",h("p","“"+idea.quote.quote+"”","hint")));
   return card;
 }
 

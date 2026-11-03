@@ -230,7 +230,11 @@ function showExperimentTools(view) {
     h("h2",meta ? (meta.condition || "同一开局，再走一次") : "如果有一个条件不同呢？"));
   bar.append(text);
   const choices=h("div",null,"actions");
-  if (available) choices.append(button(meta ? "再开一条路线" : "试一个条件",letter ? openLetterLab : post ? openPostLab : ()=>experimentForm(view),"experiment-start"));
+  if (available) {
+    if(!letter && !post)choices.append(button("问一个如果",()=>askExperiment(view),"experiment-start"));
+    choices.append(button(meta ? "再开一条路线" : "试一个条件",letter ? openLetterLab : post ? openPostLab : ()=>experimentForm(view),letter||post ? "experiment-start" : "link"));
+    if(letter || post)choices.append(button("问一个如果",()=>askExperiment(view),"link"));
+  }
   choices.append(button("已有路线",()=>experimentShelf(meta?.parent_id || activeRun),"link")); bar.append(choices);
   root.append(bar);
   if (!meta) {

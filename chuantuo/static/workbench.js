@@ -1090,7 +1090,7 @@ safe(async () => {
     else if (pending.kind === "prepare") {
       if (pending.project && project?.id !== pending.project) openProject(await api("/api/projects/" + pending.project));
       await acceptedDraft(result);
-    } else if (["report","question","field_reading"].includes(pending.kind)) { location.hash = "run/" + pending.run; notice("结果已保存。"); }
+    } else if (["report","question","field_reading","experiment_plan"].includes(pending.kind)) { location.hash = "run/" + pending.run; notice("结果已保存。"); }
     keep("job", null);
   } catch (err) { if (!(err instanceof TypeError)) keep("job", null); throw err; }
   finally { busy = false; $("prepare").disabled = false; }

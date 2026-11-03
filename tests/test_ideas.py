@@ -6,6 +6,8 @@ from chuantuo.ideas import useful_ideas
 from chuantuo.perception import Perception, decision_view
 from chuantuo.schema import RunConfig11, Scenario11, Source
 from chuantuo.source_windows import apply_meaning_tables
+from chuantuo.asking import PlanQuestion, plan_question
+from chuantuo.engine import Simulation
 
 
 def test_source_question_moves_a_future_event_without_disclosing_the_private_calendar():
@@ -63,3 +65,18 @@ def test_value_meanings_keep_the_source_quote_and_follow_field_visibility():
     assert "负责人实际登记" not in str(decision_view(p.observe("b",s.initial_state(),[],1,1,None)))
     scene["sources"].append({"id":"other","name":"新文稿","text":columns+line.replace("负责人实际登记即可。","须等首场开课。")})
     conflict={};apply_meaning_tables(scene,conflict);assert len(conflict["blocking_questions"])==1
+
+
+def test_observer_question_checks_units_limits_and_named_readers_without_touching_the_run(tmp_path):
+    s=Scenario11.model_validate({"title":"排课","background":"两方协商。","domains":["排课"],"entities":[
+        {"id":"room","name":"社区书房","identity":"排课","fields":[{"id":"seats","label":"席位","kind":"number","value":8,
+        "unit":"个","domain":"排课","constraints":{"maximum":20}}]},{"id":"teacher","name":"木刻教师","identity":"授课"}]})
+    cfg=RunConfig11.model_validate({"model":{"provider":"demo","model":"fixture"},"windows":2,"rounds_per_window":1})
+    sim=Simulation(s,cfg,directory=tmp_path);assert sim.run()["status"]=="completed";before=sim.snapshot()
+    def ask(text):return plan_question(sim,PlanQuestion(question=text,default_split=0))
+    ok=ask("如果把席位改为16个，只通知社区书房。")
+    assert not ok["calls"] and ok["ideas"][0]["experiment"]["readers"]==["room"]
+    assert not ask("如果把席位改为30个。")["ideas"]
+    assert "单位" in ask("如果把席位改为16元。")["clarification"]
+    assert "主体名称" in ask("如果把席位改为16个，只通知那个人。")["clarification"]
+    assert sim.snapshot()["state"]==before["state"] and sim.snapshot()["model_calls"]==before["model_calls"]
