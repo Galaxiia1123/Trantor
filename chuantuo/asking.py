@@ -27,6 +27,7 @@ PLANNER = """你协助观察者把一个新的“如果”问题变成可编辑�
 一次改变一个条件。数值实验用 field 和 assignment；同一数值字段的其他档位用 additional_values。具体事件改期用 event_time；
 通信时效用 transit。自由条件用 condition 并明确起初的知情范围。不要替主体预先决定同意、拒绝或结果。
 window 是保留到的最后一个已结算窗口，through 是观察终点，必须在给出的范围内。没有明确时点时用 default_split。
+若文本条件只持续到某一窗，写 experiment.ends_window；through 是继续观察到哪一窗，两者可以不同。
 操作者已经选好了起点。文中的“下一窗”或与 window_duration 对应的“下一班次”等相对时间，就是 default_split 后的新窗口，并非需要目录提供的外部事件。能据此拟定时直接给方案。
 按用户明确指定的数值、时点、方向和告知对象安排。资料不足以确定重要差别时用 clarification 集中提一个具体问题。
 可以附一个已定义字段的 watch，不能发明数据。只拟定方案，不运行模拟。不要把问题中的假设当成历史事实。返回 schema JSON。"""
@@ -75,6 +76,14 @@ def _requested_audience(question,actors):
         if len(matches)!=1:return None,"请写出所有最初应收到通知的主体名称，避免把这项条件告诉其他人。"
         readers.append(matches[0].id)
     return ("readers",list(dict.fromkeys(readers))),""
+
+
+def _temporary_period(q):
+    match=re.search(r"(?:仅|只|有效期|临时条件)(?:限|在|为|是|从|限于|有效于)*\s*第\s*(\d+)\s*(?:窗(?:口)?\s*)?(?:起\s*)?(?:至|到|[—–~])\s*第?\s*(\d+)\s*窗",q)
+    if match:return int(match[1]),int(match[2])
+    match=re.search(r"(?:仅|只)(?:在|限于)\s*第\s*(\d+)\s*窗(?:口)?(?:生效|有效|适用|开放|可用)",q)
+    if match:return int(match[1]),int(match[1])
+    return None
 
 
 def _catalog(sim,question,budget,split):
@@ -127,11 +136,20 @@ def plan_question(sim,request,progress=None,*,job_id=None,before_model=None):
     source=Source(id="observer_question",name="观察者刚提出的问题",text=q)
     raw=[];origin="observer";calls=0;output_id=None
     audience,clarification=_requested_audience(q,sim._scenario.entities)
+    period=_temporary_period(q)
     changes=re.findall(r"设为|设成|降到|降至|提高到|增加到|减少到|调整为|改为|改成",q)
     if len(changes)>1:clarification="一条对照路线会保留其他条件。你想先比较其中哪一项改动？"
     # A request about who knows the intervention must go through the audience-aware planner.
     if not clarification and (audience or not re.search(r"通知|告诉|告知|仅.{0,15}知道|只让|公开宣布|保密|隐瞒",q)):
         raw=list(explicit_ideas(sim._scenario,sim.config,earliest,[source],request.default_split))[:2]
+        quoted=re.search(r"(?:如果|假如|假设)\s*[“「‘]([^”」’\n]{2,500})[”」’]",q)
+        if not raw and period and quoted:
+            target=re.search(r"(?:比较|观察)(?:至|到)?\s*第\s*(\d+)\s*窗",q)
+            found=[(a,f) for a in sim._scenario.entities for f in a.fields if (f.label or f.id) in q[quoted.end():]]
+            raw=[{"question":q[:160],"reason":"采用问题引号内的临时条件及其有效期。",
+                  "experiment":{"kind":"condition","condition":quoted[1],"window":period[0]-1,"ends_window":period[1],
+                                "through":int(target[1]) if target else end},
+                  "watch":{"actor_id":found[0][0].id,"field_id":found[0][1].id} if len(found)==1 else None}]
         if not raw:raw,clarification=_single_value(sim,q,request.default_split,end)
     model=sim.config.model;method="direct"
     if not raw and not clarification and request.allow_model and model.provider!="demo":
@@ -158,6 +176,10 @@ def plan_question(sim,request,progress=None,*,job_id=None,before_model=None):
     for proposal in raw:
         try:
             idea=ComparisonIdea.model_validate(proposal);spec=idea.experiment
+            if period:
+                if spec.kind!="condition":raise ValueError("临时生效期适用于文本条件，字段赋值一经提交会保留。请明确想改变的是临时规则还是字段值")
+                spec=type(spec).model_validate({**spec.model_dump(),"window":period[0]-1,"ends_window":period[1]})
+                idea=idea.model_copy(update={"experiment":spec})
             if audience:
                 if spec.kind not in {"field","condition"}:raise ValueError("这项改动会沿用既有通知范围，请先选定要改变的是事件或线路，还是最初的知情对象")
                 spec=spec.model_copy(update={"audience":audience[0],"readers":audience[1]})

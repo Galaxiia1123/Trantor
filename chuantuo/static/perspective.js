@@ -89,6 +89,7 @@ async function perspectivePage(gen) {
   if(m.inbox_total>m.inbox.length)saw.append(button("浏览全部 "+m.inbox_total+" 封来信",()=>readLetters(run,actor,m,"inbox"),"link"));
   for(const change of m.changes)saw.append(h("p",change.owner+" · "+change.label+"　"+watchValue({value:change.before},change.unit)+" → "+watchValue({value:change.after},change.unit),"perspective-change"));
   for(const n of m.notices)saw.append(h("p","收到通知 · "+n,"perspective-change"));
+  for(const txt of m.ended || [])saw.append(h("p","本轮已到期 · "+txt,"perspective-change"));
   if(m.own_state)saw.append(disclosure("当时自己的处境",h("p",m.own_state)));
   if(m.holdings.length){
     const papers=h("div");

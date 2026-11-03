@@ -635,6 +635,16 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
                       offset:int=Query(default=0,ge=0),limit:int=Query(default=12,ge=1,le=40)):
         return field_reason(get_run(run_id),window,actor,field,offset,limit)
 
+    @app.get("/api/runs/{run_id}/timed-rules")
+    def timed_rules(run_id:str,window:int=Query(ge=0)):
+        sim=get_run(run_id)
+        with sim._lock:
+            latest=min(sim.config.windows,sim.window+1) if sim.status in {"ready","running","failed","interrupted"} else sim.window
+            if window>latest:raise ValueError("请选择已经到达的观察时点")
+            return [{"text":r.text,"start":r.active_from,"end":r.active_until,"visibility":r.visibility.model_dump(exclude_defaults=True),
+                     "status":"upcoming" if window<r.active_from else "expired" if window>r.active_until else "active"}
+                    for r in sim._scenario.rules if getattr(r,"active_until",None)]
+
     @app.get("/api/runs/{run_id}/calendar")
     def event_calendar(run_id:str):
         sim=get_run(run_id)
@@ -751,7 +761,7 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
             alternate = fork_run(parent,request,run_id,job_id)
             start(alternate)
             return alternate.snapshot()
-        spec=request.model_dump(mode="json",exclude={name for name in ("route","event_move","extension_limit") if getattr(request,name) is None})
+        spec=request.model_dump(mode="json",exclude={name for name in ("route","event_move","extension_limit","ends_window") if getattr(request,name) is None})
         return jobs.submit(job_id,"experiment",{"run_id":run_id,"parent_id":parent_id,"spec":spec},launch)
 
     @app.post("/api/runs/{run_id}/jobs/{job_id}/experiment-plan")

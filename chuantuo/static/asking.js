@@ -22,6 +22,7 @@ function askExperiment(view) {
       const card=ideaPreview(idea),e=idea.experiment;
       if(idea.watch_note)card.append(h("p",idea.watch_note,"hint"));
       const levels=1+(idea.additional_values||[]).length,estimate=levels*(e.through-e.window)*(view.actors.length*view.rounds_per_window+1);
+      if(e.ends_window)card.append(h("small","临时条件只在第 "+(e.window+1)+" 至 "+e.ends_window+" 窗有效。","quiet"));
       if(["field","condition"].includes(e.kind))card.append(h("small","窗口开始时　"+(e.audience==="public" ? "通知所有主体" : e.audience==="readers" ? "通知"+e.readers.map(a=>names[a] || a).join("、") : "仅世界系统知情")+
         (e.kind==="field" ? "，字段在窗末提交，之后按原可见范围呈现。" : "。"),"hint"));
       card.append(h("small",levels+" 档各跑一次，主体逐轮行动时约需 "+estimate+" 次基础调用。","quiet"),

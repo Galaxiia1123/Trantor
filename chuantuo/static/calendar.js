@@ -1,8 +1,8 @@
 "use strict";
 
 function eventAudience(event, actors) {
-  if (event.visibility.public) return "通知所有主体";
-  const names=(event.visibility.readers || []).map(id=>actors.find(a=>a.id===id)?.name || id);
+  if (event.visibility?.public) return "通知所有主体";
+  const names=(event.visibility?.readers || []).map(id=>actors.find(a=>a.id===id)?.name || id);
   return names.length ? "通知"+names.join("、") : "仅世界系统知情";
 }
 
@@ -29,7 +29,25 @@ function draftCalendar(scene) {
       try{await saveProject("移除外部事件");renderDraft();}catch(err){scene.scheduled_events=old;throw err;}
     },"link"));panel.append(card);
   }
-  panel.append(button("安排外部事件",()=>scheduleEvent(scene),"link"));return panel;
+  panel.append(button("安排外部事件",()=>scheduleEvent(scene),"link"));
+  for(const r of scene.rules.filter(r=>r.active_until))panel.append(h("p","第 "+(r.active_from||1)+" 至 "+r.active_until+" 窗 · "+r.text,"hint"));
+  if(scene.rules.length)panel.append(button("调整一条规则的有效期",()=>editRuleTerm(scene),"link"));return panel;
+}
+
+function editRuleTerm(scene){
+  const form=h("form",null,"experiment-form"),rule=h("select"),start=h("input"),end=h("input"),msg=h("p",null,"form-error");
+  const label=(text,input)=>{const l=h("label",text);l.append(input);form.append(l);};
+  scene.rules.forEach((r,i)=>rule.append(new Option(r.text.slice(0,100),i)));label("选择场景规则",rule);
+  start.type=end.type="number";start.min=end.min="1";start.required=true;end.placeholder="持续有效";
+  label("第一有效窗口",start);label("最后有效窗口（可留空）",end);const info=h("p",null,"hint");
+  function load(){const r=scene.rules[Number(rule.value)];start.value=r.active_from||1;end.value=r.active_until||"";end.min=start.value;info.textContent=eventAudience(r,scene.entities);}
+  rule.onchange=load;start.oninput=()=>{end.min=start.value||"1";};load();const go=h("button","保存有效期","primary");go.type="submit";
+  form.append(info,msg,go);form.onsubmit=async e=>{
+    e.preventDefault();if(go.disabled)return;go.disabled=true;const i=Number(rule.value),old=scene.rules[i];
+    scene.rules[i]={...old,active_from:Number(start.value),active_until:end.value ? Number(end.value) : null,
+      provenance:{...old.provenance,kind:"user",explanation:"操作者设定此规则的有效窗口。"}};
+    try{await saveProject("修改规则有效期");$("reading").close();renderDraft();}catch(ex){scene.rules[i]=old;msg.textContent=ex.message;}finally{go.disabled=false;}
+  };reading("规则的有效窗口",form);
 }
 
 function scheduledValuePicker(actors, optional) {
@@ -108,17 +126,25 @@ function scheduleEvent(scene) {
 }
 
 async function openRunCalendar(view) {
-  const run=activeRun,ticket=++readingRequest, rows=await api("/api/runs/"+run+"/calendar");
+  const run=activeRun,ticket=++readingRequest;
+  const [rows,terms]=await Promise.all([api("/api/runs/"+run+"/calendar"),view.timed_rule_count ?
+    api("/api/runs/"+run+"/timed-rules?window="+view.selected) : Promise.resolve([])]);
   if(run!==activeRun || ticket!==readingRequest)return;
   const body=h("div");
+  for(const rule of terms){
+    const card=h("article",null,"cohort");card.append(h("small","第 "+rule.start+" 至 "+rule.end+" 窗有效 · "+
+      ({upcoming:"尚未生效",active:"当窗有效",expired:"本窗已到期"}[rule.status]),"eyebrow"),h("p",rule.text),
+      h("small",eventAudience(rule,view.actors),"quiet"));body.append(card);
+  }
   for(const item of rows) {
     const card=eventCard(item.event,view.actors);
     card.append(h("small",({scheduled:"预定中",pending:"本窗已通知，尚未提交",committed:"已随窗口提交",beyond_run:"运行结束时尚未到预定日期"})[item.status],"quiet"));
     if(item.record)card.append(evidenceLinks([item.record],run));body.append(card);
   }
-  reading("外部事件日历",h("p","全局观察者可预览全部安排。主体只在指定窗口收到对自己可见的通知。","hint"),body);
+  reading(terms.length ? "条件与事件日历" : "外部事件日历",h("p","全局观察者可预览全部安排。主体按窗口和知情范围获得条件与通知。","hint"),body);
 }
 function entryText(period) {
+  if(period.closed_before_start)return "的转入期限在本场景开局前已结束";
   const first=period.first || 1;
   if(!period.last && first===1)return "各窗均可转入";
   return period.last ? "第 "+first+" 至 "+period.last+" 窗可转入" : "第 "+first+" 窗起可转入";

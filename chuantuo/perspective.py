@@ -57,7 +57,7 @@ def _rounds(sim, actor_id, through):
             changed = bool(feedback) and feedback["commit_id"] != last_feedback
             if feedback:
                 last_feedback = feedback["commit_id"]
-            news = bool(not turns or changed or visible["messages"] or visible.get("external_events"))
+            news = bool(not turns or changed or visible["messages"] or visible.get("external_events") or visible.get("ended_conditions"))
             turns.append((action, observation, changed, news))
     return turns
 
@@ -111,7 +111,8 @@ def _moment(item):
             "inbox":[_letter(m,"inbox",names,300) for m in inbox[:5]], "inbox_total":len(inbox),
             "outbox":[_letter(m,"outbox",names,300) for m in outbox[:5]], "outbox_total":len(outbox),
             "holdings":holdings, "changes":changes,
-            "notices":[e["text"] for e in visible.get("external_events",())]}
+            "notices":[e["text"] for e in visible.get("external_events",())],
+            "ended":[r["text"] for r in visible.get("ended_conditions",())]}
 
 
 def journey(sim, actor_id, window=None, turn=None, news_only=False, through=None):

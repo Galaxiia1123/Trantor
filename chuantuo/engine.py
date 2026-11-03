@@ -381,6 +381,14 @@ class Simulation:
                 "concordia_version": "2.4.0", "schedule_policy": "all actors observed each round; honor explicit review plans; deliver after barrier; settle once per window"
                 if getattr(config,"max_review_interval",0) else "all actors once per round; deliver after barrier; settle once per window"})
 
+    def _record_decision(self,actor,decision,event):
+        view=self._observations[actor]
+        ended=view.get("ended_conditions",())
+        observed=self.journal.observation_before(event,self._discarded)["id"] if ended else None
+        self.notebooks[actor].record(decision,event["id"],event["window"],view["messages"],self.config.recent_records,
+                                    view.get("external_events",()),((observed,item) for item in ended))
+        self._remember_plan(actor,decision,event["id"])
+
     def _remember_plan(self, actor, decision, record):
         due=(item["due_window"] for item in self.notebooks[actor].open.values() if "due_window" in item)
         plan=ReviewPlan.from_decision(decision,record,self._observations[actor],self.config.max_review_interval,due)
@@ -470,9 +478,7 @@ class Simulation:
                 if self.notebooks:
                     owner = data["actor_id"]
                     decision=Decision.model_validate_json(data["raw"])
-                    self.notebooks[owner].record(decision, event["id"], event["window"],
-                                                 self._observations[owner]["messages"], self.config.recent_records,self._observations[owner].get("external_events",()))
-                    self._remember_plan(owner,decision,event["id"])
+                    self._record_decision(owner,decision,event)
             elif event["kind"]=="decision_deferred" and frozen and event["window"]==self._frozen_window:
                 self._waiting_steps.append({"actor_id":data["actor_id"],"round":data["round"]})
             elif event["kind"]=="external_event" and frozen and event["window"]==self._frozen_window:
@@ -721,6 +727,8 @@ class Simulation:
             instruction+="\nmail_routes 是本窗口权威的通信时效，优先于旧材料里的预计送达时间。核对实际到件记录，再区分信中内容与收件人自己的决定。"
         if self._waiting_steps:
             instruction+="\ncontinued_waits 只表示主体延续此前的等待。本轮没有由此产生的新承诺、行动或消息。结算可保持原值。"
+        if payload.get("ended_conditions"):
+            instruction+="\nended_conditions 从本窗起不再生效。保留已结算的后果，不因条件到期自动撤回既有安排或替主体作出新决定。"
         if self._current_events:
             instruction+="\nexternal_events 是本窗实际发生的预定外部事件。assignments 指定的字段由引擎直接审查，请省略这些字段的 reviews。外部事实可用 event_ids 引用其 record，主体行动仍用 action_ids。"
         elif payload.get("calendar_window"):
@@ -828,9 +836,7 @@ class Simulation:
                 action = {"id": event["id"], **event["data"]}
                 self._actions.append(action)
                 if self.notebooks:
-                    self.notebooks[actor_id].record(expression, event["id"], self.window + 1,
-                                                    self._observations[actor_id]["messages"], self.config.recent_records,self._observations[actor_id].get("external_events",()))
-                    self._remember_plan(actor_id,expression,event["id"])
+                    self._record_decision(actor_id,expression,event)
                 for message in expression.messages:
                     for recipient in dict.fromkeys(message.recipients):
                         self._send_message(actor_id,recipient,message,event["id"])

@@ -102,6 +102,7 @@ class EntryWindow(Record):
     value: StrictStr
     first: int = Field(default=1,ge=1,strict=True)
     last: int | None = Field(default=None,ge=1,strict=True)
+    closed_before_start: bool = False
     provenance: Provenance = Field(default_factory=Provenance)
 
     @model_validator(mode="after")
@@ -113,7 +114,7 @@ class EntryWindow(Record):
         return self
 
     def allows(self, window):
-        return self.first<=window and (self.last is None or window<=self.last)
+        return not self.closed_before_start and self.first<=window and (self.last is None or window<=self.last)
 
 
 class ValueMeaning(Record):
@@ -270,6 +271,16 @@ class ScopedRule(Rule):
     # Without an explicit audience a world rule belongs only to the adjudicator.
     visibility: Visibility = Field(default_factory=Visibility)
     active_from: int = Field(default=1, ge=1)
+    active_until: int | None = Field(default=None,ge=1,strict=True)
+
+    @model_validator(mode="after")
+    def check_period(self):
+        if self.active_until is not None and self.active_until<self.active_from:
+            raise ValueError("规则的最后有效窗口不能早于生效窗口")
+        return self
+
+    def applies(self,window):
+        return self.active_from<=window and (self.active_until is None or window<=self.active_until)
 
 
 class ScheduledValue(Record):

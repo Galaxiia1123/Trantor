@@ -65,7 +65,9 @@ class Notebook:
         self.sharing = {}
         self.older = deque(maxlen=4)
 
-    def record(self, action, record_id, window, inbox, recent_count, notices=()):
+    def record(self, action, record_id, window, inbox, recent_count, notices=(), ended=()):
+        for observed,item in ended:
+            self._add({"id":observed,"window":window,"kind":"已结束的条件","text":f'“{item["text"]}”截至第 {item["last_window"]} 窗，本轮已失效。'},recent_count)
         for notice in notices:
             self._add({"id":notice["record"],"window":window,"kind":"external_event","text":notice["text"],
                        **({"at_settlement":notice["at_settlement"]} if notice.get("at_settlement") else {})},recent_count)
@@ -151,7 +153,8 @@ def objective_input(scene, config, state, actions, history, window, schema, rece
     if scene.scheduled_events and scene.public_brief is not None:
         definitions["background"]=scene.public_brief.text
     if "rules" in definitions:
-        definitions["rules"] = [rule for rule in definitions["rules"] if rule.get("active_from", 1) <= window]
+        definitions["rules"] = [rule for rule in definitions["rules"] if rule.get("active_from",1)<=window and
+                                (rule.get("active_until") is None or window<=rule["active_until"])]
     for actor in definitions["entities"]:
         for field in actor.get("fields", []):
             field.pop("value", None)
@@ -184,6 +187,8 @@ def objective_input(scene, config, state, actions, history, window, schema, rece
     if scene.scheduled_events:
         result["calendar_window"]={"window":window,"effective_records":[e["id"] for e in receipts],
                                    "scope":"这是本窗实际发生的全部日历事件。未到期的计划不会在本窗结算。"}
+    ended=[{"text":r.text,"last_window":r.active_until} for r in scene.rules if r.active_until==window-1]
+    if ended:result["ended_conditions"]=ended
     return result
 
 

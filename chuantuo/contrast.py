@@ -64,7 +64,8 @@ def _sight(view):
                _line(c["before"])+" → "+_line(c["after"])) for c in (view.get("world_feedback") or {}).get("visible_changes",()))
     return {key:_samples(items) for key,items in [("可见字段",fields),("收到的信封与附件",envelopes),("来信原文",text),
             ("持有的文书",docs),("实际收到的外部通知",notices),("获知的结算变化",feedback),("已知通信时效",routes),
-            ("已知规则",((r["text"],r["text"]) for r in view["rules"])),
+            ("已知规则",(((r["text"],r.get("active_until")),r["text"]+(f' · 至第 {r["active_until"]} 窗' if r.get("active_until") else "")) for r in view["rules"])),
+            ("本轮到期的条件",((r["text"],r["text"]) for r in view.get("ended_conditions",()))),
             ("可见资料",(((m["owner_id"],m["domain"],m["text"]),m["text"]) for m in view["visible_materials"]))]}
 
 

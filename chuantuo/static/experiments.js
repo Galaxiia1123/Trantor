@@ -63,6 +63,8 @@ function experimentForm(view,idea=null,priorWindow=null) {
   prompt.placeholder = "例如：运营社在本窗开始时收到一份有效签字函。";
   const levels=numericLevels(picker);
   const label = h("label","改变的条件"); label.append(prompt); form.append(label,picker.node,levels.node,timing.node,shift.node);
+  const endInput=h("input"),endLabel=h("label","条件最后有效的窗口（可选）");endInput.type="number";endInput.step="1";endInput.placeholder="持续有效";endLabel.append(endInput);
+  const duration=disclosure("设置临时条件的有效期",endLabel,h("p","含最后一窗。到期后继续观察，已有的行动和已结算结果仍保留。","hint"));form.append(duration);
   const audience = select("开始时谁知道这个条件",[["world","仅世界系统"],["public","所有主体"],["readers","指定主体和世界系统"]]);
   const group = h("fieldset"); group.append(h("legend","知情主体"));
   for (const actor of view.actors) {
@@ -83,6 +85,7 @@ function experimentForm(view,idea=null,priorWindow=null) {
   }
   function update() {
     const changed=["condition","field"].includes(kind.value), fieldMode=kind.value==="field";
+    duration.hidden=endInput.disabled=kind.value!=="condition";endInput.min=String(Number(split.value)+1);
     levels.show(fieldMode);const extra=levels.tokens().length;
     label.hidden=kind.value!=="condition";audience.parentElement.hidden=!changed;prompt.required=kind.value==="condition";
     timing.node.hidden=timing.node.disabled=kind.value!=="transit";
@@ -110,6 +113,7 @@ function experimentForm(view,idea=null,priorWindow=null) {
   if(preset){
     kind.value=preset.kind;split.value=String(preset.window);limits();through.value=String(preset.through);
     prompt.value=preset.condition || "";audience.value=preset.audience || "world";
+    if(preset.ends_window){endInput.value=String(preset.ends_window);duration.open=true;}
     for(const box of group.querySelectorAll("input"))box.checked=(preset.readers || []).includes(box.value);
     picker.set(preset.assignment);timing.set(preset.route);
     if(idea.additional_values?.length){levels.show(true);levels.field.value=idea.additional_values.join("、");levels.node.open=true;}
@@ -126,6 +130,7 @@ function experimentForm(view,idea=null,priorWindow=null) {
       const spec={window:Number(split.value),through:Number(through.value),kind:kind.value,condition:kind.value==="condition" ? prompt.value.trim() : "",
                   assignment:kind.value==="field" ? picker.read() : null,route:kind.value==="transit" ? timing.read() : null,
                   event_move:kind.value==="event_time" ? shift.read() : null,audience:scope,readers};
+      if(kind.value==="condition" && endInput.value!=="")spec.ends_window=Number(endInput.value);
       const contrast=!pair.disabled && pair.checked;
       const extra=levels.read(spec.assignment?.value);
       if(extra.length && (1+extra.length+Number(contrast))*Number(repeats.value)>32)throw new Error("一组多档实验最多安排 32 条路线，请减少取值或重复次数。");
@@ -202,6 +207,7 @@ async function experimentShelf(parent) {
       else if(s.kind==="event_time")card.append(h("small","只移动原日历事件，通知对象和事件内容沿用原设定。","quiet"));
       else if(s.kind==="transit")card.append(h("small","通信双方知道线路时效。分岔前已经寄出的消息仍按原定日期送达。","quiet"));
       else if(s.kind!=="repeat") card.append(h("small","初始知情范围："+(s.audience==="public" ? "所有主体" : s.audience==="world" ? "仅世界系统" : s.readers.map(id=>result.actors[id] || id).join("、")+"与世界系统"),"quiet"));
+      if(s.ends_window)card.append(h("small","临时条件有效至第 "+s.ends_window+" 窗末。","quiet"));
       if (result.selected) {
         card.append(h("p",(s.kind==="extend" ? "延长起点的值为" : "原路线终值为")+format(group.baseline)+"。"));
         for (const o of group.outcomes) card.append(h("span",format(o.value)+" · "+o.count+" 次","outcome-count"));
@@ -263,6 +269,7 @@ function showExperimentTools(view) {
     }).catch(e=>{if(body.isConnected)body.textContent=e.message;});return;
   }
   const origin=h("p",null,"hint"); origin.append("第 "+meta.window+" 窗后分岔，比较至第 "+meta.through+" 窗。 ",source);
+  if(meta.ends_window)origin.append("　条件从第 "+(meta.window+1)+" 窗起生效，至第 "+meta.ends_window+" 窗末结束。");
   if(meta.kind==="event_time"){
     origin.append("　事件内容与通知对象沿用原日历。");
     if(meta.original_event?.record)origin.append(button("查阅原日期的事件凭据",()=>evidence(meta.original_event.record,meta.parent_id),"link"));

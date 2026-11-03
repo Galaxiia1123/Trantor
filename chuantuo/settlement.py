@@ -64,6 +64,8 @@ def settled_state(scenario, state, proposal, action_ids, action_owners=None, rec
             raise ValueError(f"字段 {actor_id}.{field_id} 的提案超出用户定义的取值范围或修改权限")
         if before!=review.after and (period:=field.entry_period(review.after)):
             if window is None or not period.allows(window):
+                if period.closed_before_start:
+                    raise ValueError(f"{actor_id}.{field_id} 转入“{review.after}”的期限在派生场景开局前已经结束，请依据其他允许的值结算")
                 raise ValueError(f"第 {window} 窗不能把 {actor_id}.{field_id} 转为“{review.after}”。允许转入的窗口为 {period.first} 至 {period.last or '不限'}。请保留现值或依据行动选择本窗允许的新值")
         if isinstance(review.after,str) and limits:
             readers = set(state) if field.visibility.public else {actor_id,*field.visibility.readers}

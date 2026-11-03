@@ -114,7 +114,8 @@ def watch_window(simulation, selected=None, offset=0, limit=100, actor_id=None, 
         rows, total = simulation.journal.window_rows(window,offset,limit,actor=actor_id,kind=kind)
         events = [dict(event_preview(e), commit_status=simulation.event_status(e)) for e in rows]
         return {"title":scene.title, "format_version":getattr(scene,"format_version","1.0"),
-                "scheduled_count":len(getattr(scene,"scheduled_events",[])),"has_mail_routes":bool(getattr(scene,"mail_routes",[])),
+                "scheduled_count":len(getattr(scene,"scheduled_events",[])),"timed_rule_count":sum(bool(getattr(r,"active_until",None)) for r in scene.rules),
+                "has_mail_routes":bool(getattr(scene,"mail_routes",[])),
                 "document_count":len(simulation._perception.documents.originals),
                 "has_comparisons":bool(simulation.journal.comparison_ideas or getattr(scene,"scheduled_events",()) or getattr(scene,"mail_routes",())),
                 "rounds_per_window":simulation.config.rounds_per_window,

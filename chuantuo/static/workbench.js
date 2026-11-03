@@ -654,7 +654,8 @@ async function openActorContext(actor, window, turn, replace = false, run = acti
       if(memory[key]?.length) body.append(disclosure(label+"（"+memory[key].length+"）",h("pre",json(memory[key]))));
     }
   } else if (!result.deferred) body.append(disclosure("当时的记忆输入",h("pre",json(memory))));
-  if (view.rules?.length) body.append(disclosure("当时已知的规则和条件",bullets(view.rules.map(r=>r.text))));
+  if (view.rules?.length) body.append(disclosure("当时已知的规则和条件",bullets(view.rules.map(r=>r.text+(r.active_until ? "　有效至第 "+r.active_until+" 窗末。" : "")))));
+  if(view.ended_conditions?.length)body.append(disclosure("本轮起不再生效的条件",bullets(view.ended_conditions.map(r=>r.text))));
   body.append(disclosure("完整可见信息",h("pre",json(view))),h("small",result.deferred ? "本轮观察" : "原始输入与对应决定","quiet"),
     evidenceLinks(result.deferred ? [result.observation_id] : [result.input_id,result.action_id],run));
   if(replace && $("reading").open) {

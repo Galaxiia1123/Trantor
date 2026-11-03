@@ -53,7 +53,31 @@ def branch_payload(simulation, window, title):
     assumptions = [*scene.assumptions, f"初始状态取自运行 {simulation.run_id} 的窗口 {window}。新主体从空白记忆开始，历史收件和承诺可由用户另行定义。"]
     revised = scene.model_copy(update={"title":label,"entities":entities,"sources":[*scene.sources,material],"assumptions":assumptions})
     if isinstance(revised,Scenario11):
-        revised = revised.model_copy(update={"rules":[rule.model_copy(update={"active_from":max(1,rule.active_from-window)}) for rule in revised.rules],
+        if window:
+            revised=revised.model_copy(update={"assumptions":[*revised.assumptions,
+                f"新开局第 1 窗对应原路线第 {window+1} 窗。结构化的规则有效期、线路时效版本、事件和字段转入期限按这一对应关系换算。"]})
+        rules=[rule.model_copy(update={"active_from":max(1,rule.active_from-window),
+                "active_until":rule.active_until-window if rule.active_until else None}) for rule in revised.rules
+               if rule.active_until is None or rule.active_until>window]
+        routes={}
+        for route in sorted(revised.mail_routes,key=lambda r:r.active_from):
+            start=max(1,route.active_from-window)
+            routes[route.source,route.target,start]=route.model_copy(update={"active_from":start})
+        entities=[]
+        for actor in revised.entities:
+            fields=[]
+            for f in actor.fields:
+                if window and f.constraints and f.constraints.entry_windows:
+                    periods=[]
+                    for p in f.constraints.entry_windows:
+                        closed=p.closed_before_start or p.last is not None and p.last<=window
+                        period=p.model_copy(update={"closed_before_start":True}) if closed else p.model_copy(update={
+                            "first":max(1,p.first-window),"last":p.last-window if p.last else None})
+                        periods.append(period)
+                    f=f.model_copy(update={"constraints":f.constraints.model_copy(update={"entry_windows":periods})})
+                fields.append(f)
+            entities.append(actor.model_copy(update={"fields":fields}))
+        revised = revised.model_copy(update={"rules":rules,"mail_routes":list(routes.values()),"entities":entities,
             "scheduled_events":[event.model_copy(update={"window":event.window-window}) for event in revised.scheduled_events if event.window>window]})
     return {"scenario":revised.model_dump(mode="json"), "config":simulation.config.model_dump(mode="json"),
             "preparation_records":[], "assistant":{}}
@@ -144,6 +168,7 @@ class ExperimentRequest(Record):
     through: int = Field(ge=1)
     kind: Literal["condition","field","transit","event_time","repeat","extend"] = "condition"
     extension_limit: int | None = Field(default=None,ge=1,le=1_000_000,strict=True)
+    ends_window: int | None = Field(default=None,ge=1,strict=True)
     condition: str = Field(default="", max_length=1600)
     assignment: ScheduledValue | None = None
     route: RouteTiming | None = None
@@ -155,6 +180,8 @@ class ExperimentRequest(Record):
     def coherent(self):
         if self.through <= self.window:
             raise ValueError("终点须晚于分岔窗口")
+        if self.ends_window is not None and (self.kind!="condition" or self.ends_window<=self.window):
+            raise ValueError("只有文本条件可设最后有效窗口，且须在分岔点之后")
         if (self.kind=="extend")!=(self.extension_limit is not None):
             raise ValueError("延长观察需要为新增窗口设定单独的调用上限")
         if self.kind=="extend" and (self.through-self.window>100 or self.condition.strip() or self.audience!="world"):
@@ -248,7 +275,7 @@ def apply_intervention(baseline,spec,source_id,state=None,configs=(),*,allow_sam
         event["provenance"]={"kind":"user","explanation":f"对照实验将原定第 {original} 窗的事件改至第 {move.new_window} 窗，沿用原事件内容和通知范围。"}
         condition=f"把“{event['text'][:90]}”从第 {original} 窗改到第 {move.new_window} 窗"
     elif condition:
-        scene["rules"].append({"text":condition, "active_from":spec.window + 1,
+        scene["rules"].append({"text":condition, "active_from":spec.window + 1,"active_until":spec.ends_window,
             "visibility":{"public":spec.audience == "public","readers":spec.readers},
             "provenance":{"kind":"user","explanation":f"对照实验设定，自第 {spec.window + 1} 窗起生效。"}})
     scene = Scenario11.model_validate(scene)
@@ -382,7 +409,7 @@ def outcome_groups(parent, catalog, actor_id=None, field_id=None):
         spec = row.get("experiment")
         if not spec or spec["parent_id"] != parent.run_id:
             continue
-        key = (spec["parent_event"],spec["state_sha256"],spec["through"],spec["kind"],spec["condition"],spec["audience"],tuple(sorted(spec["readers"])),encode(spec.get("assignment")),encode(spec.get("route")),encode(spec.get("event_move")))
+        key = (spec["parent_event"],spec["state_sha256"],spec["through"],spec["kind"],spec["condition"],spec["audience"],tuple(sorted(spec["readers"])),encode(spec.get("assignment")),encode(spec.get("route")),encode(spec.get("event_move")),spec.get("ends_window"))
         if key not in groups:
             original = boundary(parent,spec["window"] if spec["kind"]=="extend" else spec["through"])
             groups[key] = {"spec":spec,"baseline":original["state"][selected["actor"]][selected["field"]] if selected else None,

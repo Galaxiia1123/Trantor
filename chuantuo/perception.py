@@ -174,15 +174,20 @@ class Perception:
             roster, subsystems = self.scene.entities, self.scene.subsystems
         result = {"window":window, "round":turn, "window_duration":self.config.window_duration,
             "background":self.scene.public_brief.text if getattr(self.scene,"public_brief",None) is not None else self.scene.background,
-            "rules":[{"text":r.text,"provenance":{"kind":r.provenance.kind}} for r in self.scene.rules
+            "rules":[{"text":r.text,"provenance":{"kind":r.provenance.kind},
+                      **({"active_until":r.active_until} if isinstance(r,ScopedRule) and r.active_until else {})} for r in self.scene.rules
                 if not isinstance(r,ScopedRule) or
-                (window >= r.active_from and (r.visibility.public or actor_id in r.visibility.readers))],
+                (r.applies(window) and (r.visibility.public or actor_id in r.visibility.readers))],
             "self":{"id":actor.id,"name":actor.name,"identity":actor.identity,"preferences":actor.preferences,"depth":self.depths[actor_id]},
             "roster":[{"id":a.id,"name":a.name,"subsystem_id":a.subsystem_id, **({"parent_id":a.parent_id} if a.parent_id else {})} for a in roster],
             "subsystems":[s.model_dump(exclude={"interaction"}) if s.owner_id != actor_id and actor.subsystem_id != s.id else s.model_dump() for s in subsystems],
             "visible_state":fields, "visible_materials":materials, "influences":[dict(e) for e in self.edges[actor_id]], "messages":deepcopy(inbox)}
         if papers:=self.documents.cabinet(actor_id):
             result["documents"]=papers
+        if turn==1:
+            ended=[{"text":r.text,"last_window":r.active_until} for r in self.scene.rules if isinstance(r,ScopedRule) and
+                   r.active_until==window-1 and (r.visibility.public or actor_id in r.visibility.readers)]
+            if ended:result["ended_conditions"]=ended
         if routes:
             result["mail_routes"]=routes
             result["mail_timing"]="定向线路的 transit_windows 是从发出至到达的窗口数。大于零时在到达窗口的第一轮前交付；零表示本轮结束后交付。"
