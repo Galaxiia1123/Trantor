@@ -283,6 +283,7 @@ class Journal:
                 raise ValueError("原始输入与该主体、窗口或轮次不符")
             return {"actor_id":actor_id,"window":window,"round":payload["round"],"rounds":rounds,
                     "input_id":original["id"],"output_id":output["id"],"action_id":action["id"],
+                    "decision":action["data"]["text"],"outgoing":deepcopy(action["data"].get("messages",[])),
                     "observation":payload["observation"],"memory":payload["memory"],"coverage":payload.get("memory_coverage"),
                     **({"resumed_plan":payload["resume_plan"]} if payload.get("resume_plan") else {})}
 

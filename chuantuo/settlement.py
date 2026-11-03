@@ -287,7 +287,7 @@ def verify_commits(scenario, config, events):
             action_ids.clear()
             action_owners.clear()
             receipts=[]
-    outputs = verify_references(events)
+    outputs = verify_references(events, discarded)
     complete_pending = (len(schedule) == expected_actions and all(n == 1 for n in schedule.values())
                         and observations == schedule and outbound == expected_messages)
     return {"committed_windows": last_window, "verified_expressions": total_actions, "verified_deferred":total_deferred,"verified_deliveries": total_messages,
@@ -305,11 +305,34 @@ def actor_evidence(event, actor_id):
     return event["kind"] == "message_delivered" and data.get("to") == actor_id
 
 
-def verify_references(events):
+def verify_interview(data, seen, supplied, discarded, committed):
+    anchor_id, context_id = data["anchor_record"], data.get("context_record")
+    anchor, context = seen.get(anchor_id), seen.get(context_id)
+    actor, window, turn = data.get("actor_id"), data["cutoff_window"], data.get("cutoff_round")
+    if (not actor or not anchor or not context or supplied != {anchor_id, context_id}
+            or supplied & discarded or window not in committed or int(context_id[1:]) >= int(anchor_id[1:])
+            or any(e["window"] != window or e["data"].get("actor_id") != actor for e in (anchor,context))
+            or anchor["data"].get("round") != turn):
+        raise ValueError("现场问答的证据不属于当事主体的已提交轮次")
+    if anchor["kind"] == "decision_deferred" and context["kind"] == "observation" and context["data"]["visible"]["round"] == turn:
+        return
+    response = seen.get(data.get("decision_output"))
+    if (anchor["kind"] != "expression" or context["kind"] != "model_input" or context["data"].get("purpose") != "agent"
+            or not response or response["kind"] != "model_output" or response["id"] in discarded
+            or response["window"] != window or response["data"].get("actor_id") != actor
+            or response["data"].get("input_id") != context_id or int(response["id"][1:]) >= int(anchor_id[1:])
+            or anchor["data"].get("model_output_id", response["id"]) != response["id"]):
+        raise ValueError("现场问答与主体实际收到的模型输入不符")
+
+
+def verify_references(events, discarded=frozenset()):
     seen = {}
+    committed = set()
     reports = answers = 0
     for event in events:
         data = event["data"]
+        if event["kind"] == "window_committed":
+            committed.add(event["window"])
         if event["kind"]=="expression" and data.get("model_output_id"):
             response = seen.get(data["model_output_id"])
             if (not response or response["kind"]!="model_output" or response["window"]!=event["window"]
@@ -329,9 +352,12 @@ def verify_references(events):
             if not supplied <= seen.keys() or not data["evidence_ids"] or not set(data["evidence_ids"]) <= supplied:
                 raise ValueError("存档回答引用了未提供的记录")
             actor_id = data.get("actor_id")
-            for eid in supplied:
-                record = seen[eid]
-                if record["window"] > data["cutoff_window"] or (actor_id and not actor_evidence(record,actor_id)):
-                    raise ValueError("存档回答的证据超出窗口或主体权限")
+            if data.get("anchor_record"):
+                verify_interview(data, seen, supplied, discarded, committed)
+            else:
+                for eid in supplied:
+                    record = seen[eid]
+                    if record["window"] > data["cutoff_window"] or (actor_id and not actor_evidence(record,actor_id)):
+                        raise ValueError("存档回答的证据超出窗口或主体权限")
         seen[event["id"]] = event
     return {"verified_reports":reports,"verified_answers":answers}

@@ -140,6 +140,30 @@ def test_questions_cannot_cite_unseen_events_or_affect_memory(tmp_path):
     assert sim.agents["city"].get_state() == memory
 
 
+def test_interview_uses_the_deciding_rounds_input_and_no_later_delivery(tmp_path):
+    class Gateway:
+        def complete(self, model, messages):
+            payload=json.loads(messages[-1]["content"])
+            if payload["task"]=="agent" and payload["actor_id"]=="engineer" and payload["round"]==1:
+                return json.dumps({"text":"private-sender-choice","messages":[{"recipients":["city"],"text":"receipt-R2"}]})
+            if payload["task"]=="analysis":
+                assert ("receipt-R2" in messages[-1]["content"]) == (payload["cutoff_round"]==2)
+                assert "private-sender-choice" not in messages[-1]["content"]
+            return respond(messages)
+    sim=Simulation(demo_scenario(),demo_config().model_copy(update={"windows":1}),Gateway(),tmp_path)
+    assert sim.run()["status"]=="completed"
+    memory=sim.agents["city"].get_state()
+    actions=sim.journal.snapshot({"expression"})
+    for action in (a for a in actions if a["data"]["actor_id"]=="city"):
+        question=Question(text="Which messages had arrived?",actor_id="city",anchor=action["id"],max_calls=1)
+        answer=answer_question(sim,question)
+        assert answer["cutoff_round"]==action["data"]["round"] and answer["anchor_record"]==action["id"]
+        assert {e["id"] for e in answer["evidence"]}=={answer["context_record"],action["id"]}
+    with pytest.raises(ValueError,match="当事|主体"):
+        answer_question(sim,Question(text="收到过吗？",actor_id="city",anchor=next(a["id"] for a in actions if a["data"]["actor_id"]=="port")))
+    assert Simulation.restore(tmp_path).agents["city"].get_state()==memory
+
+
 def test_corrupt_or_stale_log_never_overwrites_evidence(tmp_path):
     directory = tmp_path / "old-folder"
     sim = Simulation(demo_scenario(), demo_config(), directory=directory)

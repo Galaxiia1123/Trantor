@@ -799,7 +799,9 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
         with sim._lock:
             if window>sim.window or actor_id not in sim.depths:
                 raise ValueError("请选择已提交窗口中的主体")
-            return sim.journal.decision_context(actor_id,window,turn,sim._discarded)
+            config_id=sim.config.model_id("actor",sim.depths[actor_id])
+            return {**sim.journal.decision_context(actor_id,window,turn,sim._discarded),
+                    "mode":"sample" if sim.config.catalog[config_id].provider=="demo" else "api"}
 
     @app.get("/api/runs/{run_id}/actors/{actor_id}/export")
     def actor_export(run_id:str,actor_id:str,through:int=Query(ge=0)):
@@ -841,13 +843,14 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
     @app.post("/api/runs/{run_id}/jobs/{job_id}/question")
     def ask(run_id: str, job_id: str, question: Question):
         sim = get_run(run_id)
-        return jobs.submit(job_id, "question", {"run_id": run_id, **question.model_dump()},
+        return jobs.submit(job_id, "question", {"run_id": run_id, "actor_id":question.actor_id, **question.model_dump(exclude_defaults=True)},
                            lambda progress: answer_question(sim, question, progress,job_id=job_id))
 
     @app.get("/api/runs/{run_id}/answers")
     def answers(run_id: str):
         return [{"record_id": event["id"], **{key: event["data"][key] for key in
-                 ("question", "text", "actor_id", "evidence_ids", "cutoff_window", "limitations", "config_id")}}
+                 ("question","text","actor_id","evidence_ids","cutoff_window","limitations","config_id","anchor_record","cutoff_round","selection")
+                 if key in event["data"]}}
                 for event in get_run(run_id).journal.snapshot({"analysis_answer"})]
 
     @app.post("/api/runs/{run_id}/jobs/{job_id}/report")

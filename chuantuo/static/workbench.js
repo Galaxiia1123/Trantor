@@ -175,10 +175,10 @@ async function awaitJob(id) {
     notice(receipt.message || "正在处理"); await pause(720);
   }
 }
-async function job(kind, path, payload, follow) {
+async function job(kind, path, payload, follow, sourceRun = activeRun) {
   if (busy) return;
   busy = true; $("prepare").disabled = true; const id = uid();
-  keep("job", {id, kind, project:project?.id, run:activeRun});
+  keep("job", {id, kind, project:project?.id, run:sourceRun});
   try {
     await api(path.replace("{id}", id), "POST", payload);
     const result = await awaitJob(id);
@@ -602,6 +602,14 @@ async function openActorContext(actor, window, turn, replace = false, run = acti
   result.rounds.forEach(n=>{const o=h("option","第 "+n+" 轮");o.value=n;round.append(o);}); round.value=result.round;
   round.onchange=safe(()=>openActorContext(actor,window,Number(round.value),true,run));
   body.append(h("p",actor.name+" · 第 "+window+" 窗 · "+(result.deferred ? "引擎照常形成了这一轮的观察，主体按此前安排等待。" : "这次作决定时实际收到的内容。"),"hint"),round);
+  if(result.decision) {
+    const statement=h("section",null,"decision-statement");
+    statement.append(h("small","当时的决定","quiet"),h("p",result.decision));
+    if(result.outgoing?.length) statement.append(disclosure("这次发出的消息（"+result.outgoing.length+"）",
+      ...result.outgoing.map(m=>h("p",m.recipients.map(id=>view.roster?.find(a=>a.id===id)?.name || id).join("、")+" · "+m.text))));
+    body.append(statement);
+  }
+  body.append(button("就这一轮追问",()=>openDecisionQuestion(actor,result,run),"secondary"));
   if(result.deferred) body.append(h("p","本轮没有新的模型请求或对外行动。若无来信和可见变化，最迟第 "+result.review_at+" 窗重新判断。"),evidenceLinks([result.plan_record,result.deferred_id],run));
   if(result.resumed_plan) body.append(h("p",wakeText(result.resumed_plan.reason)),evidenceLinks([result.resumed_plan.plan_record],run));
   if(view.state){
@@ -640,7 +648,10 @@ async function openActorContext(actor, window, turn, replace = false, run = acti
   if (view.rules?.length) body.append(disclosure("当时已知的规则和条件",bullets(view.rules.map(r=>r.text))));
   body.append(disclosure("完整可见信息",h("pre",json(view))),h("small",result.deferred ? "本轮观察" : "原始输入与对应决定","quiet"),
     evidenceLinks(result.deferred ? [result.observation_id] : [result.input_id,result.action_id],run));
-  if(replace && $("reading").open) { $("reading-title").textContent=actor.name+"的决策现场"; $("reading-content").replaceChildren(body); }
+  if(replace && $("reading").open) {
+    const back=readingTrail.length ? $("reading-content").firstElementChild : null;
+    $("reading-title").textContent=actor.name+"的决策现场"; $("reading-content").replaceChildren(...(back ? [back,body] : [body]));
+  }
   else reading(actor.name+"的决策现场",body);
 }
 function adoptSuggestedField(view, event, suggestion, index) {
@@ -929,12 +940,48 @@ async function drawWindowHistory() {
 }
 $("all-windows").ontoggle = safe(async () => { if ($("all-windows").open) await drawWindowHistory(); });
 $("changed-windows").onchange=$("window-order").onchange=safe(async()=>{requestedWindows=40;await drawWindowHistory();});
+function openDecisionQuestion(actor, context, run) {
+  const form=h("form",null,"advanced"), input=h("textarea"), label=h("label","想向"+actor.name+"确认什么？");
+  input.className="editor"; input.rows=3; input.maxLength=10000; input.required=true;
+  input.value=context.deferred ? "当时在等什么？哪些新消息会使你提前行动？" : "作出这个决定时，你掌握了哪些信息？还有什么无法确认？";
+  label.append(input);
+  const here="第 "+context.window+" 窗 · 第 "+context.round+" 轮", status=h("p","","hint");
+  status.setAttribute("aria-live","polite");
+  const submit=h("button","用这一轮的记录回答"); submit.type="submit";
+  form.append(h("p",actor.name+" · "+here,"eyebrow"),label,
+    h("p","回答只取用这轮的决定及其可见信息。"+(context.mode==="sample" ? "这条路线使用本地示例脚本。" : "通常调用 1 次模型，引用或格式出错时最多再试 1 次。"),"hint"),submit,status);
+  form.onsubmit=async event=>{
+    event.preventDefault();if(busy || submit.disabled)return;
+    const question=input.value.trim();if(!question){input.focus();return;}
+    const ticket=readingRequest;submit.disabled=true;status.textContent="正在查阅这轮的原始记录…";
+    try {
+      await job("question","/api/runs/"+run+"/jobs/{id}/question",
+        {text:question,actor_id:actor.id,anchor:context.action_id || context.deferred_id,max_calls:2},async answer=>{
+          if(activeRun===run && $("followup").open)await loadAnswers();
+          status.textContent="回答已保存在这条路线的追问记录。";
+          if(ticket===readingRequest && $("reading").open)reading(actor.name+"的现场回答",
+            h("p",here+" · 回顾性访谈","eyebrow"),h("h3",question),h("p",answer.text),
+            evidenceLinks(answer.evidence_ids,run),h("p",answer.limitations,"hint"),
+            disclosure("本次提供的片段",h("p",answer.selection,"hint"),
+              ...answer.evidence.map(item=>disclosure(item.locator.section+" · "+item.id,h("p",item.excerpt)))));
+        },run);
+    } catch(err){status.textContent=err.message;} finally{submit.disabled=false;}
+  };
+  reading("追问这轮决定",form);
+}
 async function loadAnswers() {
   const run = activeRun;
   if (!run || playback()) return;
   const list = await api("/api/runs/" + run + "/answers"); if (run !== activeRun) return;
-  $("answers").replaceChildren(...list.map(a => disclosure(a.question, h("p",a.text), evidenceLinks(a.evidence_ids),
-    h("p",a.limitations || "", "hint"))));
+  $("answers").replaceChildren(...list.map(a => {
+    const row=disclosure(a.question, h("p",a.text), evidenceLinks(a.evidence_ids,run),h("p",a.limitations || "", "hint"));
+    if(a.anchor_record) {
+      const name=Array.from($("question-scope").options).find(option=>option.value===a.actor_id)?.textContent;
+      row.append(button("回到第 "+a.cutoff_window+" 窗第 "+a.cutoff_round+" 轮的决定",
+        ()=>openActorContext({id:a.actor_id,name:name?.replace(/当时可见的记录$/,"") || a.actor_id},a.cutoff_window,a.cutoff_round,false,run),"link"));
+    }
+    return row;
+  }));
 }
 $("followup").ontoggle = safe(async () => { if ($("followup").open) await loadAnswers(); });
 $("ask").onclick = safe(async () => {

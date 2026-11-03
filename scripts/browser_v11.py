@@ -227,6 +227,14 @@ def main():
                 expect(page.locator("#reading-title")).to_have_text("许澄的决策现场")
                 page.get_by_label("查看主体决策轮次").select_option("1")
                 expect(page.locator("#reading-content")).to_contain_text("持续事项")
+                page.get_by_role("button",name="就这一轮追问").click()
+                page.get_by_label("想向许澄确认什么？").fill("本轮已经收到什么来信？")
+                page.get_by_role("button",name="用这一轮的记录回答").click()
+                expect(page.locator("#reading-title")).to_have_text("许澄的现场回答")
+                expect(page.locator("#reading-content")).to_contain_text("第 1 轮")
+                page.get_by_role("button",name="返回追问这轮决定",exact=False).click()
+                page.get_by_role("button",name="返回许澄的决策现场",exact=False).click()
+                expect(page.get_by_label("查看主体决策轮次")).to_have_value("1")
                 page.keyboard.press("Escape");expect(page.locator("#reading")).to_be_hidden()
                 expect(page.locator("#events")).to_contain_text("重新审议")
                 page.locator("#events").get_by_role("button", name="记录",exact=False).last.click()
@@ -261,7 +269,7 @@ def main():
                 page.locator("#nav-library").click(); expect(page.locator("#projects")).to_contain_text("潮汐港")
                 page.locator("#projects button").first.click(); expect(page.locator("#draft")).to_contain_text("9 个窗口")
                 assert page.request.get(url+"/api/runs/"+rid+"/reports").json()
-                assert len(endpoint.calls)==102
+                assert len(endpoint.calls)==103
                 page.goto(run_url); expect(page.locator("#watch-meta")).to_contain_text("已完成")
                 page.get_by_role("button",name="试一个条件",exact=True).click()
                 page.get_by_label("从哪里分岔").select_option("8")
@@ -339,9 +347,9 @@ def main():
                 page.keyboard.press("Escape");page.get_by_role("button",name="外部事件日历").click()
                 expect(page.locator("#reading-content")).to_contain_text("运行结束时尚未到预定日期")
             assert len([task for _,task in endpoint.calls if task=="agent"]) == 150
-            assert len(endpoint.calls)==168 and {m for m,_ in endpoint.calls}=={"local-script-http"},endpoint.calls
+            assert len(endpoint.calls)==169 and {m for m,_ in endpoint.calls}=={"local-script-http"},endpoint.calls
             assert not errors and not endpoint.errors,(errors,endpoint.errors)
-            browser.close(); print("Browser acceptance passed: source intake, nine windows, field and calendar experiments, suggested research question, interview, report and repeated comparisons; 168 loopback model calls.")
+            browser.close(); print(f"Browser acceptance passed: source intake, nine windows, field and calendar experiments, suggested research question, interview, report and repeated comparisons; {len(endpoint.calls)} loopback model calls.")
     finally:
         endpoint.shutdown(); endpoint.server_close()
 

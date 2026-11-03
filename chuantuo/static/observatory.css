@@ -131,3 +131,5 @@
 .comparison-idea{padding:12px 15px;border:1px solid #d6cedb;border-radius:10px;background:#fffdfa;margin-top:.65rem;overflow-wrap:anywhere}
 .comparison-idea h3{margin:.4rem 0;font-size:16px}.comparison-idea p{margin:.3rem 0;color:#514a55}
 .comparison-idea small,.comparison-idea>.link{display:block;margin-top:.45rem}
+.decision-statement{padding:.65rem 1rem;margin:.85rem 0;border-left:3px solid var(--accent,#765770);background:#f7f3f8}
+.decision-statement p{margin:.3rem 0;white-space:pre-wrap;overflow-wrap:anywhere}
