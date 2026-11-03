@@ -48,7 +48,9 @@ def _response(payload):
         if actor == "desk":
             if any(r["text"] == SIGNED for r in view["rules"]):
                 if window == 2:
-                    return {"text":ACCEPT,"messages":[{"recipients":["shop"],"text":"签章已核对，申请已登记复核。"}]}
+                    application=next((m.get("receipt_id") for m in view["messages"] if m["from"]=="shop" and "请求复核" in m["text"]),None)
+                    return {"text":ACCEPT,"messages":[{"recipients":["shop"],"text":"签章已核对，申请已登记复核。",
+                                                       **({"reply_to":application} if application else {})}]}
                 return {"text":"核对已登记的议程，等待复核会议。"}
             return {"text":"收件记录里仍没有可供核验的签字函，暂不登记。"}
         if any("已登记复核" in m["text"] for m in view["messages"]):

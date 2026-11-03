@@ -29,9 +29,9 @@ def decision_evidence(simulation, actor_id, anchor_id):
     kind = "observation" if deferred else "model_input"
     for key, value in sorted(view.items(), key=lambda item: item[0] not in labels):
         pieces.append((source_id, kind, labels.get(key, key), value))
-    for key in ("memory", "coverage", "resumed_plan"):
+    for key in ("memory", "coverage", "resumed_plan","reply_targets"):
         if key in context:
-            pieces.append((source_id, kind, {"memory":"当时实际带入的记忆","coverage":"记忆覆盖范围","resumed_plan":"恢复判断的缘由"}[key], context[key]))
+            pieces.append((source_id, kind, {"memory":"当时实际带入的记忆","coverage":"记忆覆盖范围","resumed_plan":"恢复判断的缘由","reply_targets":"当时可直接回复的旧信"}[key], context[key]))
     return {"anchor_record":anchor_id, "context_record":source_id, "cutoff_window":window, "cutoff_round":turn,
             **({"decision_output":context["output_id"]} if not deferred else {})}, pieces
 

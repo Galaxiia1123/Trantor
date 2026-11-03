@@ -66,10 +66,44 @@ def conversation(sim,one,two,start=0,through=None,query="",offset=0,limit=30):
             elif next_w>sim.window and sim.status in {"stopped","completed"}: stage="no_next_observation"
             else: stage="awaiting_observation"
             items.append({"receipt":event["id"],"action":action["id"],"window":action["window"],"arrived_window":w,"dispatch":data.get("dispatch_id"),
-                          "round":turn,"from":data["from"],"to":data["to"],
+                          "round":turn,"from":data["from"],"to":data["to"],"reply_to":data.get("reply_to"),
+                          "has_replies":sim.journal.has_replies(event["id"],end,sim._discarded),
                           "text":data["text"],"stage":stage,"seen":{"record":seen,"window":next_w,"round":next_turn} if seen else None,
                           **({"enclosures":[{"id":d["id"],"title":d["title"]} for d in data["enclosures"]]} if data.get("enclosures") else {})})
         return {"start":start,"through":end,"total":len(matches),"next":offset+len(items),"items":items}
+
+
+def reply_chain(sim,receipt_id,through=None,offset=0,limit=30):
+    with sim._lock:
+        end=_range(sim,0,through);selected=sim.journal.event(receipt_id)
+        if selected["kind"]!="message_delivered" or selected["window"]>end or selected["id"] in sim._discarded:
+            raise ValueError("请选择此时已经送达的信件")
+        pair={selected["data"]["from"],selected["data"]["to"]}
+        roots={};depth={};envelopes=[];arrived=set()
+        for w in range(1,end+1):
+            rows,_=sim.journal.window_rows(w,0)
+            for e in rows:
+                if e["kind"] not in {"message_delivered","message_dispatched"} or e["id"] in sim._discarded:continue
+                d=e["data"]
+                if {d["from"],d["to"]}!=pair:continue
+                if e["kind"]=="message_dispatched" and not d.get("reply_to"):continue
+                parent=d.get("reply_to");key=e["id"]
+                if parent and parent not in roots:raise ValueError("回复所指的原信没有对应签收记录")
+                roots[key]=roots[parent] if parent else key;depth[key]=depth[parent]+1 if parent else 0
+                if d.get("dispatch_id"):arrived.add(d["dispatch_id"])
+                envelopes.append(e)
+        root=roots[receipt_id]
+        entries=[e for e in envelopes if roots[e["id"]]==root and e["id"] not in arrived]
+        names={a.id:a.name for a in sim._scenario.entities if a.id in pair}
+        items=[]
+        for e in entries[offset:offset+limit]:
+            d=e["data"];ref=e["id"];pending=e["kind"]=="message_dispatched"
+            sent=sim.journal.event(d["action_id"])
+            items.append({"id":ref,"parent":d.get("reply_to"),"depth":depth[ref],"sender":names[d["from"]],"recipient":names[d["to"]],
+                          "sent_window":sent["window"],"round":sent["data"]["round"],"received_window":None if pending else e["window"],
+                          "due_window":d.get("due_window"),"text":d["text"][:1400],"truncated":len(d["text"])>1400,
+                          "enclosures":[doc["title"] for doc in d.get("enclosures",())]})
+        return {"root":root,"selected":receipt_id,"through":end,"total":len(entries),"items":items,"next":offset+len(items)}
 
 
 def dispatch_ledger(sim, through=None, actor=None, stage=None, offset=0, limit=30):

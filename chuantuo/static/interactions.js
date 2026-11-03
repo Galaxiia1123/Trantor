@@ -81,6 +81,7 @@ function openConversation(run,one,two,start,end) {
         button("投递原文",()=>evidence(message.receipt,run),"link"));
       card.append(actions);
       if(message.enclosures?.length)card.append(button("查阅随信副本 · "+message.enclosures.map(d=>d.title).join("、"),()=>evidence(message.receipt,run),"link"));
+      if(message.reply_to || message.has_replies)card.append(button("沿这封信读回复",()=>openReplyChain(run,message.receipt,end),"link"));
       if(message.seen) {
         card.append(button("收件人于"+windowName(message.seen.window)+"第 "+message.seen.round+" 轮看到",()=>openActorContext({id:message.to,name:names[message.to]},message.seen.window,message.seen.round,false,run),"link"));
       } else {
@@ -95,4 +96,24 @@ function openConversation(run,one,two,start,end) {
   }
   form.onsubmit=e=>{e.preventDefault();current=q.value.trim();safe(()=>page())();};
   reading(one.name+"与"+two.name+"的往来",body);safe(()=>page())();
+}
+
+function openReplyChain(run,receipt,through){
+  const body=h("div"),status=h("p","","hint"),list=h("div");body.append(status,list);
+  async function load(offset=0){
+    const q=new URLSearchParams({through,offset}),r=await api("/api/runs/"+run+"/reply-chain/"+encodeURIComponent(receipt)+"?"+q);
+    if(!body.isConnected)return;
+    status.textContent="截至"+windowName(through)+"，这组往来有 "+r.total+" 封。只按发信时明确引用的原信连接。";
+    list.querySelector(".more-replies")?.remove();
+    for(const m of r.items){
+      const card=h("article",null,"conversation-entry reply-item");card.dataset.selected=String(m.id===receipt);
+      card.append(h("small",m.parent ? "回复 "+m.parent : "最初的信","eyebrow"),h("h3",m.sender+" → "+m.recipient),
+        h("p",m.text+(m.truncated ? "…" : "")),h("small",windowName(m.sent_window)+"第 "+m.round+" 轮发出，"+
+          (m.received_window ? windowName(m.received_window)+"已送达。" : "仍在途中，预计"+windowName(m.due_window)+"到达。"),"quiet"));
+      if(m.enclosures.length)card.append(h("small","随信附件　"+m.enclosures.join("、"),"quiet"));
+      card.append(evidenceLinks([m.id],run));list.append(card);
+    }
+    if(r.next<r.total)list.append(button("继续读取回复",()=>load(r.next),"link more-replies"));
+  }
+  reading("这封信的回复",body);safe(load)();
 }

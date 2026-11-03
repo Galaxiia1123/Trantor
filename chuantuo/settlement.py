@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from .replies import validate_reply
 from collections import Counter
 from copy import deepcopy
 
@@ -141,6 +142,7 @@ def verify_commits(scenario, config, events):
     acted_per_round = Counter()
     total_actions = total_messages = total_deferred = 0
     plans, visible_at_round, deadlines = {}, {}, {}
+    seen_letters,observation_ids={},{}
     receipts=[]
     expected_actions = len(actors) * config.rounds_per_window
     for event in events:
@@ -152,6 +154,8 @@ def verify_commits(scenario, config, events):
         if event["window"] != last_window + 1:
             raise ValueError(f"事件 {event['id']} 的窗口与提交边界不一致")
         scheduled=perception.calendar.get(event["window"],()) if perception else ()
+        if kind=="message_delivered":
+            seen_letters[event["id"]]=event
         if kind=="external_event":
             if observations or len(receipts)>=len(scheduled) or not _same(data,scheduled[len(receipts)].model_dump(mode="json")):
                 raise ValueError("外部事件与场景设定、顺序或生效窗口不一致")
@@ -205,13 +209,15 @@ def verify_commits(scenario, config, events):
             action_owners[event["id"]] = owner
             action_turns[event["id"]]=data["round"]
             for message in data["messages"]:
+                if ref:=message.get("reply_to"):
+                    validate_reply(seen_letters.get(ref),owner,message["recipients"],observation_ids[owner])
                 for recipient in set(message["recipients"]):
                     if recipient not in actors:
                         raise ValueError("表达包含不存在的收件人")
-                    expected_messages[event["id"],owner,recipient,message["text"],tuple(message.get("enclosures",()))]+=1
+                    expected_messages[event["id"],owner,recipient,message["text"],tuple(message.get("enclosures",())),message.get("reply_to")]+=1
         elif kind in {"message_delivered","message_dispatched"}:
             doc_ids=tuple(doc["id"] for doc in data.get("enclosures",()))
-            key = data["action_id"], data["from"], data["to"], data["text"], doc_ids
+            key = data["action_id"], data["from"], data["to"], data["text"], doc_ids, data.get("reply_to")
             if outbound[key] >= expected_messages[key]:
                 raise ValueError(f"投递 {event['id']} 与该表达的收件人或内容不符")
             if doc_ids and (not perception or not _same(data["enclosures"],perception.documents.envelope(doc_ids))):
@@ -234,6 +240,7 @@ def verify_commits(scenario, config, events):
                 inboxes[data["to"]].append(perception.documents.received(event) if perception else data)
         elif kind == "observation":
             viewer, visible = data["actor_id"], data["visible"]
+            observation_ids[viewer]=event["id"]
             if viewer not in actors or visible["self"]["id"] != viewer:
                 raise ValueError("主体观察归属不符")
             turn = visible["round"]

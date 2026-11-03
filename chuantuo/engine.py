@@ -24,6 +24,7 @@ from .settlement import actor_evidence, complete_scheduled_reviews, settled_stat
 from .schema import validate_outbox
 from .documents import envelope_scope
 from .briefing import runtime_scene
+from .replies import envelope_key, validate_reply
 
 
 def encode(value) -> str:
@@ -48,6 +49,9 @@ class Journal:
         self._offsets = {}
         self._window_rows = {}
         self._round_observations = {}
+        self._letters_by_envelope={}
+        self._letters_by_reader={}
+        self._reply_events={}
         self._settlements = {}
         self._usage = {}
         self._prep_sizes = {}
@@ -125,6 +129,11 @@ class Journal:
         if kind=="observation":
             key=(event["window"],data["visible"]["round"],data["actor_id"])
             self._round_observations.setdefault(key,[]).append(event)
+        elif kind=="message_delivered":
+            self._letters_by_envelope.setdefault(envelope_key(data),[]).append(event)
+            self._letters_by_reader.setdefault(data["to"],[]).append(event)
+        if kind in {"message_delivered","message_dispatched"} and data.get("reply_to"):
+            self._reply_events.setdefault(data["reply_to"],[]).append(event)
         if event["kind"] in {"expression","decision_deferred","message_dispatched","message_delivered","window_committed","settlement_rejected","model_failure","external_event"}:
             self._window_rows.setdefault(event["window"], []).append(event)
         if event["kind"] == "window_committed":
@@ -156,18 +165,52 @@ class Journal:
             for obs in reversed(self._round_observations.get((window,turn,actor),())):
                 if obs["id"] in discarded:
                     continue
-                if any(all(m.get(k)==delivery.get(k) for k in ("action_id","from","to","text","dispatch_id","enclosures")) for m in obs["data"]["visible"]["messages"]):
+                if any(all(m.get(k)==delivery.get(k) for k in ("action_id","from","to","text","dispatch_id","enclosures","reply_to")) for m in obs["data"]["visible"]["messages"]):
                     return obs["id"]
         return None
 
     def observation_before(self, action, discarded):
         data=action["data"]
-        key=(action["window"],data["round"],data["actor_id"])
+        return self.round_observation(data["actor_id"],action["window"],data["round"],discarded,before=action["id"])
+
+    def round_observation(self,actor,window,turn,discarded,*,before=None):
         with self._lock:
-            for obs in reversed(self._round_observations.get(key,())):
-                if obs["id"] not in discarded and int(obs["id"][1:])<int(action["id"][1:]):
+            for obs in reversed(self._round_observations.get((window,turn,actor),())):
+                if obs["id"] not in discarded and (before is None or int(obs["id"][1:])<int(before[1:])):
                     return obs
         return None
+
+    def reply_mail(self,obs,discarded,*,recent_windows=3):
+        actor=obs["data"]["actor_id"];visible=obs["data"]["visible"]
+        before=int(obs["id"][1:]);counts={};messages=[];current=set();recent=[]
+        with self._lock:
+            for message in visible["messages"]:
+                key=envelope_key(message)
+                choices=self._letters_by_envelope.get(key,())
+                index=counts.get(key,0)
+                while index<len(choices) and choices[index]["id"] in discarded:index+=1
+                if index==len(choices) or int(choices[index]["id"][1:])>=before:
+                    raise ValueError("收件箱与这轮实际送达的信件不符")
+                ref=choices[index]["id"];counts[key]=index+1;current.add(ref)
+                messages.append({**message,"receipt_id":ref})
+            for letter in reversed(self._letters_by_reader.get(actor,())):
+                if letter["window"]<obs["window"]-recent_windows:break
+                ref=letter["id"]
+                if int(ref[1:])<before and ref not in current and ref not in discarded:
+                    d=letter["data"]
+                    recent.append({"receipt_id":ref,"from":d["from"],"window":letter["window"],"excerpt":d["text"][:72]})
+                    if len(recent)==4:break
+        return {**visible,"messages":messages},recent
+
+    def has_replies(self,ref,through,discarded):
+        with self._lock:return any(e["window"]<=through and e["id"] not in discarded for e in self._reply_events.get(ref,()))
+
+    def validate_replies(self,decision,actor,observation_id,discarded):
+        for message in decision.messages:
+            if not message.reply_to:continue
+            try:receipt=self.event(message.reply_to) if message.reply_to not in discarded else None
+            except FileNotFoundError:receipt=None
+            validate_reply(receipt,actor,message.recipients,observation_id)
 
     def inbox_before(self, action, discarded):
         if obs:=self.observation_before(action,discarded):
@@ -289,6 +332,7 @@ class Journal:
                     "input_id":original["id"],"output_id":output["id"],"action_id":action["id"],
                     "decision":action["data"]["text"],"outgoing":deepcopy(action["data"].get("messages",[])),
                     "observation":payload["observation"],"memory":payload["memory"],"coverage":payload.get("memory_coverage"),
+                    **({"reply_targets":payload["reply_targets"]} if payload.get("reply_targets") else {}),
                     **({"resumed_plan":payload["resume_plan"]} if payload.get("resume_plan") else {})}
 
     def page(self, after=0, limit=500, project=None):
@@ -620,6 +664,9 @@ class Simulation:
                 if schema is Decision:
                     validate_outbox(result,self._perception.delivery_limits)
                     self._perception.documents.validate(result,self._observations[actor_id])
+                    if any(m.reply_to for m in result.messages):
+                        obs=self.journal.round_observation(actor_id,self.window+1,self.round,self._discarded)
+                        self.journal.validate_replies(result,actor_id,obs["id"],self._discarded)
             except ValueError as error:
                 issues = [{key: issue[key] for key in ("type", "loc", "msg")}
                           for issue in error.errors(include_input=False, include_url=False)] if isinstance(error,ValidationError) else [
@@ -628,7 +675,7 @@ class Simulation:
                     "output_id": output["id"], "attempt": attempt + 1, "issues": issues}, self.window + 1)
                 if attempt == retries:
                     if not isinstance(error,ValidationError):
-                        raise ModelError(f"主体 {actor_id} 的收件范围校验未通过，原消息未投递") from None
+                        raise ModelError(f"主体 {actor_id} 的收件范围校验未通过，原消息未投递。{error}") from None
                     raise
                 payload = {**payload, "response_schema": schema.model_json_schema(),
                            "output_correction": {"previous_response": raw, "issues": issues}}
@@ -652,8 +699,11 @@ class Simulation:
         def callback(memory):
             config_id = self.config.model_id("actor", self.depths[actor_id])
             if self.notebooks:
-                payload = self.notebooks[actor_id].payload(self._observations[actor_id], self.config,self._wake.get(actor_id))
-                return self._call(config_id, "agent", payload, actor_instruction(self.config,bool(payload["observation"].get("documents"))), actor_id, Decision)
+                obs=self.journal.round_observation(actor_id,self.window+1,self.round,self._discarded)
+                visible,recent=self.journal.reply_mail(obs,self._discarded,recent_windows=self.config.history_windows)
+                payload = self.notebooks[actor_id].payload(visible,self.config,self._wake.get(actor_id),recent)
+                instruction=actor_instruction(self.config,bool(visible.get("documents")),bool(visible["messages"] or payload.get("reply_targets")))
+                return self._call(config_id,"agent",payload,instruction,actor_id,Decision)
             total = memory["total_items"] if isinstance(memory,dict) else len(memory)
             payload = {"task": "agent", "actor_id": actor_id, "window": self.window + 1, "round": self.round,
                        "observation": self._observations[actor_id], "memory": memory["items"] if isinstance(memory,dict) else memory}
@@ -751,6 +801,7 @@ class Simulation:
     def _send_message(self, sender, recipient, message, action_id):
         window=self.window+1
         data={"from":sender,"to":recipient,"text":message.text,"action_id":action_id}
+        if ref:=getattr(message,"reply_to",None):data["reply_to"]=ref
         if keys:=getattr(message,"enclosures",()):
             data["enclosures"]=self._perception.documents.envelope(keys)
         if scope:=envelope_scope(data,self._perception.delivery_limits):

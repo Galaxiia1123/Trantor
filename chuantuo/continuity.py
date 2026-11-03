@@ -38,8 +38,10 @@ def world_instruction(allowed):
         "本窗没有可核对的有向关系引用。每条 reviews 完全省略 influence_refs。主体自己的决定引用 action_ids，到件凭据引用 event_ids。")
 
 
-def actor_instruction(config, documents=False):
+def actor_instruction(config, documents=False, replies=False):
     instruction=AGENT_INSTRUCTION
+    if replies:
+        instruction+="\n直接答复哪一封来信，就在发给原发件人的那条消息中填 reply_to，使用本轮收件或 reply_targets 中的 receipt_id。主动发起的新话题省略 reply_to。"
     if documents:
         instruction+="\n若决定随信发出原件，在该条消息中加入 enclosures 编号数组，只能选本人 documents 中列出的原件并遵守 can_send_to。收到的 enclosures 是实际交付的原文副本；声称已经寄出不会交付附件。"
     if not config.max_review_interval:
@@ -109,7 +111,7 @@ class Notebook:
                                **({"document":old["document"],"kind":old["kind"]} if "document" in old else {}),
                                **({"kind":old["kind"],"dispatch":old["dispatch"]} if "dispatch" in old else {})})
 
-    def payload(self, observation, config, wake=None):
+    def payload(self, observation, config, wake=None, reply_targets=()):
         view = decision_view(observation)
         end = max(0, len(self.records) - config.recent_records)
         query = " ".join(m["text"] for m in view["messages"]) or " ".join(item["text"] for item in self.open.values())
@@ -132,14 +134,18 @@ class Notebook:
             memory["sharing"] = self.sharing
         payload = {"task": "agent", "actor_id": view["self"]["id"], "window": view["window"],
                    "round": view["round"], "observation": view, "memory": memory}
+        if reply_targets:payload["reply_targets"]=list(reply_targets)
         if config.max_review_interval:
             payload["latest_review_window"]=view["window"]+config.max_review_interval
             if wake:
                 payload["resume_plan"]=wake
         limit = config.model.context_limit_chars
-        system_size=len(actor_instruction(config,bool(view.get("documents"))))
+        system_size=len(actor_instruction(config,bool(view.get("documents")),bool(view["messages"] or reply_targets)))
         def fits():
             return system_size + len(json.dumps(payload, ensure_ascii=False)) <= limit
+        if reply_targets and not fits():
+            del payload["reply_targets"]
+            system_size=len(actor_instruction(config,bool(view.get("documents")),bool(view["messages"])))
         for key in ("earlier", "retrieved", "recent"):
             while memory[key] and not fits():
                 memory[key].pop(0)
@@ -212,6 +218,7 @@ def add_decision_inbox(payload, journal, discarded, budget):
                   {"from":m["from"],"text":m["text"][:700],**({"excerpt":True} if len(m["text"])>700 else {})})
             if enclosed:=m.get("enclosures"):
                 item["attached"]=[d["title"] for d in enclosed]
+            if m.get("reply_to"):item["reply_to"]=m["reply_to"]
             row["attest"].append(item)
             if len(json.dumps(row,ensure_ascii=False))+2>allowance:
                 row["attest"].pop();break

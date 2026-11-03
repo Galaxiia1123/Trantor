@@ -681,6 +681,7 @@ class MatterUpdate(Record):
 
 class AgentMessage(Message):
     enclosures: list[Identifier] = Field(default_factory=list,max_length=4)
+    reply_to: str | None = Field(default=None,pattern=r"^e[0-9]{6,12}$")
 
     @model_validator(mode="after")
     def separate_enclosures(self):

@@ -628,9 +628,12 @@ async function openActorContext(actor, window, turn, replace = false, run = acti
     body.append(h("h3","本轮收到的消息"));
     view.messages.forEach(m=>{
       body.append(h("p",m.from+" → "+m.to+"　"+m.text),evidenceLinks([m.receipt_id || result.observation_id || result.input_id],run));
+      if(m.reply_to)body.append(h("small","发件人将这封信标为对 "+m.reply_to+" 的答复。","quiet"));
       for(const doc of m.enclosures || [])body.append(disclosure("收到附件 · "+doc.title,h("p",doc.text),evidenceLinks([m.receipt_id].filter(Boolean),run)));
     });
   }
+  if(result.reply_targets?.length)body.append(disclosure("当时可直接答复的旧信",...result.reply_targets.map(m=>
+    h("p",windowName(m.window)+" · "+m.from+"　"+m.excerpt+"　"+m.receipt_id))));
   if(view.documents?.length)body.append(disclosure("当时持有的原件或副本",...view.documents.map(d=>{
     const original=view.visible_materials?.find(m=>m.document?.id===d.id),line=h("div");
     line.append(h("strong",d.title),h("small",d.first_delivery ? " · 第 "+d.received_window+" 窗取得副本" : " · 开局已持有","quiet"));

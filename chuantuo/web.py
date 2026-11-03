@@ -41,7 +41,7 @@ from . import __version__
 from .experiments import Adoption, ExperimentRequest, adopt_suggestion, branch_payload, compare, experiment_comparison, fork_experiment, outcome_groups
 from .recovery import salvage
 from .observatory import FieldWatch, observe_field, observation_notes, ongoing_matters
-from .interactions import interaction_map, conversation, dispatch_ledger
+from .interactions import interaction_map, conversation, dispatch_ledger, reply_chain
 from .studies import Studies, StudyRequest, study_notes
 from .readings import ReadingRequest, read_field
 from .asking import PlanQuestion, plan_question
@@ -610,6 +610,10 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
                           q:str=Query(default="",max_length=200),offset:int=Query(default=0,ge=0),limit:int=Query(default=30,ge=1,le=80)):
         return conversation(get_run(run_id),one,two,start,through,q,offset,limit)
 
+    @app.get("/api/runs/{run_id}/reply-chain/{receipt}")
+    def letter_replies(run_id:str,receipt:str,through:int|None=Query(default=None,ge=0),offset:int=Query(default=0,ge=0),limit:int=Query(default=30,ge=1,le=80)):
+        return reply_chain(get_run(run_id),receipt,through,offset,limit)
+
     @app.get("/api/runs/{run_id}/documents")
     def document_copies(run_id:str,through:int|None=Query(default=None,ge=0),document:str|None=None,
                         offset:int=Query(default=0,ge=0),limit:int=Query(default=30,ge=1,le=100)):
@@ -976,6 +980,7 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
                         "rehearsal":("rehearsal-room.md","北廊排练室 · 排期交换 · 3 窗",None),
                         "roof":("roof-calendar.md","钟楼天台 · 外部事件 · 3 窗",None),
                         "class":("night-class.md","榆街社区夜课 · 席位与开班 · 2 窗",None),
+                        "letters":("loan-correspondence.md","榆岸档案馆 · 两封并行来信 · 3 窗",None),
                         "mail":("mountain-mail.md","山线货运站 · 跨窗通信 · 3 窗",None)}
     asset_names=[row[0] for row in material_templates.values()]+["tidal-replay.json","verified-replay.json"]
     case_assets = {name:(static.parent/"templates"/name).read_bytes() for name in asset_names}
