@@ -693,8 +693,12 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
         return repository.save_project(branch_payload(get_run(run_id),request.window,request.title))
 
     def check_experiment_parent(parent):
-        if not isinstance(parent.config, RunConfig11) or profile.model != parent.config.model:
+        if not isinstance(parent.config, RunConfig11):
             raise ValueError("对照实验需要绑定与原路线相同的 v1.1 模型配置")
+        if parent.config.model.provider=="demo":
+            return
+        if profile.model != parent.config.model:
+            raise ValueError("请绑定原路线使用的模型配置后再做对照实验")
         if owns_gateway and not credential_ready(profile.model):
             raise ValueError("请先配置当前模型的凭据")
 
@@ -927,6 +931,7 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
     material_templates={"tidal":("tidal-port.md","潮汐港 · 跨层协商 · 9 窗","case"),
                         "rehearsal":("rehearsal-room.md","北廊排练室 · 排期交换 · 3 窗",None),
                         "roof":("roof-calendar.md","钟楼天台 · 外部事件 · 3 窗",None),
+                        "class":("night-class.md","榆街社区夜课 · 席位与开班 · 2 窗",None),
                         "mail":("mountain-mail.md","山线货运站 · 跨窗通信 · 3 窗",None)}
     asset_names=[row[0] for row in material_templates.values()]+["tidal-replay.json","verified-replay.json"]
     case_assets = {name:(static.parent/"templates"/name).read_bytes() for name in asset_names}

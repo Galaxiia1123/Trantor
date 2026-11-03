@@ -1,6 +1,7 @@
 """Turn a research question into an editable alternative, separate from the simulated world."""
 import re
-from pydantic import Field
+from itertools import chain
+from pydantic import Field, StrictFloat, StrictInt
 
 from .experiments import ExperimentRequest, apply_intervention
 from .models import protect_credentials
@@ -15,6 +16,7 @@ class ComparisonIdea(Record):
     experiment: ExperimentRequest
     watch: FieldWatch | None = None
     quote: SourceQuote | None = None
+    additional_values: list[StrictInt | StrictFloat] = Field(default_factory=list,max_length=7)
 
 
 def _grounded_quote(quote,scene):
@@ -50,6 +52,38 @@ def _explicit_date_question(scene,config,earliest):
                                  "event_move":{"event_id":matched[0].id,"new_window":new}},"watch":watch}
 
 
+def _explicit_levels(scene,config,earliest):
+    fields=[(a,f) for a in scene.entities for f in a.fields]
+    number=r"[-+]?\d+(?:\.\d+)?"
+    for source in scene.sources:
+        if source.public_reference or source.simulation_ref:continue
+        for sentence in re.findall(r"[^。！？!?\n]{1,450}[。！？!?]?",source.text):
+            mark=re.search(r"(?:分别|逐档)(?:设为|设置为|设成|取|测试|试试|试)\s*",sentence)
+            if not mark:continue
+            choices=[(a,f) for a,f in fields if f.kind=="number" and (f.label or f.id) in sentence]
+            if len(choices)>1:choices=[(a,f) for a,f in choices if a.name in sentence]
+            if len(choices)!=1:continue
+            actor,field=choices[0]
+            unit=r"(?:\s*"+re.escape(field.unit)+r")?" if field.unit else ""
+            token=number+unit
+            values=re.match(token+r"(?:\s*(?:、|，|,|和|与|或)\s*"+token+r"){1,7}",sentence[mark.end():])
+            if not values or re.search(r"\d,\d{3}(?:\D|$)",values.group()):continue
+            rest=sentence[mark.end()+values.end():]
+            if re.match(r"\s*(?:、|，|,|和|与|或)\s*[-+]?\d",rest):continue
+            numbers=[float(v) if "." in v else int(v) for v in re.findall(number,values.group())]
+            start=re.search(r"第\s*(\d+)\s*窗(?:口)?(?:末|结束时)",sentence[:mark.start()])
+            stop=re.search(r"(?:比较|观察|到|至)[^。！？]{0,12}?第\s*(\d+)\s*窗",rest)
+            split=int(start[1])-1 if start else earliest
+            if split<earliest:continue
+            watch=[(a,f) for a,f in fields if (a.id,f.id)!=(actor.id,field.id) and (f.label or f.id) in rest]
+            yield {"question":sentence.strip()[:160],"reason":"文稿列出了同一字段的多个取值。每档在同一窗末设置，默认只在结算后通过字段的可见范围体现。可编辑通知对象和终点。",
+                   "quote":{"source_id":source.id,"quote":sentence.strip()},
+                   "experiment":{"kind":"field","window":split,"through":int(stop[1]) if stop else config.windows,
+                                 "assignment":{"entity_id":actor.id,"field_id":field.id,"value":numbers[0]}},
+                   "additional_values":numbers[1:],
+                   "watch":{"actor_id":watch[0][0].id,"field_id":watch[0][1].id,"title":watch[0][1].label or watch[0][1].id} if len(watch)==1 else None}
+
+
 def useful_ideas(scene,config,proposals=(),watches=(),*,earliest=0,reviewed=False):
     ideas=[]
     def add(item,origin):
@@ -64,17 +98,34 @@ def useful_ideas(scene,config,proposals=(),watches=(),*,earliest=0,reviewed=Fals
                     idea.watch.resolve(scene,config.catalog.values())
                 except ValueError:
                     idea=idea.model_copy(update={"watch":None})
-            _,condition=apply_intervention(scene,spec,"proposed",scene.initial_state() if spec.window==0 else None,config.catalog.values())
+            state=scene.initial_state() if spec.window==0 else None
+            if idea.additional_values:
+                from .studies import StudyRequest
+                study=StudyRequest(experiment=spec,additional_values=idea.additional_values,repetitions=1,call_limit=1)
+                conditions=[apply_intervention(scene,alternative,"proposed",state,config.catalog.values(),allow_same_field=True)[1]
+                            for alternative in study.conditions().values()]
+                condition="共 "+str(len(conditions))+" 档，首档："+conditions[0]
+            else:
+                _,condition=apply_intervention(scene,spec,"proposed",state,config.catalog.values())
             grounded=_grounded_quote(idea.quote,scene)
         except ValueError:
             return
         snapshot=spec.model_dump(mode="json")
+        if origin=="model" and idea.additional_values:
+            values={spec.assignment.value,*idea.additional_values}
+            for prior in ideas:
+                other=prior["experiment"].get("assignment")
+                if prior["origin"]=="material" and other and prior.get("additional_values") and (
+                        other["entity_id"],other["field_id"])==(spec.assignment.entity_id,spec.assignment.field_id) and (
+                        {other["value"],*prior["additional_values"]}==values):
+                    return
         if any(row["experiment"]==snapshot or (spec.event_move and row["experiment"].get("event_move")==snapshot["event_move"]) for row in ideas):
             return
         data=idea.model_dump(mode="json")
+        if origin=="material" and not grounded:return
         data.update(quote=data["quote"] if grounded else None,origin=origin,condition=condition)
         ideas.append(data)
-    for item in _explicit_date_question(scene,config,earliest):
+    for item in chain(_explicit_date_question(scene,config,earliest),_explicit_levels(scene,config,earliest)):
         add(item,"material")
         if len(ideas)>=2:break
     for raw in proposals:

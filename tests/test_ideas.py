@@ -31,3 +31,18 @@ def test_source_question_moves_a_future_event_without_disclosing_the_private_cal
     assert alternate.scheduled_events[0].visibility==active.scheduled_events[0].visibility
     with pytest.raises(ValueError,match="尚未发生"):
         apply_intervention(active,spec.model_copy(update={"window":2,"through":3}),"sample")
+
+
+def test_explicit_levels_keep_the_authors_timing_and_check_every_value():
+    text="我想在第 1 窗末把席位分别设为 6、12、18 个，比较第 2 窗末的安排。"
+    scene=Scenario11.model_validate({"title":"夜课","background":"讨论夜课。","sources":[{"id":"doc","name":"设定","text":text}],
+        "domains":["排课"],"entities":[{"id":"desk","name":"书房","identity":"排课","fields":[
+        {"id":"seats","label":"席位","kind":"number","domain":"排课","unit":"个","value":6,"constraints":{"maximum":24}},
+        {"id":"plan","label":"安排","kind":"string","domain":"排课","value":"待定"}]}]})
+    cfg=RunConfig11.model_validate({"model":{"provider":"demo","model":"fixture"},"windows":2})
+    proposal={"question":"试不同席位","experiment":{"kind":"field","window":1,"through":2,"assignment":{
+        "entity_id":"desk","field_id":"seats","value":12}},"additional_values":[6,18]}
+    ideas=useful_ideas(scene,cfg,[proposal])
+    assert len(ideas)==1 and ideas[0]["experiment"]["window"]==0 and ideas[0]["additional_values"]==[12,18]
+    assert ideas[0]["quote"]["quote"]==text and ideas[0]["watch"]["field_id"]=="plan"
+    assert not useful_ideas(scene.model_copy(update={"sources":[]}),cfg,[{**proposal,"additional_values":[6,250]}])

@@ -360,8 +360,25 @@ def main():
                 expect(page.locator("#reading-content")).to_contain_text("广场屏")
                 page.keyboard.press("Escape");page.get_by_role("button",name="外部事件日历").click()
                 expect(page.locator("#reading-content")).to_contain_text("运行结束时尚未到预定日期")
-            assert len([task for _,task in endpoint.calls if task=="agent"]) == 150
-            assert len(endpoint.calls)==169 and {m for m,_ in endpoint.calls}=={"local-script-http"},endpoint.calls
+                page.keyboard.press("Escape");page.goto(run_url);page.get_by_role("button",name="试一个条件",exact=True).click()
+                page.get_by_label("从哪里分岔").select_option("8");page.get_by_label("探索方式").select_option("field")
+                page.get_by_label("要改变的字段").select_option(label="市议会 · 资金缺口")
+                page.get_by_label("窗末目标值（万元）",exact=True).fill("1250")
+                page.get_by_text("同时比较这个字段的多个取值",exact=True).click()
+                page.get_by_label("其他目标值",exact=True).fill("1500、2000")
+                page.get_by_label("每个取值运行几次").select_option("1")
+                page.get_by_label("想比较什么",exact=True).select_option(label="市议会 · 资金缺口的终值")
+                expect(page.locator(".experiment-estimate")).to_contain_text("共 3 条路线")
+                page.get_by_label("全组模型调用上限",exact=True).fill("33")
+                page.get_by_role("button",name="启动多档对照").click()
+                expect(page.locator(".study-progress")).to_contain_text("3 / 3 条完成",timeout=40000)
+                expect(page.locator(".study-contrast")).to_contain_text("1250万元")
+                expect(page.locator(".study-contrast")).to_contain_text("2000万元")
+                page.get_by_role("button",name="并排读两条路线").click()
+                page.get_by_label("右侧条件路线").select_option("3")
+                expect(page.locator(".comparison-side").last).to_contain_text("2000万元")
+            assert len([task for _,task in endpoint.calls if task=="agent"]) == 180
+            assert len(endpoint.calls)==202 and {m for m,_ in endpoint.calls}=={"local-script-http"},endpoint.calls
             assert not errors and not endpoint.errors,(errors,endpoint.errors)
             browser.close(); print(f"Browser acceptance passed: source intake, nine windows, field and calendar experiments, suggested research question, interview, report and repeated comparisons; {len(endpoint.calls)} loopback model calls.")
     finally:

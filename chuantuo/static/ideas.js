@@ -43,6 +43,7 @@ function ideaPreview(idea) {
   if(idea.reason)card.append(h("p",idea.reason));
   if(idea.condition && idea.condition!==idea.reason)card.append(h("small",idea.condition,"hint"));
   const e=idea.experiment;
+  if(idea.additional_values?.length)card.append(h("p","研究取值　"+[e.assignment.value,...idea.additional_values].join(" / ")));
   card.append(h("small","从"+windowName(e.window)+"至"+windowName(e.through)+" · "+(idea.watch?.title || "比较过程和终点状态"),"quiet"));
   if(idea.quote)card.append(disclosure("展开材料原句",h("p","“"+idea.quote.quote+"”","hint")));
   return card;

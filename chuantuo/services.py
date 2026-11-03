@@ -187,7 +187,7 @@ def _report_inputs(simulation):
 重要结论另列 claims。source 引用材料编号及开局或准备记录；assumption 是模拟假设；simulation 只用于窗口内发生的表达、投递、观察或客观结果。
 描述结算字段时引用 execution.commits 中对应窗口的提交编号。model 调用、错误、重试、完成状态属于 method，以 provider_attempt、run_status 或拒绝记录为据。
 interpretation 用于解释、局限及不能外推的讨论。每条结论按其实际依据填写；同一事实不要在不同章节反复重写。
-source_ids 只填写实际使用的材料编号。客观状态变化引用已提交窗口。带 simulation_ref 的来源是先前推演的快照。
+evidence_ids 只填本次 events 的事件 id（形如 e000001）。材料编号只填在结论的 source_ids；引用文稿的章节用收录该文稿的开局事件作 evidence_ids。客观状态变化引用已提交窗口。带 simulation_ref 的来源是先前推演的快照。
 对解释明确标注“报告解释”。模拟结果不能直接作为现实结论。失败或未完成的窗口不得写成已提交。
 不包含密钥或内部思维链，不补造情节。不能将离线脚本演示称为真实模型实验。
 场景虚构与调用方式是两件事。sources 中保留的旧示例运行说明只描述原材料；本次实际调用方式
@@ -263,18 +263,27 @@ def generate_report(simulation: Simulation, gateway=None, progress=None, *, max_
             native = isinstance(simulation.config, RunConfig11)
             if native and not any(section.claims for section in report.sections):
                 raise ValueError("报告至少需要一条注明依据类型与记录的关键结论")
-            if any(not set(section.evidence_ids) <= ids for section in report.sections):
-                raise ValueError("报告引用了不存在的证据或本次未提供的记录")
             problems = []
             anchored = []
             creation = next((e for e in evidence if e["kind"]=="run_created" and e["id"] in ids), None)
             original_sources = {s["id"] for s in creation["data"]["scenario"]["sources"]} if creation else set()
             commit_refs = [e["id"] for e in evidence if e["kind"]=="window_committed" and e["id"] in ids]
+            def check_event_ids(where, refs):
+                missing=set(refs)-ids
+                if missing:
+                    wrong="、".join(str(r)[:90] for r in sorted(missing)[:4])
+                    hint=("。材料编号只可填在结论的 source_ids。原始文稿收录于 "+creation["id"]
+                          if creation and missing & original_sources else "。请引用本次提供的原始事件编号")
+                    problems.append(where+" 的 evidence_ids 引用了不存在的证据或未提供的事件 "+wrong+hint)
+                return not missing
             for section in report.sections:
+                check_event_ids("章节「"+section.title+"」",section.evidence_ids)
                 for claim in section.claims:
                     where = f"「{section.title}」中的结论“{claim.text[:70]}”"
-                    if not set(claim.evidence_ids) <= ids or not set(claim.source_ids) <= sources.keys():
-                        problems.append(where + "引用了不存在的证据或材料")
+                    event_ids_ok=check_event_ids(where,claim.evidence_ids)
+                    if unknown:=set(claim.source_ids)-sources.keys():
+                        problems.append(where+" 的 source_ids 含有未提供的材料编号 "+"、".join(sorted(unknown)[:4]))
+                    if not event_ids_ok or unknown:
                         continue
                     records = [by_id[eid] for eid in claim.evidence_ids]
                     if native and claim.basis == "source":
@@ -296,13 +305,12 @@ def generate_report(simulation: Simulation, gateway=None, progress=None, *, max_
             if problems:
                 raise ValueError(" / ".join(problems[:8]))
         except (ValidationError, ValueError) as error:
-            if attempt == -1:
-                continue
             issues = ([{key: issue[key] for key in ("type", "loc", "msg")}
                        for issue in error.errors(include_input=False, include_url=False)]
                       if isinstance(error, ValidationError) else [{"msg": str(error)}])
-            simulation.journal.append("model_validation_error", {"purpose": "report", "output_id": output["id"],
-                "attempt": attempt + 1, "issues": issues}, cutoff_window)
+            if attempt>=0:
+                simulation.journal.append("model_validation_error", {"purpose": "report", "output_id": output["id"],
+                    "attempt": attempt + 1, "issues": issues}, cutoff_window)
             if attempt == 2:
                 raise
             payload = json.loads(base_messages[1]["content"])
@@ -310,7 +318,10 @@ def generate_report(simulation: Simulation, gateway=None, progress=None, *, max_
                 "instruction": "逐条修正上述分类、原始引用或格式。不同种类的事实分开写，缺少依据则删去该断言。返回完整 JSON。"}
             messages = [base_messages[0], {"role": "user", "content": encode(payload)}]
             if sum(len(m["content"]) for m in messages) > model.context_limit_chars:
-                messages = base_messages
+                payload["output_correction"].pop("previous_response")
+                messages=[base_messages[0],{"role":"user","content":encode(payload)}]
+                if sum(len(m["content"]) for m in messages)>model.context_limit_chars:
+                    messages=base_messages
         else:
             if attempt == -1:
                 coverage["rechecked_output_id"] = output["id"]

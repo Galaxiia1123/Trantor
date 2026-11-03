@@ -59,7 +59,7 @@ function scheduledValuePicker(actors, optional) {
   }
   field.onchange=redraw;redraw();
   node.append(label(optional ? "预定字段值（可选）" : "要改变的字段",field),targetWrap);
-  return {node,count:fields.length,set(value){
+  return {node,count:fields.length, selected:()=>field.value==="" || unknown?.checked ? null : fields[Number(field.value)],set(value){
     if(!value)return;
     const index=fields.findIndex(f=>f.actor===value.entity_id && f.id===value.field_id);
     if(index<0)return;field.value=String(index);redraw();

@@ -173,7 +173,7 @@ class ExperimentRequest(Record):
         return self
 
 
-def prepare_experiment(parent, spec):
+def prepare_experiment(parent, spec, *, allow_same_field=False):
     """Validate the intervention before scheduling any model work."""
     if not isinstance(parent.config, RunConfig11):
         raise ValueError("历史版本的场景可另存开局，条件对照需要 v1.1 场景")
@@ -182,11 +182,11 @@ def prepare_experiment(parent, spec):
     if parent.experiment and spec.window < parent.experiment["window"]:
         raise ValueError("请打开原路线以选择更早的分岔窗口")
     selected = boundary(parent, spec.window)
-    scene,condition=apply_intervention(parent._scenario,spec,parent.run_id,selected["state"],parent.config.catalog.values())
+    scene,condition=apply_intervention(parent._scenario,spec,parent.run_id,selected["state"],parent.config.catalog.values(),allow_same_field=allow_same_field)
     return selected,scene,condition
 
 
-def apply_intervention(baseline,spec,source_id,state=None,configs=()):
+def apply_intervention(baseline,spec,source_id,state=None,configs=(),*,allow_same_field=False):
     """Use the same scenario contract for a proposed question and an actual fork."""
     scene = baseline.model_dump(mode="json")
     condition = spec.condition.strip()
@@ -199,7 +199,7 @@ def apply_intervention(baseline,spec,source_id,state=None,configs=()):
         period=f.entry_period(change.value)
         if period and not period.allows(spec.window+1):
             raise ValueError("分岔后的首个窗口不在该目标值允许转入的期限内")
-        if state is not None and state[actor.id][f.id]==change.value:
+        if not allow_same_field and state is not None and state[actor.id][f.id]==change.value:
             raise ValueError("目标值与分岔时相同，可选择原样重跑")
         event_key=hashlib.sha256(encode([source_id,spec.model_dump(mode="json",exclude_none=True)]).encode()).hexdigest()[:12]
         scene["scheduled_events"].append({"id":"variation_"+event_key,"window":spec.window+1,
@@ -244,9 +244,9 @@ def apply_intervention(baseline,spec,source_id,state=None,configs=()):
     return scene, condition
 
 
-def fork_experiment(parent, spec, run_id, job_id, directory: Path, *, study=None, call_limit=None):
+def fork_experiment(parent, spec, run_id, job_id, directory: Path, *, study=None, call_limit=None, allow_same_field=False):
     """Copy a sealed prefix once. Stable event positions preserve private inboxes and citations."""
-    selected, scene, condition = prepare_experiment(parent,spec)
+    selected, scene, condition = prepare_experiment(parent,spec,allow_same_field=allow_same_field)
     config = parent.config.model_copy(update={"windows":spec.through})
     if call_limit is not None:
         limits=[v for v in (config.model_call_limit,call_limit) if v is not None]

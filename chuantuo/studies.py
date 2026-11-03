@@ -8,7 +8,7 @@ import uuid
 from decimal import Decimal, localcontext
 from pathlib import Path
 
-from pydantic import Field, ValidationError, model_validator
+from pydantic import Field, StrictFloat, StrictInt, ValidationError, model_validator
 
 from .engine import encode
 from .experiments import ExperimentRequest, prepare_experiment, trajectory_comparison
@@ -22,16 +22,40 @@ class StudyRequest(Record):
     experiment: ExperimentRequest
     repetitions: int = Field(default=3, ge=1, le=16)
     compare_original: bool = False
+    additional_values: list[StrictInt | StrictFloat] = Field(default_factory=list,max_length=7)
     call_limit: int = Field(gt=0, le=1_000_000)
     watch: FieldWatch | None = None
 
     @model_validator(mode="after")
     def distinct_conditions(self):
+        if self.additional_values:
+            first=self.experiment.assignment
+            if self.experiment.kind!="field" or first is None or type(first.value) not in (int,float):
+                raise ValueError("多档实验需要选择同一个数值字段和第一个目标值")
+            if self.experiment.condition.strip():
+                raise ValueError("多档实验沿用相同的通知方式，请在字段中设定值并留空自定义条件说明")
+            values=[first.value,*self.additional_values]
+            if any(not Decimal(str(v)).is_finite() for v in values) or len(set(values))!=len(values):
+                raise ValueError("各档必须是不重复的有限数值")
+            if (len(values)+int(self.compare_original))*self.repetitions>32:
+                raise ValueError("一组多档实验最多安排 32 条路线，请减少取值或重复次数")
         if self.compare_original and self.experiment.kind=="repeat":
             raise ValueError("双条件对照需要具体改变一个条件；原样重跑可直接使用重复实验")
-        if not self.compare_original and self.repetitions<2:
+        if not self.compare_original and not self.additional_values and self.repetitions<2:
             raise ValueError("重复实验至少需要两条路线")
         return self
+
+    def conditions(self):
+        result={}
+        if self.compare_original:
+            result["original"]=ExperimentRequest(window=self.experiment.window,through=self.experiment.through,kind="repeat")
+        if self.additional_values:
+            assignment=self.experiment.assignment
+            for i,value in enumerate([assignment.value,*self.additional_values],1):
+                result[f"level_{i}"]=self.experiment.model_copy(update={"assignment":assignment.model_copy(update={"value":value})})
+        else:
+            result["changed" if self.compare_original else None]=self.experiment
+        return result
 
 
 def measured(sim, watch, through):
@@ -92,6 +116,7 @@ def study_notes(record):
             "limit":"已到上限","pausing":"正在暂停","stopping":"正在结束"}
     findings={"observed":"出现过目标结果","not_observed":"未出现目标结果","maintained":"全程满足","violated":"曾偏离条件",
               "met_at_end":"终点达成","missed_at_end":"终点未达成","undetermined":"有未知窗口","undetermined_end":"终值未知","ended_early":"未覆盖期限"}
+    labels.update({a["arm"]:note_text(a["label"]) for a in record.get("arm_definitions",())})
     def outcome(row):
         if not row:return "—"
         if row["status"]!="tracking":return findings.get(row["status"],row["status"])
@@ -159,12 +184,30 @@ class Studies:
                 return self.view(study_id)
             self.check_parent(parent)
             protect_credentials(payload, parent.config.catalog.values())
-            _, _, condition = prepare_experiment(parent, request.experiment)
+            options=request.conditions()
+            if request.additional_values:
+                # Every level must be admissible before the first independent run can spend a call.
+                for exp in options.values():
+                    prepare_experiment(parent,exp,allow_same_field=True)
+                a=request.experiment.assignment
+                actor=next(e for e in parent._scenario.entities if e.id==a.entity_id)
+                field=next(f for f in actor.fields if f.id==a.field_id)
+                labels=[{"arm":key,"label":str(exp.assignment.value)+(field.unit or ""),"value":exp.assignment.value} if exp.assignment
+                        else {"arm":key,"label":"原条件"} for key,exp in options.items()]
+                condition=actor.name+" · "+(field.label or field.id)+"的多档对照"
+            else:
+                labels=[]
+                _, _, condition = prepare_experiment(parent, request.experiment)
             baseline = measured(parent, request.watch, request.experiment.through)
             members = []
             for replicate in range(1,request.repetitions+1):
-                arms=("original","changed") if request.compare_original else (None,)
-                for arm in arms if replicate%2 else reversed(arms):
+                arms=list(options)
+                if request.additional_values:
+                    offset=(replicate-1)%len(arms)
+                    arms=arms[offset:]+arms[:offset]
+                elif replicate%2==0:
+                    arms.reverse()
+                for arm in arms:
                     index=len(members)+1
                     key=uuid.uuid5(uuid.NAMESPACE_URL,f"trantor:study:{study_id}:{index}").hex
                     member={"index":index,"run_id":key[:12],"status":"queued","calls":0,"window":request.experiment.window,"outcome":None}
@@ -173,7 +216,7 @@ class Studies:
                     members.append(member)
             record = {"id":study_id, "parent_id":parent.run_id, "title":parent._scenario.title,
                       "condition":condition, "request":payload, "created_at":now(), "status":"running",
-                      "baseline":baseline, "members":members, "error":None}
+                      "baseline":baseline, "members":members, "error":None, **({"arm_definitions":labels} if labels else {})}
             self.save(record, new=True)
             self._start(study_id)
             return self.view(study_id)
@@ -189,6 +232,11 @@ class Studies:
         marker = sim.experiment or {}
         if marker.get("study") != member_marker(record,member) or marker.get("parent_id") != record["parent_id"]:
             raise ValueError("路线记录与实验组不匹配，请检查本机资料")
+        if record.get("arm_definitions"):
+            spec=StudyRequest.model_validate(record["request"]).conditions()[member["arm"]]
+            expected=spec.model_dump(mode="json")
+            if any(marker.get(k)!=expected[k] for k in ("kind","assignment","window","through","audience","readers")):
+                raise ValueError("路线记录与本档的数值、时间或通知范围不符")
 
     def _capture(self, record, member, sim):
         self._check_member(sim, record, member)
@@ -222,8 +270,9 @@ class Studies:
         with self.lock:
             record = self._refresh(self.read(study_id))
             members=record["members"]
-            if record["request"].get("compare_original"):
-                arms=[{"arm":name,**outcomes_for([m for m in members if m["arm"]==name])} for name in ("original","changed")]
+            if record.get("arm_definitions") or record["request"].get("compare_original"):
+                definitions=record.get("arm_definitions") or [{"arm":"original"},{"arm":"changed"}]
+                arms=[{**a,**outcomes_for([m for m in members if m["arm"]==a["arm"]])} for a in definitions]
                 return {**record,"outcomes":[],"arms":arms,"calls":sum(g["calls"] for g in arms),"completed":sum(g["completed"] for g in arms)}
             return {**record,**outcomes_for(members),"arms":[]}
 
@@ -231,9 +280,12 @@ class Studies:
         record=self.view(study_id)
         members={m["index"]:m for m in record["members"]}
         routes=[]
+        multi=bool(record.get("arm_definitions"))
+        if multi and members.get(original,{}).get("arm")==members.get(changed,{}).get("arm"):
+            raise ValueError("请选取不同条件的两条路线")
         for index,arm in ((original,"original"),(changed,"changed")):
             item=members.get(index)
-            if not item or item.get("arm")!=arm or item["status"]!="completed":
+            if not item or (not multi and item.get("arm")!=arm) or item["status"]!="completed":
                 raise ValueError("请从两个条件中分别选择一条已完成的路线")
             sim=self.get_run(item["run_id"])
             self._check_member(sim,record,item)
@@ -253,6 +305,7 @@ class Studies:
                     self._refresh(record)
                 rows.append({**{k:record[k] for k in ("id","parent_id","title","condition","status","updated_at")},
                              "count":len(record["members"]), "paired":record["request"].get("compare_original",False),
+                             "levels":len(record.get("arm_definitions",())),
                              "completed":sum(m["status"]=="completed" for m in record["members"])})
             return sorted(rows, key=lambda r:r["updated_at"], reverse=True)
 
@@ -306,10 +359,9 @@ class Studies:
                 else:
                     if member.get("created"):
                         raise ValueError("已开始路线的本地记录缺失，无法继续计数。请先恢复原记录。")
-                    exp=spec.experiment
-                    if member.get("arm")=="original":
-                        exp=ExperimentRequest(window=exp.window,through=exp.through,kind="repeat")
-                    sim=self.fork(parent,exp,rid,None,study=member_marker(record,member),call_limit=remaining)
+                    exp=spec.conditions()[member.get("arm")]
+                    sim=self.fork(parent,exp,rid,None,study=member_marker(record,member),call_limit=remaining,
+                                  allow_same_field=bool(spec.additional_values))
                 self._check_member(sim, record, member)
                 with self.lock:
                     record = self.read(study_id)

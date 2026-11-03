@@ -61,7 +61,8 @@ function experimentForm(view,idea=null,priorWindow=null) {
   const through = select("比较到哪个窗口",[]);
   const prompt = h("textarea",null,"editor"); prompt.maxLength = 1600; prompt.rows = 3;
   prompt.placeholder = "例如：运营社在本窗开始时收到一份有效签字函。";
-  const label = h("label","改变的条件"); label.append(prompt); form.append(label,picker.node,timing.node,shift.node);
+  const levels=numericLevels(picker);
+  const label = h("label","改变的条件"); label.append(prompt); form.append(label,picker.node,levels.node,timing.node,shift.node);
   const audience = select("开始时谁知道这个条件",[["world","仅世界系统"],["public","所有主体"],["readers","指定主体和世界系统"]]);
   const group = h("fieldset"); group.append(h("legend","知情主体"));
   for (const actor of view.actors) {
@@ -82,6 +83,7 @@ function experimentForm(view,idea=null,priorWindow=null) {
   }
   function update() {
     const changed=["condition","field"].includes(kind.value), fieldMode=kind.value==="field";
+    levels.show(fieldMode);const extra=levels.tokens().length;
     label.hidden=kind.value!=="condition";audience.parentElement.hidden=!changed;prompt.required=kind.value==="condition";
     timing.node.hidden=timing.node.disabled=kind.value!=="transit";
     shift.update(kind.value==="event_time",Number(split.value),Number(through.value));
@@ -91,20 +93,26 @@ function experimentForm(view,idea=null,priorWindow=null) {
     const calls=windows*(view.actors.length*view.rounds_per_window+1);
     const count=Number(repeats.value);
     pairLabel.hidden=pair.disabled=kind.value==="repeat";
-    const contrast=!pair.disabled && pair.checked, total=contrast ? count*2 : count;
+    const contrast=!pair.disabled && pair.checked, conditions=1+extra+(contrast ? 1 : 0),total=count*conditions;
+    repeats.parentElement.firstChild.textContent=extra ? "每个取值运行几次" : "新路线数量";
+    pairLabel.lastChild.textContent=extra ? "也按原条件运行相同次数，单独列出结果" : "也按原条件运行相同次数，分别比较两组结果";
     study.update(total,calls);
-    submit.textContent=contrast ? "启动双条件对照" : count===1 ? "启动新路线" : "启动这组实验";
-    cost.textContent=(contrast ? "原条件与改后条件分别运行 "+count+" 次，每条 "+windows+" 窗。" :
+    submit.textContent=extra ? "启动多档对照" : contrast ? "启动双条件对照" : count===1 ? "启动新路线" : "启动这组实验";
+    cost.textContent=(extra ? conditions+" 档条件，每档 "+count+" 次，共 "+total+" 条路线。":
+      contrast ? "原条件与改后条件分别运行 "+count+" 次，每条 "+windows+" 窗。" :
       count===1 ? "只重跑新路线的 "+windows+" 个窗口。" : count+" 条路线依次各跑 "+windows+" 个窗口。")+
       "全部主体逐轮判断约需 "+(calls*total)+" 次基础调用，纠正与重试会增加用量。"+
       (view.status.max_review_interval ? "主体可选择延续等待。" : "")+(contrast ? "存档原路线另作参照。" : "原路线使用已提交记录。");
+    if(view.mode==="sample")cost.textContent+=" 这条路线使用本机案例脚本，不产生 API 费用。";
   }
   split.onchange=()=>{limits();update();}; through.onchange=kind.onchange=audience.onchange=repeats.onchange=pair.onchange=update;
+  levels.field.oninput=update;picker.node.addEventListener("change",update);
   if(preset){
     kind.value=preset.kind;split.value=String(preset.window);limits();through.value=String(preset.through);
     prompt.value=preset.condition || "";audience.value=preset.audience || "world";
     for(const box of group.querySelectorAll("input"))box.checked=(preset.readers || []).includes(box.value);
     picker.set(preset.assignment);timing.set(preset.route);
+    if(idea.additional_values?.length){levels.show(true);levels.field.value=idea.additional_values.join("、");levels.node.open=true;}
   }else limits();
   update();
   form.onsubmit=async event=>{
@@ -119,8 +127,10 @@ function experimentForm(view,idea=null,priorWindow=null) {
                   assignment:kind.value==="field" ? picker.read() : null,route:kind.value==="transit" ? timing.read() : null,
                   event_move:kind.value==="event_time" ? shift.read() : null,audience:scope,readers};
       const contrast=!pair.disabled && pair.checked;
-      if(Number(repeats.value)>1 || contrast) {
-        const result=await study.submit(spec,Number(repeats.value),contrast);
+      const extra=levels.read(spec.assignment?.value);
+      if(extra.length && (1+extra.length+Number(contrast))*Number(repeats.value)>32)throw new Error("一组多档实验最多安排 32 条路线，请减少取值或重复次数。");
+      if(Number(repeats.value)>1 || contrast || extra.length) {
+        const result=await study.submit(spec,Number(repeats.value),contrast,extra);
         if(activeRun===run && form.isConnected && $("reading").open) {$("reading").close(); location.hash="study/"+result.id;}
       } else await job("experiment","/api/jobs/{id}/experiment/"+run,spec,async result=>{
         let warning="";

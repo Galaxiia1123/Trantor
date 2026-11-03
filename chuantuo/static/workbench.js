@@ -528,7 +528,7 @@ function drawLibrary() {
     studies:studies.filter(s=>matches(s.title,s.condition,s.id,studyStatus[s.status],"重复实验"))};
   $("studies").parentElement.hidden=!selections.studies.length;
   $("studies").replaceChildren(...selections.studies.slice(0,libraryLimits.studies).map(s=>recordRow(s.condition || s.title+" · 原条件重跑",
-    (s.paired ? "双条件对照 · " : "")+studyStatus[s.status]+" · "+s.completed+"/"+s.count+" 条完成",()=>{location.hash="study/"+s.id;},"比较结果")));
+    (s.levels ? s.levels+" 档条件 · " : s.paired ? "双条件对照 · " : "")+studyStatus[s.status]+" · "+s.completed+"/"+s.count+" 条完成",()=>{location.hash="study/"+s.id;},"比较结果")));
   $("projects").replaceChildren(...selections.projects.slice(0,libraryLimits.projects).map(p => recordRow(p.title, p.actors + " 个主体 · 第 " + p.version + " 版", () => {location.hash = "project/" + p.id;})));
   $("runs").replaceChildren(...selections.runs.slice(0,libraryLimits.runs).map(r => recordRow(r.experiment ? experimentKind(r.experiment)+" · "+(r.experiment.condition || r.title) : r.title, (statuses[r.status] || r.status) + " · " + r.window + "/" + r.windows + " 窗 · " + (r.mode === "demo" ? "脚本" : "模型接口"), () => {location.hash = "run/" + r.run_id;}, "回看")));
   if (!selections.projects.length) $("projects").append(h("p",query ? "没有匹配的场景。" : "整理后的场景会保存在这里。","empty"));

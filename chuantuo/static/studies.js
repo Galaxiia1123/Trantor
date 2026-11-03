@@ -3,6 +3,29 @@
 const studyStatus={queued:"等待开始",opening:"恢复分岔现场",pausing:"将在窗口末暂停",stopping:"将在窗口末结束",limit:"达到调用上限",
   ready:"待启动",running:"推演中",paused:"已暂停",failed:"未完成",interrupted:"服务中断",stopped:"已结束",completed:"已完成"};
 
+function numericLevels(picker) {
+  const field=h("input"),label=h("label","其他目标值"),help=h("p","","hint");
+  field.type="text";field.placeholder="例如 12、18、24";field.maxLength=240;label.append(field);
+  const node=disclosure("同时比较这个字段的多个取值",label,help);
+  let previous;
+  function tokens(){return node.hidden ? [] : field.value.trim().split(/[、，,\s]+/).filter(Boolean);}
+  return {node,field,tokens,show(enabled){
+    const def=picker.selected(), key=def?.actor+"/"+def?.id;
+    if(key!==previous){field.value="";previous=key;}
+    node.hidden=!(enabled && def?.kind==="number");field.disabled=node.hidden;
+    if(!node.hidden)help.textContent="第一个值填写在上方，其他值以逗号或空格分隔。最多再加 7 档，单位为"+(def.unit || "该字段的原单位")+"。如要比较原条件，可在下方勾选。";
+  },read(first){
+    const raw=tokens(), values=raw.map(Number), def=picker.selected();
+    if(!values.length)return [];
+    if(values.length>7 || raw.some(v=>!/^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?$/i.test(v)) ||
+       values.some(v=>!Number.isFinite(v) || Number.isInteger(v) && !Number.isSafeInteger(v)))throw new Error("其他目标值最多 7 个，均须为可精确表示的有限数值。");
+    if(new Set([first,...values]).size!==values.length+1)throw new Error("各档的目标值需要互不相同。");
+    if(values.some(v=>def.constraints?.minimum!=null && v<def.constraints.minimum || def.constraints?.maximum!=null && v>def.constraints.maximum))
+      throw new Error("有数值超出了这个字段的允许范围。");
+    return values;
+  }};
+}
+
 function studyOptions(view,run,proposed=null) {
   const node=h("fieldset",null,"study-options"), watch=h("select"), cap=h("input");
   node.append(h("legend","重复实验"));
@@ -28,8 +51,9 @@ function studyOptions(view,run,proposed=null) {
         for(const row of rows) add("观察卡 · "+(row.question.title || row.label),row.question);
       }).catch(()=>{requested=false;});
     }
-  },async submit(experiment,repetitions,compare_original=false) {
+  },async submit(experiment,repetitions,compare_original=false,additional_values=[]) {
     const body={experiment,repetitions,compare_original,call_limit:Number(cap.value),watch:choices[Number(watch.value)]};
+    if(additional_values.length)body.additional_values=additional_values;
     const signature=JSON.stringify(body);
     if(submission?.signature!==signature)submission={id:uid(),signature};
     return api("/api/runs/"+run+"/studies/"+submission.id,"PUT",body);
@@ -52,16 +76,16 @@ async function studyPage(id,gen) {
   const back=h("a","回到项目与记录");back.href="#library";
   page.replaceChildren(h("div","重复实验","eyebrow"),header,progress,grid,back);
   let previous="",lastControls="",serial=0,filter=null;
-  const armName=id=>id==="original" ? "原条件" : "改后条件";
   async function refresh() {
     const ticket=++serial;
     clearTimeout(timer);
     const r=await api("/api/studies/"+encodeURIComponent(id));
     if(gen!==routeGeneration || ticket!==serial)return;
     const spec=r.request.experiment, total=r.members.length;
+    const multi=Boolean(r.arm_definitions?.length),armName=id=>r.arm_definitions?.find(a=>a.arm===id)?.label || (id==="original" ? "原条件" : "改后条件");
     heading.textContent=r.condition || "相同条件，再走 "+total+" 次";
     subtitle.textContent=r.title+" · 从"+(spec.window ? windowName(spec.window)+"结算后" : "开局")+"比较至"+windowName(spec.through)+
-      (r.request.compare_original ? " · 两种条件各运行 "+r.request.repetitions+" 次" : "");
+      (multi ? " · "+r.arms.length+" 档条件，每档 "+r.request.repetitions+" 次" : r.request.compare_original ? " · 两种条件各运行 "+r.request.repetitions+" 次" : "");
     progress.textContent=(studyStatus[r.status] || r.status)+"　·　"+r.completed+" / "+total+" 条完成　·　模型调用 "+r.calls+" / "+r.request.call_limit;
     if(lastControls!==r.status){
       lastControls=r.status;controls.replaceChildren();
@@ -105,14 +129,14 @@ async function studyPage(id,gen) {
             else cell.textContent=arm.completed ? "0 / "+arm.completed : "尚无终值";
           }
         }
-        facts.append(table);
+        const scroll=h("div",null,"study-table-scroll");scroll.append(table);facts.append(scroll);
         if(!keys.size)facts.append(h("p",b ? "路线到达共同终点后显示结果。" : "这组实验分别保留每次独立运行的过程。","hint"));
         for(const arm of r.arms){
           const note=h("div",null,"arm-notes");note.append(h("strong",armName(arm.arm)+"　"+arm.completed+"/"+arm.total+" 条完成"));
           numeric(arm.numeric,note);facts.append(note);
         }
-        facts.append(h("small","每轮分别运行两种条件，先后顺序轮换。每列只统计本条件已到终点的路线，存档原路线单独作为参照。","quiet"));
-        if(r.arms.every(a=>a.completed))facts.append(button("并排读两条路线",()=>compareStudyRoutes(r),"link"));
+        facts.append(h("small",(multi ? "各档从同一处独立分岔，每次重复轮换起跑顺序。" : "每轮分别运行两种条件，先后顺序轮换。")+"每列只统计本条件已到终点的路线，存档原路线单独作为参照。","quiet"));
+        if(r.arms.filter(a=>a.completed).length>=2)facts.append(button("并排读两条路线",()=>compareStudyRoutes(r),"link"));
       }else{
         if(!r.outcomes.length && b)facts.append(h("p","路线到达共同终点后，这里会列出每种结果出现的次数。","hint"));
         for(const o of r.outcomes){
@@ -153,24 +177,29 @@ async function studyPage(id,gen) {
 
 function compareStudyRoutes(study) {
   const body=h("div"),controls=h("form",null,"study-compare-controls"),result=h("div"),spec=study.request.experiment;
+  const multi=Boolean(study.arm_definitions?.length);
+  const labelFor=arm=>study.arm_definitions?.find(a=>a.arm===arm)?.label || (arm==="original" ? "原条件" : "改后条件");
   function pick(arm,title){
     const select=h("select");select.setAttribute("aria-label",title);
-    for(const m of study.members.filter(m=>m.arm===arm && m.status==="completed"))
-      select.append(new Option("第 "+m.replicate+" 次运行"+(m.outcome ? " · "+studyOutcome(m.outcome) : ""),m.index));
+    for(const m of study.members.filter(m=>(multi || m.arm===arm) && m.status==="completed"))
+      select.append(new Option((multi ? labelFor(m.arm)+" · " : "")+"第 "+m.replicate+" 次运行"+(m.outcome ? " · "+studyOutcome(m.outcome) : ""),m.index));
     const label=h("label",title);label.append(select);controls.append(label);return select;
   }
-  const left=pick("original","原条件路线"),right=pick("changed","改后条件路线"),n=h("input");
+  const left=pick("original",multi ? "左侧条件路线" : "原条件路线"),right=pick("changed",multi ? "右侧条件路线" : "改后条件路线"),n=h("input");
+  const selected=el=>study.members.find(m=>m.index===Number(el.value));
+  if(multi)right.value=String(study.members.find(m=>m.status==="completed" && m.arm!==selected(left).arm).index);
   n.type="number";n.min=String(spec.window);n.max=String(spec.through);n.required=true;n.value=String(spec.through);
   const label=h("label","并排回看窗口");label.append(n);
   const go=h("button","查看这一窗");go.type="submit";controls.append(label,go);body.append(controls,result);
   let ticket=0;
   async function load(){
     if(!controls.reportValidity())return;
+    if(multi && selected(left).arm===selected(right).arm){ticket++;result.replaceChildren(h("p","请从不同取值中各选一条路线。","hint"));return;}
     const seq=++ticket,params=new URLSearchParams({original:left.value,changed:right.value,window:n.value});
     const data=await api("/api/studies/"+study.id+"/compare?"+params);
     if(!body.isConnected || seq!==ticket)return;
-    const which=select=>study.members.find(m=>m.index===Number(select.value)).replicate;
-    result.replaceChildren();drawExperimentComparison(result,data,data.actors,false,{labels:["原条件 · 第 "+which(left)+" 次","改后条件 · 第 "+which(right)+" 次"],
+    const title=el=>labelFor(selected(el).arm)+" · 第 "+selected(el).replicate+" 次";
+    result.replaceChildren();drawExperimentComparison(result,data,data.actors,false,{labels:[title(left),title(right)],
       selectWindow:async w=>{n.value=String(w);await load();}});
   }
   controls.onsubmit=safe(async e=>{e.preventDefault();await load();});left.onchange=right.onchange=safe(load);
