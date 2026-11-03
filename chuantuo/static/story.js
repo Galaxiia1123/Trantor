@@ -103,6 +103,12 @@ function openFieldReason(view,actorId,fieldId,window=view.settled_through) {
         h("p",r.reason));content.replaceChildren(hero);
       if(r.entry_period)hero.append(disclosure("这个值的转入期限",h("p",entryText(r.entry_period)+"，以后可以保持。"),
         ...(r.entry_period.provenance?.quotes || []).map(q=>h("small","“"+q.quote+"”","quiet"))));
+      const f=view.actors.find(a=>a.id===r.actor_id)?.fields?.[r.field_id];
+      if(f?.constraints?.choices?.length){
+        const meaning=f.constraints.meanings?.find(m=>m.value===r.after);
+        if(meaning)hero.append(h("p","“"+r.after+"”在这场推演中指"+meaning.text,"hint"));
+        if(window)hero.append(button("用不同口径读这一窗",()=>resultReading(view,r,run),"link"));
+      }
       if(r.previous_change)content.append(button("查阅上一次变化 · "+windowName(r.previous_change),()=>openFieldReason(view,r.actor_id,r.field_id,r.previous_change),"link"));
       content.append(h("h3",r.total ? "结算引用的记录（"+r.total+"）" : window===0 ? "开局来源" : "这项审查没有引用行动或事件"));
       if(r.definition?.quotes?.length)content.append(disclosure("字段定义的原文",...r.definition.quotes.map(q=>h("p","“"+q.quote+"”","hint"))));

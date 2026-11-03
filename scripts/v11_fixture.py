@@ -40,6 +40,7 @@ def definition(data):
                 "kind":"number" if isinstance(value,int) else "string","visibility":{"public":public,"readers":list(readers)},"provenance":origin(quote)}
     council["fields"] = [field("gap","资金缺口",2000,"扩建资金缺口为 2000 万元",True,"万元"),
                          field("agenda","议案","等待复核和书面担保","才会再次审议",True)]
+    council["fields"][1]["constraints"]={"choices":["等待复核和书面担保","已列入复议"]}
     port["fields"] = [field("review","护岸复核","待复核","护岸复核",False,readers=["engineer"])]
     carrier["fields"] = [field("ceiling","担保上限",2000,"担保上限为 2000 万元",False,"万元")]
     carrier["materials"] = [{"text":CONDITION,"domain":"扩建听证","provenance":origin("否则到期失效")}]
@@ -127,6 +128,10 @@ def response(data):
     if task == "prepare_scene": return definition(data)
     if task == "agent": return decision(data)
     if task == "world": return settle(data)
+    if task=="field_reading":
+        item=next(r for r in data["evidence"] if r["kind"]=="expression")
+        return {"findings":[{"index":i,"status":"unknown","reason":"这些节选没有独立证明全部条件。","evidence_ids":[item["id"]]}
+                            for i in range(1,len(data["criteria"])+1)]}
     if task == "analysis":
         if (data.get("actor") or {}).get("id") == "resident":
             assert "潮汐-17" not in encode(data)

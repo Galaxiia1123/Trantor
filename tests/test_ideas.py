@@ -5,6 +5,7 @@ from chuantuo.experiments import ExperimentRequest, apply_intervention
 from chuantuo.ideas import useful_ideas
 from chuantuo.perception import Perception, decision_view
 from chuantuo.schema import RunConfig11, Scenario11, Source
+from chuantuo.source_windows import apply_meaning_tables
 
 
 def test_source_question_moves_a_future_event_without_disclosing_the_private_calendar():
@@ -46,3 +47,19 @@ def test_explicit_levels_keep_the_authors_timing_and_check_every_value():
     assert len(ideas)==1 and ideas[0]["experiment"]["window"]==0 and ideas[0]["additional_values"]==[12,18]
     assert ideas[0]["quote"]["quote"]==text and ideas[0]["watch"]["field_id"]=="plan"
     assert not useful_ideas(scene.model_copy(update={"sources":[]}),cfg,[{**proposal,"additional_values":[6,250]}])
+
+
+def test_value_meanings_keep_the_source_quote_and_follow_field_visibility():
+    line="| 书房 | 进度 | 通过 | 负责人实际登记即可。 |"
+    columns="| 主体 | 字段 | 候选值 | 含义 |\n| --- | --- | --- | --- |\n"
+    scene={"title":"登记","background":"各方独立。","domains":["排课"],"missing_information":[],
+           "sources":[{"id":"draft","name":"设定","text":columns+line}],
+           "entities":[{"id":"a","name":"书房","identity":"登记","fields":[{"id":"state","label":"进度","kind":"string","domain":"排课",
+                        "value":"待定","constraints":{"choices":["待定","通过"]}}]}, {"id":"b","name":"来访者","identity":"咨询","fields":[]}]}
+    record={};apply_meaning_tables(scene,record);cfg=RunConfig11.model_validate({"model":{"provider":"demo","model":"fixture"}})
+    s=Scenario11.model_validate(scene);p=Perception(s,s.depths(),cfg)
+    assert s.entities[0].fields[0].constraints.meanings[0].provenance.quotes[0].quote==line
+    assert "负责人实际登记" in str(decision_view(p.observe("a",s.initial_state(),[],1,1,None)))
+    assert "负责人实际登记" not in str(decision_view(p.observe("b",s.initial_state(),[],1,1,None)))
+    scene["sources"].append({"id":"other","name":"新文稿","text":columns+line.replace("负责人实际登记即可。","须等首场开课。")})
+    conflict={};apply_meaning_tables(scene,conflict);assert len(conflict["blocking_questions"])==1

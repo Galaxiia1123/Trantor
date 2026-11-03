@@ -34,6 +34,8 @@ def state_sentences(visible_fields):
                     limits.append("固定值")
                 if rule.get("choices"):
                     limits.append("可取" + "、".join(rule["choices"]))
+                for m in rule.get("meanings",()):
+                    limits.append("“"+m["value"]+"”指"+m["text"])
                 for entry in rule.get("entry_windows",()):
                     limits.append("“"+entry["value"]+"”从第 "+str(entry.get("first",1))+" 窗"+
                                   ("至第 "+str(entry["last"])+" 窗" if entry.get("last") else "起")+"可转入")
@@ -141,7 +143,8 @@ class Perception:
             fields.setdefault(owner,{})[field.id] = {"value":state[owner][field.id], "domain":field.domain,
                 "kind":field.kind,"unit":field.unit,"provenance":{"kind":field.provenance.kind}}
             if field.constraints:
-                fields[owner][field.id]["constraints"] = field.constraints.model_dump(exclude_defaults=True,exclude={"entry_windows":{"__all__":{"provenance"}}})
+                fields[owner][field.id]["constraints"] = field.constraints.model_dump(exclude_defaults=True,exclude={
+                    k:{"__all__":{"provenance"}} for k in ("entry_windows","meanings")})
             if field.label:
                 fields[owner][field.id]["label"] = field.label
         for _, owner, material in merge(self.public_materials, self.granted_materials[actor_id]):

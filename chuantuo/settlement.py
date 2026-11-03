@@ -346,6 +346,18 @@ def verify_references(events, discarded=frozenset()):
                     ids = item["evidence_ids"]
                     if not ids or any(eid not in seen for eid in ids):
                         raise ValueError(f"报告 {event['id']} 引用了不存在或晚于报告的记录")
+        elif event["kind"]=="analysis_reading":
+            selected=set(data["evidence_ids"])
+            origin=seen.get(data["commit"])
+            values=origin["data"].get("state",{}).get(data["actor_id"],{}) if origin else {}
+            if (not origin or origin["kind"]!="window_committed" or origin["window"]!=event["window"]
+                    or data["field_id"] not in values or not _same(values[data["field_id"]],data["original"])
+                    or [f["index"] for f in data["findings"]]!=list(range(1,len(data["criteria"])+1))
+                    or not selected<=seen.keys() or selected & discarded or data["commit"] in selected
+                    or any(seen[i]["window"]>event["window"] or seen[i]["kind"] not in
+                           {"run_created","window_committed","expression","decision_deferred","observation","external_event"} for i in selected)
+                    or any(not f["evidence_ids"] or not set(f["evidence_ids"])<=selected for f in data["findings"])):
+                raise ValueError("存档口径判读引用了超出范围的记录")
         elif event["kind"] == "analysis_answer":
             answers += 1
             supplied = {item["id"] for item in data["evidence"]}

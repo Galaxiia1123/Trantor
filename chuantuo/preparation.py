@@ -126,6 +126,7 @@ SYSTEM = """你负责把用户文稿变为可运行的沙盘。按 schema 返回
 材料明确给出某方向通信需要几个逻辑窗口时，用 mail_routes 记录 source、target、transit_windows、active_from 及逐字出处。发件窗为 W，经过 N 个窗口就在 W+N 的窗首送达，0 表示当轮结束后交付。反向独立。不要把普通活动的办理期限或模糊的“稍后”当作通信时效。
 只有材料明确提供了可以随信转交的具体凭证及正文时，才在持有主体的某项 materials 上填写 document 的 id 和 title。该项 text 须逐字复制凭证正文，并提供覆盖正文的引文。尚待收件的人不列为开局读者。若材料授权寄给某方，用 sharing.allowed_recipients 记录并摘引授权原句。只有文件名或寄件意向时保留为普通资料，不生成原件正文。
 材料明确把某个文字候选值限定在特定窗口内才可写入时，在字段 constraints.entry_windows 按 value、first、last 及逐字出处登记。first 和 last 包含边界，期限只约束转入该值；无变化可以保持。不要将普通计划的期限猜成硬性结算约束。
+材料明确解释某个已定义文字候选值的含义时，在 constraints.meanings 写 value、text 和带逐字 quotes 的 provenance。只转录明确口径。仅凭“通过”“开班”等名称不能推断成立条件。
 material 来源必须列出 source_ids 和逐字连续的短 quotes；推断必须标 ai_assumption 并在 assumptions 中列明，不能把检索不到的事实编成设定。
 gaps 只列实际缺项。影响运行的真实公开事实归 public，仅用公开实体与事实词生成简短查询，绝不抄入私有计划、身份资料或未公开的文稿内容。学术文献用 research，其余用 web；历史情景填 as_of。虚构设定、用户意图不做公共搜索。critical 仅用于无法合理开局的冲突或关键意图。空泛且无关的背景不必补全。
 plan 按目标决定统一窗口、互动轮数、私有记忆与恢复策略。用户显式设定优先。运行数与周期要取文稿原意。保留整个日志，控制记忆开销。校验失败只能按预案纠正或停止。不要配置其他模型。
@@ -202,8 +203,9 @@ def _keep_user_definitions(scene, current):
     for source in current.entities:
         old = source.model_dump(mode="json")
         entity = next((a for a in scene["entities"] if a["id"] == source.id), None)
-        pinned_periods={f.id:[p for p in f.constraints.entry_windows if p.provenance.kind=="user"] for f in source.fields if f.constraints}
-        protected = source.provenance.kind == "user" or any(f.provenance.kind == "user" for f in [*source.fields,*source.materials]) or any(pinned_periods.values())
+        pinned={f.id:{k:[p for p in getattr(f.constraints,k) if p.provenance.kind=="user"] for k in ("entry_windows","meanings")}
+                for f in source.fields if f.constraints}
+        protected = source.provenance.kind == "user" or any(f.provenance.kind == "user" for f in [*source.fields,*source.materials]) or any(any(v.values()) for v in pinned.values())
         if entity is None and not protected:
             continue
         if entity is None:
@@ -214,13 +216,14 @@ def _keep_user_definitions(scene, current):
             preserved.add(id(entity))
         for field in old["fields"]:
             merge_known(entity.setdefault("fields", []), field, lambda f:f["id"])
-            if periods:=pinned_periods.get(field["id"]):
+            for key,items in pinned.get(field["id"],{}).items():
+                if not items:continue
                 target=next((f for f in entity["fields"] if f["id"]==field["id"]),None)
                 if target is None:
                     target=field;entity["fields"].append(target)
                 if not target.get("constraints"):target["constraints"]=dict(field["constraints"])
-                for p in periods:
-                    merge_known(target["constraints"].setdefault("entry_windows",[]),p.model_dump(mode="json"),lambda r:r["value"])
+                for p in items:
+                    merge_known(target["constraints"].setdefault(key,[]),p.model_dump(mode="json"),lambda r:r["value"])
         for material in old["materials"]:
             merge_known(entity.setdefault("materials", []), material, lambda m:(m["domain"],m["text"]))
     for edge in current.influences:
@@ -278,6 +281,17 @@ def prepare(seed, model, gateway, materials, progress, search=None):
                 scene = output["scenario"]
                 preserved = _keep_user_definitions(scene, seed.current_scenario) if seed.current_scenario else set()
                 scene["sources"] = [s.model_dump(mode="json") for s in sources]
+                for actor in scene.get("entities",()):
+                    for f in actor.get("fields",()):
+                        rules=f.get("constraints") or {}
+                        if "meanings" not in rules:continue
+                        meanings=[]
+                        for m in rules["meanings"]:
+                            if id(m) in preserved:meanings.append(m);continue
+                            p=m.get("provenance") or {}
+                            if p.get("quotes") and set(p.get("source_ids",()))=={q.get("source_id") for q in p["quotes"]}:
+                                m["provenance"]={**p,"kind":"material"};meanings.append(m)
+                        rules["meanings"]=meanings
                 separate_brief(scene,sources,prior=seed.current_scenario.public_brief if seed.current_scenario else None)
                 for _, item in _objects(scene):
                     p = item.get("provenance") or {}

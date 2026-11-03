@@ -81,6 +81,8 @@ def _objects(data):
                 if collection=="fields":
                     for period in (item.get("constraints") or {}).get("entry_windows",[]):
                         yield ("value_entry",actor["id"]+"."+item["id"]),period
+                    for meaning in (item.get("constraints") or {}).get("meanings",[]):
+                        yield ("value_meaning",actor["id"]+"."+item["id"]),meaning
 
 
 def _without_provenance(item):

@@ -118,7 +118,8 @@ def test_current_state_prose_and_details_share_a_commit(native_run):
     before, after = (watch_window(native_run, i) for i in (7,8))
     council = next(a for a in after["actors"] if a["id"] == "council")
     assert "已列入复议" in council["profile"] and "资金缺口为2000万元" in council["profile"]
-    assert "已列入复议" not in before["actors"][0]["profile"]
+    assert "议案已列入复议" not in before["actors"][0]["profile"]
+    assert before["actors"][0]["fields"]["agenda"]["value"]=="等待复核和书面担保"
     assert native_run.journal.event(after["state_record"])["data"]["state"]["council"]["gap"] == council["fields"]["gap"]["value"] == 2000
     observation = native_run.journal.private_history("council",9,last_observation=True)[0]
     assert decision_view(observation["data"]["visible"])["state"]["council"] == council["profile"]

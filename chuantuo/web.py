@@ -43,6 +43,7 @@ from .recovery import salvage
 from .observatory import FieldWatch, observe_field, observation_notes, ongoing_matters
 from .interactions import interaction_map, conversation, dispatch_ledger
 from .studies import Studies, StudyRequest, study_notes
+from .readings import ReadingRequest, read_field
 from .story import field_reason, window_strip
 from .documents import document_history
 from .ideas import useful_ideas
@@ -424,7 +425,7 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
             original,_ = materials.load(job_id)
             return jobs.reconcile(job_id,{"source":original.model_dump(mode="json")})
         rid = context.get("run_id")
-        if not rid or kind not in {"launch","experiment","report","question"}:
+        if not rid or kind not in {"launch","experiment","report","question","field_reading"}:
             return receipt
         try:
             sim = get_run(rid)
@@ -432,7 +433,7 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
             return receipt
         if kind in {"launch","experiment"} and sim.journal.event("e000001")["data"].get("launch_job_id")==job_id:
             return jobs.reconcile(job_id,sim.snapshot())
-        record_kind = "report_created" if kind=="report" else "analysis_answer"
+        record_kind = {"report":"report_created","field_reading":"analysis_reading"}.get(kind,"analysis_answer")
         for e in sim.journal.snapshot({record_kind}):
             if e["data"].get("job_id")==job_id:
                 result = saved_report(rid,e["id"]) if kind=="report" else {**e["data"],"record_id":e["id"]}
@@ -860,6 +861,17 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
         if markdown is None:
             raise FileNotFoundError("此旧报告没有可读取的 Markdown 文件")
         return {"record_id": event_id, "markdown": markdown, "cutoff_window": event["window"],"coverage":event["data"].get("coverage")}
+
+    @app.post("/api/runs/{run_id}/jobs/{job_id}/field-reading")
+    def reread_field(run_id:str,job_id:str,request:ReadingRequest):
+        sim=get_run(run_id)
+        return jobs.submit(job_id,"field_reading",{"run_id":run_id,**request.model_dump()},
+                           lambda progress:read_field(sim,request,progress,job_id=job_id))
+
+    @app.get("/api/runs/{run_id}/field-readings")
+    def saved_readings(run_id:str,window:int=Query(ge=1),actor:str=Query(),field:str=Query()):
+        return [{"record_id":e["id"],**e["data"]} for e in get_run(run_id).journal.snapshot({"analysis_reading"})
+                if e["window"]==window and (e["data"]["actor_id"],e["data"]["field_id"])==(actor,field)]
 
     @app.post("/api/runs/{run_id}/jobs/{job_id}/question")
     def ask(run_id: str, job_id: str, question: Question):

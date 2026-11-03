@@ -5,7 +5,7 @@ from copy import deepcopy
 
 from .schema import Scenario11, Source
 from .briefing import separate_brief, scope_generated_access_rules
-from .source_windows import apply_entry_tables
+from .source_windows import apply_entry_tables, apply_meaning_tables
 
 
 FIELD = re.compile(r"""(?:字段(?:名(?:为)?)?|(?:state\s+)?field(?:\s+named)?)\s*[“「『"'‘\x60]\s*([^”」』"'’\x60\n]{1,70}?)\s*[”」』"'’\x60]""", re.I)
@@ -45,6 +45,15 @@ def confirm_named_fields(payload):
     defined = {v for a in payload["scenario"]["entities"] for f in a["fields"] if f["provenance"]["kind"]=="user"
                for v in (f.get("label"),f["id"]) if v}
     for record in payload["preparation_records"]:
+        meaning_review=record.get("meaning_review",{})
+        pending=meaning_review.get("unresolved",[])
+        confirmed={item["question"] for item in pending for a in payload["scenario"]["entities"] if not item["actor"] or item["actor"] in (a["id"],a["name"])
+                   for f in a["fields"] if item["field"] in (f["id"],f.get("label")) for m in (f.get("constraints") or {}).get("meanings",[])
+                   if m["value"]==item["value"] and m["provenance"]["kind"]=="user"}
+        if confirmed:
+            meaning_review["unresolved"]=[i for i in pending if i["question"] not in confirmed]
+            record["blocking_questions"]=[q for q in record.get("blocking_questions",[]) if q not in confirmed]
+            payload["scenario"]["missing_information"]=[q for q in payload["scenario"]["missing_information"] if q not in confirmed]
         timing=record.get("entry_window_review",{})
         remaining=timing.get("unresolved",[])
         resolved_periods={item["question"] for item in remaining for a in payload["scenario"]["entities"]
@@ -282,6 +291,7 @@ def reconcile(result):
         scope_generated_access_rules(scene)
         record["common_brief_review"]=True
     apply_entry_tables(scene,record)
+    apply_meaning_tables(scene,record)
     if record.get("source_reconciliation",{}).get("version") == 1:
         bundle["questions"]=record.get("blocking_questions",[])
         return _initial_access(bundle)

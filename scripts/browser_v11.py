@@ -231,6 +231,14 @@ def main():
                 page.locator("#window-outcome").get_by_role("button",name="为什么发生变化").click()
                 expect(page.locator(".reason-summary")).to_contain_text("已列入复议")
                 expect(page.locator(".reason-card").first).to_contain_text("市议会")
+                page.get_by_role("button",name="用不同口径读这一窗").click()
+                page.get_by_label("要判读的候选值").select_option("已列入复议")
+                page.get_by_label("第一种口径").fill("市议会作出登记决定。")
+                page.get_by_label("第二种口径（可选）").fill("议案已获一致通过。")
+                page.get_by_role("button",name="用同一组记录判读").click()
+                expect(page.locator(".reading-result section")).to_have_count(2)
+                expect(page.locator(".reading-result")).to_contain_text("现有证据不足")
+                page.get_by_role("button",name="返回这项状态如何得出",exact=False).click()
                 if args.screenshots: page.locator("#reading").screenshot(path=args.screenshots/"field-reason.png")
                 page.get_by_role("button",name="查看市议会当时知道什么").click()
                 expect(page.locator("#reading-title")).to_have_text("市议会的决策现场")
@@ -283,7 +291,7 @@ def main():
                 page.locator("#nav-library").click(); expect(page.locator("#projects")).to_contain_text("潮汐港")
                 page.locator("#projects button").first.click(); expect(page.locator("#draft")).to_contain_text("9 个窗口")
                 assert page.request.get(url+"/api/runs/"+rid+"/reports").json()
-                assert len(endpoint.calls)==103
+                assert len(endpoint.calls)==104
                 page.goto(run_url); expect(page.locator("#watch-meta")).to_contain_text("已完成")
                 page.get_by_role("button",name="试一个条件",exact=True).click()
                 page.get_by_label("从哪里分岔").select_option("8")
@@ -386,7 +394,7 @@ def main():
                 page.get_by_role("link",name="回到原路线终点").click()
                 expect(page.locator("#window-status")).to_contain_text("第 9 窗 / 共 9 窗")
             assert len([task for _,task in endpoint.calls if task=="agent"]) == 190
-            assert len(endpoint.calls)==213 and {m for m,_ in endpoint.calls}=={"local-script-http"},endpoint.calls
+            assert len(endpoint.calls)==214 and {m for m,_ in endpoint.calls}=={"local-script-http"},endpoint.calls
             assert not errors and not endpoint.errors,(errors,endpoint.errors)
             browser.close(); print(f"Browser acceptance passed: source intake, nine windows, field and calendar experiments, suggested research question, interview, report and repeated comparisons; {len(endpoint.calls)} loopback model calls.")
     finally:

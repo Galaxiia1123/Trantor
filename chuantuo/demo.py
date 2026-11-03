@@ -133,6 +133,10 @@ def respond(messages: list[dict[str, str]]) -> str:
         result = {"summary": "离线流程演示：以下固定港口场景仅用于体验整理、审阅与采纳，不是对上传材料的真实 AI 理解。",
                   "scenario": scenario, "changes": ["演示返回固定场景；真实模型会按目标、材料与回答生成或修订。"],
                   "questions": [{"id": "scope", "question": "你希望重点观察什么变化？", "reason": "演示问题；真实整理会针对材料提出关键缺口。", "options": ["协作与沟通", "方案形成过程"]}]}
+    elif task=="field_reading":
+        ref=next(e["id"] for e in payload["evidence"] if e["kind"] in {"expression","decision_deferred"})
+        result={"findings":[{"index":i,"status":"unknown","reason":"本机脚本展示记录与引用，不对自定义口径作语义判断。","evidence_ids":[ref]}
+                            for i in range(1,len(payload["criteria"])+1)]}
     elif task == "analysis":
         records = payload["evidence"]
         actor = payload.get("actor")

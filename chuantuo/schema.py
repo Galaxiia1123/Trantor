@@ -116,13 +116,29 @@ class EntryWindow(Record):
         return self.first<=window and (self.last is None or window<=self.last)
 
 
+class ValueMeaning(Record):
+    value: StrictStr
+    text: str = Field(min_length=1,max_length=500)
+    provenance: Provenance = Field(default_factory=Provenance)
+
+    @model_validator(mode="after")
+    def grounded_definition(self):
+        if self.provenance.kind not in {"user","material"} or self.provenance.kind=="material" and not self.provenance.quotes:
+            raise ValueError("候选值的含义需要用户设定或明确的材料原句")
+        if not self.text.strip():
+            raise ValueError("请说明这个值在本场景中代表什么")
+        return self
+
+
 class FieldConstraints(Record):
+
     minimum: StrictInt | StrictFloat | None = None
     maximum: StrictInt | StrictFloat | None = None
     choices: list[StrictStr] = Field(default_factory=list)
     allow_unknown: bool = True
     fixed: bool = False
     entry_windows: list[EntryWindow] = Field(default_factory=list)
+    meanings: list[ValueMeaning] = Field(default_factory=list,max_length=64)
 
 
 class StateField(Record):
@@ -167,6 +183,9 @@ class StateField(Record):
             bounds=[r.value for r in rule.entry_windows]
             if len(bounds)!=len(set(bounds)) or not set(bounds)<=set(rule.choices):
                 raise ValueError("转入期限只能分别设在本字段已经定义的文字候选值上")
+            meanings=[m.value for m in rule.meanings]
+            if len(meanings)!=len(set(meanings)) or not set(meanings)<=set(rule.choices):
+                raise ValueError("每个已有文字候选值只能设定一种含义")
             if not self.permits(self.value):
                 raise ValueError(f"字段 {self.id} 的初始值不符合所设约束")
         return self
@@ -320,6 +339,7 @@ class Scenario(Record):
         for obj in [*self.entities, *self.influences, *self.rules, *getattr(self,"scheduled_events",[]), *getattr(self,"mail_routes",[]), *[f for a in self.entities for f in [*a.fields, *a.materials]],
                     *(m.sharing for a in self.entities for m in a.materials if m.sharing),
                     *(period for a in self.entities for f in a.fields if f.constraints for period in f.constraints.entry_windows),
+                    *(m for a in self.entities for f in a.fields if f.constraints for m in f.constraints.meanings),
                     *([self.public_brief] if getattr(self,"public_brief",None) is not None else [])]:
             if not set(obj.provenance.source_ids) <= source_ids:
                 raise ValueError("来源引用不存在")
@@ -509,6 +529,10 @@ class Scenario11(Scenario):
         check(self.public_brief.text if self.public_brief is not None else self.background, actor_ids, "公共背景")
         from .briefing import check_public_numbers
         check_public_numbers(self)
+        for actor in self.entities:
+            for f in actor.fields:
+                for meaning in f.constraints.meanings if f.constraints else ():
+                    check(meaning.text,actor_ids if f.visibility.public else {actor.id,*f.visibility.readers},"字段值的含义")
         for system in self.subsystems:
             check(system.name, actor_ids, "子系统名称")
             check(system.interaction, {system.owner_id, *(a.id for a in self.entities if a.subsystem_id == system.id)}, "子系统互动说明")

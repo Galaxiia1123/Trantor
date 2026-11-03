@@ -446,7 +446,7 @@ function renderDraft() {
   const labeled = (text, control) => { const l = h("label", text); l.append(control); return l; };
   const reason = h("input"); reason.placeholder = "变更关系或解决开局冲突时填写";
   adv.append(h("h3","运行方案"),h("p", draft.plan_reason || record.plan_reason, "hint"),plan.node,
-    draftEntryWindows(scene),
+    draftEntryWindows(scene),draftMeanings(scene),
     disclosure("编辑完整场景定义", labeled("场景 JSON", sceneEdit)), labeled("修改依据", reason),
     button("校验并保存修改", async () => {
       const editedPlan = plan.read(), editedScene = JSON.parse(sceneEdit.value);
@@ -1082,7 +1082,7 @@ safe(async () => {
     else if (pending.kind === "prepare") {
       if (pending.project && project?.id !== pending.project) openProject(await api("/api/projects/" + pending.project));
       await acceptedDraft(result);
-    } else if (["report","question"].includes(pending.kind)) { location.hash = "run/" + pending.run; notice("结果已保存。"); }
+    } else if (["report","question","field_reading"].includes(pending.kind)) { location.hash = "run/" + pending.run; notice("结果已保存。"); }
     keep("job", null);
   } catch (err) { if (!(err instanceof TypeError)) keep("job", null); throw err; }
   finally { busy = false; $("prepare").disabled = false; }
