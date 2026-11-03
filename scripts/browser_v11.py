@@ -148,6 +148,11 @@ def main():
                 expect(page.locator("#draft")).to_contain_text("9 个窗口")
                 expect(page.locator("#draft")).to_contain_text("准备追踪的问题（1）")
                 expect(page.locator("#draft")).to_contain_text("已存 · 第 1 版")
+                page.get_by_text("各主体的开局信息",exact=True).click();page.get_by_role("button",name="预览主体的开局所见").click()
+                page.get_by_label("预览哪个主体的开局信息").select_option("resident")
+                expect(page.locator("#reading-content")).to_contain_text("林遥的开局所见")
+                expect(page.locator("#reading-content")).not_to_contain_text("潮汐-17")
+                page.keyboard.press("Escape")
                 interpreter = [str(args.installed_python),"-I"] if args.installed_python else [sys.executable]
                 adoption = subprocess.run([*interpreter,"-m","chuantuo","prepare","--resume-job",job_id,"--port",url.rsplit(":",1)[1]],
                                           cwd=tmp if args.installed_python else ROOT,capture_output=True,encoding="utf-8",timeout=20,check=True)
@@ -320,10 +325,23 @@ def main():
                 expect(page.locator("#reading .comparison-heading")).to_contain_text("1 项状态不同")
                 page.keyboard.press("Escape")
                 if args.screenshots:page.locator("#study-page").screenshot(path=args.screenshots/"dual-study.png")
-            assert len([task for _,task in endpoint.calls if task=="agent"]) == 140
-            assert len(endpoint.calls)==157 and {m for m,_ in endpoint.calls}=={"local-script-http"},endpoint.calls
+                page.goto(run_url)
+                plan=page.locator("#experiment-tools .comparison-idea").filter(has_text="如果这项外部事件晚一窗发生")
+                plan.get_by_role("button",name="按这个问题对照").click()
+                expect(page.get_by_label("探索方式")).to_have_value("event_time")
+                expect(page.get_by_label("改到第几窗",exact=True)).to_have_value("3")
+                page.get_by_label("从哪里分岔").select_option("1");page.get_by_label("比较到哪个窗口").select_option("2")
+                page.get_by_role("button",name="启动新路线",exact=True).click()
+                expect(page.locator("#watch-meta")).to_contain_text("已完成",timeout=25000)
+                expect(page.locator("#experiment-tools")).to_contain_text("日历实验")
+                page.get_by_role("button",name="查阅原日期的事件凭据").click()
+                expect(page.locator("#reading-content")).to_contain_text("广场屏")
+                page.keyboard.press("Escape");page.get_by_role("button",name="外部事件日历").click()
+                expect(page.locator("#reading-content")).to_contain_text("运行结束时尚未到预定日期")
+            assert len([task for _,task in endpoint.calls if task=="agent"]) == 150
+            assert len(endpoint.calls)==168 and {m for m,_ in endpoint.calls}=={"local-script-http"},endpoint.calls
             assert not errors and not endpoint.errors,(errors,endpoint.errors)
-            browser.close(); print("Browser acceptance passed: source intake, nine windows, field experiment, private interview, report, repetitions and two-condition comparison; 157 loopback model calls.")
+            browser.close(); print("Browser acceptance passed: source intake, nine windows, field and calendar experiments, suggested research question, interview, report and repeated comparisons; 168 loopback model calls.")
     finally:
         endpoint.shutdown(); endpoint.server_close()
 

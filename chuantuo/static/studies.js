@@ -3,7 +3,7 @@
 const studyStatus={queued:"等待开始",opening:"恢复分岔现场",pausing:"将在窗口末暂停",stopping:"将在窗口末结束",limit:"达到调用上限",
   ready:"待启动",running:"推演中",paused:"已暂停",failed:"未完成",interrupted:"服务中断",stopped:"已结束",completed:"已完成"};
 
-function studyOptions(view,run) {
+function studyOptions(view,run,proposed=null) {
   const node=h("fieldset",null,"study-options"), watch=h("select"), cap=h("input");
   node.append(h("legend","重复实验"));
   const title=h("label","想比较什么");watch.setAttribute("aria-label","想比较什么");title.append(watch);node.append(title);
@@ -11,6 +11,7 @@ function studyOptions(view,run) {
   function add(label,question) {watch.append(new Option(label,choices.length));choices.push(question);}
   for(const actor of view.actors) for(const [id,f] of Object.entries(actor.fields))
     add(actor.name+" · "+(f.label || id)+"的终值",{actor_id:actor.id,field_id:id});
+  if(proposed){add("建议观察 · "+(proposed.title || proposed.field_id),proposed);watch.value=String(choices.length-1);}
   add("只比较过程，由我回看每条路线",null);
   let requested=false;
   cap.type="number";cap.min="1";cap.max="1000000";cap.step="1";cap.required=true;

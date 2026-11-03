@@ -55,6 +55,8 @@ def decision_view(observation):
     if any(m.get("dispatch_id") for m in observation["messages"]):
         view["messages"]=[{**m,"到件记录":f"第 {m['due_window']} 窗首已实际进入你的收件箱；text 为收到的原信。"}
                           if m.get("dispatch_id") else m for m in observation["messages"]]
+    if observation.get("external_events"):
+        view["external_events"]=[{**e,"实际通知窗口":observation["window"]} for e in observation["external_events"]]
     if feedback := observation.get("world_feedback"):
         # Current values are already in the profile. Show which changed and when.
         view["changes"] = {"window": feedback["window"], "record": feedback["commit_id"],
@@ -161,7 +163,8 @@ class Perception:
         else:
             roster, subsystems = self.scene.entities, self.scene.subsystems
         result = {"window":window, "round":turn, "window_duration":self.config.window_duration,
-            "background":self.scene.background, "rules":[{"text":r.text,"provenance":{"kind":r.provenance.kind}} for r in self.scene.rules
+            "background":self.scene.public_brief.text if getattr(self.scene,"public_brief",None) is not None else self.scene.background,
+            "rules":[{"text":r.text,"provenance":{"kind":r.provenance.kind}} for r in self.scene.rules
                 if not isinstance(r,ScopedRule) or
                 (window >= r.active_from and (r.visibility.public or actor_id in r.visibility.readers))],
             "self":{"id":actor.id,"name":actor.name,"identity":actor.identity,"preferences":actor.preferences,"depth":self.depths[actor_id]},

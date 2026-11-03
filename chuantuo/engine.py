@@ -23,6 +23,7 @@ from .schema import Decision, Expression, Influence, RunConfig, RunConfig11, Sce
 from .settlement import actor_evidence, complete_scheduled_reviews, settled_state, verify_commits
 from .schema import validate_outbox
 from .documents import envelope_scope
+from .briefing import runtime_scene
 
 
 def encode(value) -> str:
@@ -39,6 +40,7 @@ class Journal:
 
     def __init__(self, directory: Path | None = None):
         self._events: list[dict] = []
+        self.comparison_ideas=[]
         self._lock = threading.RLock()
         self._changed = threading.Condition(self._lock)
         self.directory = directory
@@ -75,6 +77,8 @@ class Journal:
 
     def _remember(self, event, size):
         kind, data = event["kind"], event["data"]
+        if kind=="scene_parse":
+            self.comparison_ideas=deepcopy(data.get("comparison_ideas",[]))
         if kind == "experiment_forked":
             self._usage.clear()
             self._prep_sizes.clear()
@@ -319,7 +323,7 @@ consequences 用自然语言描述客观后果并引用行动。它们供观察�
 class Simulation:
     def __init__(self, scenario: Scenario, config: RunConfig, gateway=None, directory: Path | None = None,
                  *, _journal=None, _run_id=None, _launch_job_id=None):
-        self._scenario = scenario.model_copy(deep=True)
+        self._scenario=(runtime_scene(scenario) if _journal is None else scenario).model_copy(deep=True)
         self.config = config.model_copy(deep=True)
         self.depths = self._scenario.depths()
         if _journal is None:
@@ -358,6 +362,7 @@ class Simulation:
         self._accepted_outputs = {}
         self._committed: set[int] = set()
         self._window_marks = {}
+        self._idea_cache = None
         self._history: list[dict] = []
         self._call_count = 0
         self._settlement_correction = None
@@ -713,6 +718,8 @@ class Simulation:
             instruction+="\ncontinued_waits 只表示主体延续此前的等待。本轮没有由此产生的新承诺、行动或消息。结算可保持原值。"
         if self._current_events:
             instruction+="\nexternal_events 是本窗实际发生的预定外部事件。assignments 指定的字段由引擎直接审查，请省略这些字段的 reviews。外部事实可用 event_ids 引用其 record，主体行动仍用 action_ids。"
+        elif payload.get("calendar_window"):
+            instruction+="\n本窗没有任何日历事件生效。原材料的预计日期、历史通知或主体提及的日程不能触发本窗的预定字段变更。没有独立的本窗行动依据时保留原值。"
         if self._current_mail:
             instruction+="\nmail 中 in_transit 表示刚寄出，不能按送达结算。arrived 才是本窗实际送达。用其 record 作 event_ids 引用，用收件人本窗的决定作 action_ids 引用。每处引用都必须在 this_window_refs 的对应列表内，勿复制信里提及的旧行动编号。"
         return self._call(self.config.model_id("world"), "world", payload,instruction,schema=Settlement)

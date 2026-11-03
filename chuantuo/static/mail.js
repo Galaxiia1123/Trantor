@@ -13,7 +13,8 @@ function routeTimingPicker(actors) {
   function pairs(){const old=to.value;to.replaceChildren(...actors.filter(a=>a.id!==from.value).map(a=>new Option(a.name,a.id)));
     if(old && old!==from.value)to.value=old;}
   pairs();from.onchange=pairs;time.oninput=refresh;refresh();node.append(example);
-  return {node,read:()=>({source:from.value,target:to.value,transit_windows:Number(time.value)})};
+  return {node,set(route){if(route){from.value=route.source;pairs();to.value=route.target;time.value=String(route.transit_windows);refresh();}},
+          read:()=>({source:from.value,target:to.value,transit_windows:Number(time.value)})};
 }
 
 function draftMailRoutes(scene) {

@@ -3,7 +3,8 @@ import re
 import hashlib
 from copy import deepcopy
 
-from .schema import Scenario11
+from .schema import Scenario11, Source
+from .briefing import separate_brief, scope_generated_access_rules
 from .source_windows import apply_entry_tables
 
 
@@ -275,6 +276,11 @@ def reconcile(result):
     bundle = deepcopy(result)
     scene, record = bundle["scenario"], bundle["preparation_records"][-1]
     _document_declarations(scene,record)
+    if not record.get("common_brief_review"):
+        if scene.get("public_brief") is None:
+            separate_brief(scene,[Source.model_validate(s) for s in scene["sources"]])
+        scope_generated_access_rules(scene)
+        record["common_brief_review"]=True
     apply_entry_tables(scene,record)
     if record.get("source_reconciliation",{}).get("version") == 1:
         bundle["questions"]=record.get("blocking_questions",[])

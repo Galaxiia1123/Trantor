@@ -143,7 +143,9 @@ class Notebook:
 
 
 def objective_input(scene, config, state, actions, history, window, schema, receipts=()):
-    definitions = scene.model_dump(mode="json", exclude={"sources","scheduled_events","mail_routes"}, exclude_defaults=True)
+    definitions = scene.model_dump(mode="json", exclude={"sources","scheduled_events","mail_routes","public_brief"}, exclude_defaults=True)
+    if scene.scheduled_events and scene.public_brief is not None:
+        definitions["background"]=scene.public_brief.text
     if "rules" in definitions:
         definitions["rules"] = [rule for rule in definitions["rules"] if rule.get("active_from", 1) <= window]
     for actor in definitions["entities"]:
@@ -175,4 +177,7 @@ def objective_input(scene, config, state, actions, history, window, schema, rece
         result["entry_limits"]=barred
     if receipts:
         result["external_events"]=[{"record":e["id"],"text":e["data"]["text"],"assignments":e["data"]["assignments"]} for e in receipts]
+    if scene.scheduled_events:
+        result["calendar_window"]={"window":window,"effective_records":[e["id"] for e in receipts],
+                                   "scope":"这是本窗实际发生的全部日历事件。未到期的计划不会在本窗结算。"}
     return result

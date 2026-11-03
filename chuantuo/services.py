@@ -166,7 +166,7 @@ def _report_inputs(simulation):
     # log. All scenario, observations, original expressions and outcomes remain.
     evidence = [e for e in events if e["id"] not in discarded
                 and (e["kind"] not in {"provider_attempt","model_validation_error"} or e["data"].get("purpose") in {"agent", "world"})]
-    evidence = [{**e, "data": ({k: v for k, v in e["data"].items() if k not in ("messages", "raw_output", "attempts", "source_batches")}
+    evidence = [{**e, "data": ({k: v for k, v in e["data"].items() if k not in ("messages", "raw_output", "attempts", "source_batches","comparison_ideas")}
                               if e["kind"] in ("scene_parse", "weight_estimation") else e["data"])} for e in evidence]
     if isinstance(simulation.config, RunConfig11):
         evidence = compact_observations(evidence)

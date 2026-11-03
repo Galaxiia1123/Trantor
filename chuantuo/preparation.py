@@ -12,6 +12,8 @@ from .definition import DefinitionRequest, _objects
 from .engine import encode
 from .models import protect_credentials
 from .observatory import FieldWatch
+from .ideas import ComparisonIdea, useful_ideas
+from .briefing import separate_brief, scope_generated_access_rules
 from .preparation_trace import accepted
 from .public_sources import PublicSearch
 from .schema import Identifier, Record, RunConfig11, RunPlan, Scenario11, Source, SourceQuote
@@ -67,6 +69,18 @@ class Draft(Record):
     gaps: list[Gap] = Field(default_factory=list, max_length=12)
     findings: list[Finding] = Field(default_factory=list)
     observation_questions: list[FieldWatch] = Field(default_factory=list, max_length=3)
+    comparison_ideas: list[ComparisonIdea] = Field(default_factory=list,max_length=2)
+
+    @field_validator("comparison_ideas",mode="before")
+    @classmethod
+    def optional_ideas(cls,items):
+        result=[]
+        for raw in items[:2] if isinstance(items,list) else []:
+            try:
+                result.append(ComparisonIdea.model_validate(raw))
+            except ValidationError:
+                continue
+        return result
 
     @field_validator("observation_questions",mode="before")
     @classmethod
@@ -100,6 +114,7 @@ class Seed(Record):
 
 SYSTEM = """你负责把用户文稿变为可运行的沙盘。按 schema 返回单个 JSON，摘要和运行理由供用户阅读，请简明。
 当研究问题对应已有字段时，可在 observation_questions 提议至多三张观察卡。填写主体和字段的真实 id，title 沿用用户的问题。criterion 区分曾达到 ever、始终保持 always、仅看最终值 at_end。目标值或期限仅采用材料明确给出的值，未给目标时用 track。纯定性问题可留空，不为观察卡增设字段。这些卡片仅用于观察。
+用户提出了可检验的“如果”时，可在 comparison_ideas 给一至两个待试问题。只改一件事，沿用真实主体、字段及日历编号。experiment.window 是分岔前最后一次结算（0 表示开局），through 是共同终点。event_time 用 event_move.event_id 和 new_window 改一个现有外部事件的日期。可选 watch 指向已有观测字段，quote 是用户问题的逐字摘引。不要预写两条路线的结果，也不要把建议的替代情境写进原路线。
 材料明确规定某一窗口必然发生的外部变化时，使用 scheduled_events。window 指发生窗口，通知只给指定知情主体。只有原文明确给出字段归属、变更时刻和目标值才写 assignments，窗末统一提交。开放讨论、主体意向、资格条件和“如果……就可能”仍由主体与世界推演。不要把尚保密的未来事实提前写进公共背景。
 直接返回实例，只写有实际内容的字段。不要输出 schema、$defs、字段说明或空白填充。外层结构示意为 {"summary":"…","scenario":{"title":"…","background":"…","domains":[],"entities":[{"id":"a","name":"…","identity":"…"}]},"plan":{},"plan_reason":"…","checklist":{},"gaps":[],"findings":[]}。checklist 补齐 schema 中的七项。
 先复用已有设定，逐项检查 checklist。把 scene 的 sources 留空，系统会放回原件。领域和状态字段由材料定义，有意义的字段用易读的 label 和原单位，未知用 null。没有资料支持的评分不创建。背景/规则仅写所有人可知的内容，敏感内容挂到各主体及其可见范围，默认私有。
@@ -263,6 +278,7 @@ def prepare(seed, model, gateway, materials, progress, search=None):
                 scene = output["scenario"]
                 preserved = _keep_user_definitions(scene, seed.current_scenario) if seed.current_scenario else set()
                 scene["sources"] = [s.model_dump(mode="json") for s in sources]
+                separate_brief(scene,sources,prior=seed.current_scenario.public_brief if seed.current_scenario else None)
                 for _, item in _objects(scene):
                     p = item.get("provenance") or {}
                     if id(item) in preserved:
@@ -278,6 +294,7 @@ def prepare(seed, model, gateway, materials, progress, search=None):
                         note = f"{detail}（{item['provenance'].get('explanation') or '模拟假设'}）"
                         if note not in scene.setdefault("assumptions", []):
                             scene["assumptions"].append(note)
+                scope_generated_access_rules(scene)
                 output["plan"] = {**output["plan"], **fixed}
                 draft = Draft.model_validate(output)
                 if len({g.id for g in draft.gaps}) != len(draft.gaps):
@@ -388,5 +405,8 @@ def prepare(seed, model, gateway, materials, progress, search=None):
             watches.append(data)
     if watches:
         record["observation_questions"]=watches
+    ideas=useful_ideas(scene,config,draft.comparison_ideas,watches)
+    if ideas:
+        record["comparison_ideas"]=ideas
     return {"summary":draft.summary, "scenario":scene.model_dump(mode="json"),"config":config.model_dump(mode="json"),
             "preparation_records":[record], "questions":questions,"plan_reason":draft.plan_reason}

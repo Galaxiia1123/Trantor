@@ -319,7 +319,8 @@ class Scenario(Record):
             raise ValueError("同一有向边重复；反向边可以独立配置")
         for obj in [*self.entities, *self.influences, *self.rules, *getattr(self,"scheduled_events",[]), *getattr(self,"mail_routes",[]), *[f for a in self.entities for f in [*a.fields, *a.materials]],
                     *(m.sharing for a in self.entities for m in a.materials if m.sharing),
-                    *(period for a in self.entities for f in a.fields if f.constraints for period in f.constraints.entry_windows)]:
+                    *(period for a in self.entities for f in a.fields if f.constraints for period in f.constraints.entry_windows),
+                    *([self.public_brief] if getattr(self,"public_brief",None) is not None else [])]:
             if not set(obj.provenance.source_ids) <= source_ids:
                 raise ValueError("来源引用不存在")
             for quote in obj.provenance.quotes:
@@ -387,12 +388,18 @@ class MailRoute(RouteTiming):
     provenance: Provenance = Field(default_factory=Provenance)
 
 
+class PublicBrief(Record):
+    text: str = Field(max_length=4800)
+    provenance: Provenance = Field(default_factory=Provenance)
+
+
 class Scenario11(Scenario):
     format_version: Literal["1.1"] = "1.1"
     influences: list[Relation] = Field(default_factory=list)
     rules: list[ScopedRule] = Field(default_factory=list)
     scheduled_events: list[ScheduledEvent] = Field(default_factory=list,max_length=256)
     mail_routes: list[MailRoute] = Field(default_factory=list,max_length=256)
+    public_brief: PublicBrief | None = None
 
     @model_validator(mode="after")
     def validate_calendar(self):
@@ -499,7 +506,9 @@ class Scenario11(Scenario):
         def check(text, readers, location):
             if any(term in text and not readers <= allowed for term,allowed in private.items()):
                 raise ValueError(f"{location}含有超出读者权限的私有内容。请调整可见范围，或把涉密内容移入主体资料")
-        check(self.background, actor_ids, "公共背景")
+        check(self.public_brief.text if self.public_brief is not None else self.background, actor_ids, "公共背景")
+        from .briefing import check_public_numbers
+        check_public_numbers(self)
         for system in self.subsystems:
             check(system.name, actor_ids, "子系统名称")
             check(system.interaction, {system.owner_id, *(a.id for a in self.entities if a.subsystem_id == system.id)}, "子系统互动说明")

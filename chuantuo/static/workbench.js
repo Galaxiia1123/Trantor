@@ -409,7 +409,10 @@ function renderDraft() {
     }
     root.append(disclosure("准备追踪的问题（"+selected.length+"）",panel));
   }
-  root.append(disclosure("参与者与有向关系", relationExplorer(scene),draftMailRoutes(scene)));
+  root.append(disclosure("参与者与有向关系", relationExplorer(scene),draftMailRoutes(scene)),draftBrief(scene,config));
+  if(record.comparison_ideas?.length)root.append(disclosure("可以怎样对照（"+record.comparison_ideas.length+"）",
+    h("p","这些备选条件不会改变开局。原路线跑到比较终点后，可在观察页选择运行。","hint"),
+    ...record.comparison_ideas.map(ideaPreview)));
   root.append(disclosure("外部事件（"+(scene.scheduled_events || []).length+"）",draftCalendar(scene)));
   if (scene.assumptions.length || scene.missing_information.length) root.append(disclosure("假设与缺项（" + (scene.assumptions.length + scene.missing_information.length) + "）", bullets([...scene.assumptions,...scene.missing_information])));
   const check = record.source_reconciliation || {};

@@ -90,7 +90,7 @@ def settled_state(scenario, state, proposal, action_ids, action_owners=None, rec
                 raise ValueError(f"{location} 的 {', '.join(missing)} 未列入同一字段的 action_ids。若确有影响，同时在该字段列出这些行动；无直接作用则移除这条 influence_refs")
         if before != review.after:
             if not review.action_ids and key not in forced and not arrivals.intersection(review.event_ids):
-                raise ValueError("状态变更必须关联窗口行动")
+                raise ValueError(f"第 {window} 窗 {actor_id}.{field_id} 的状态变更必须关联窗口行动或本窗实际到件。当前没有触发此变更的日历赋值；不能按预计日期结算。没有其他当窗依据时，保持原值 {before!r}")
             next_state[actor_id][field_id] = review.after
             changes.append(review.model_dump(mode="json"))
     if any(not set(item.action_ids) <= action_ids for item in proposal.consequences):

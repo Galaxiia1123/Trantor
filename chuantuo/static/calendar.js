@@ -59,7 +59,13 @@ function scheduledValuePicker(actors, optional) {
   }
   field.onchange=redraw;redraw();
   node.append(label(optional ? "预定字段值（可选）" : "要改变的字段",field),targetWrap);
-  return {node,count:fields.length,read(){
+  return {node,count:fields.length,set(value){
+    if(!value)return;
+    const index=fields.findIndex(f=>f.actor===value.entity_id && f.id===value.field_id);
+    if(index<0)return;field.value=String(index);redraw();
+    if(unknown){unknown.checked=value.value===null;unknown.onchange();}
+    if(target && value.value!==null)target.value=String(value.value);
+  },read(){
     if(!target)return null;
     const f=fields[Number(field.value)];let value=target.value;
     if(unknown?.checked)value=null;
@@ -107,7 +113,7 @@ async function openRunCalendar(view) {
   const body=h("div");
   for(const item of rows) {
     const card=eventCard(item.event,view.actors);
-    card.append(h("small",({scheduled:"预定中",pending:"本窗已通知，尚未提交",committed:"已随窗口提交"})[item.status],"quiet"));
+    card.append(h("small",({scheduled:"预定中",pending:"本窗已通知，尚未提交",committed:"已随窗口提交",beyond_run:"运行结束时尚未到预定日期"})[item.status],"quiet"));
     if(item.record)card.append(evidenceLinks([item.record],run));body.append(card);
   }
   reading("外部事件日历",h("p","全局观察者可预览全部安排。主体只在指定窗口收到对自己可见的通知。","hint"),body);

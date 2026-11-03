@@ -5,10 +5,12 @@ from .engine import AGENT_SYSTEM, WORLD_SYSTEM, Simulation, encode
 from .continuity import actor_instruction, world_instruction, Notebook, objective_input
 from .models import ModelError, credential_ready
 from .perception import Perception
+from .briefing import runtime_scene
 from .schema import RunConfig11, Settlement
 
 
 def preflight(scene, config, depths):
+    scene=runtime_scene(scene)
     catalog = config.catalog
     world_id = config.model_id("world")
     state = scene.initial_state()

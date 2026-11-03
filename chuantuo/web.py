@@ -45,6 +45,9 @@ from .interactions import interaction_map, conversation, dispatch_ledger
 from .studies import Studies, StudyRequest, study_notes
 from .story import field_reason, window_strip
 from .documents import document_history
+from .ideas import useful_ideas
+from .briefing import runtime_scene
+from .perception import Perception, decision_view
 from .insights import Question, actor_observation, answer_question, event_preview, search_evidence, timeline, watch_window, window_history
 
 
@@ -61,6 +64,10 @@ class SceneBundle(Record):
         if any(item.get("kind") not in {"scene_parse", "weight_estimation"} for item in self.preparation_records):
             raise ValueError("无法识别的准备阶段记录")
         return self
+
+
+class OpeningPreview(SceneBundle):
+    actor_id: str
 
 
 class RunRequest(SceneBundle):
@@ -202,6 +209,18 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
         return {"app":"chuantuo", "version":__version__, "status":"ok","store":str(root.resolve()),"assets":revision,"build":build_id,
                 "active_runs":sum(w.is_alive() for w in list(workers.values())),"active_jobs":len(jobs.active)+len(studies.workers),
                 "active_studies":len(studies.workers)}
+
+    @app.post("/api/opening-view")
+    def preview_opening(request:OpeningPreview):
+        scene=runtime_scene(request.scenario)
+        if request.actor_id not in {a.id for a in scene.entities}:
+            raise ValueError("请选择开局中已定义的主体")
+        p=Perception(scene,scene.depths(),request.config)
+        due=[{"id":e.id,"data":e.model_dump(mode="json")} for e in p.calendar.get(1,())]
+        view=decision_view(p.observe(request.actor_id,scene.initial_state(),[],1,1,None,due))
+        for notice in view.get("external_events",()):
+            notice.pop("record",None)
+        return view
 
     @app.get("/api/demo")
     def demo():
@@ -620,7 +639,8 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
         with sim._lock:
             recorded={e["data"]["id"]:e for e in sim.journal.snapshot({"external_event"}) if e["id"] not in sim._discarded}
             return [{"event":event.model_dump(mode="json"),"record":recorded[event.id]["id"] if event.id in recorded else None,
-                     "status":"committed" if event.window<=sim.window else "pending" if event.id in recorded else "scheduled"}
+                     "status":"committed" if event.window<=sim.window else "pending" if event.id in recorded else
+                              "beyond_run" if sim.status in {"completed","stopped"} else "scheduled"}
                     for event in sorted(getattr(sim._scenario,"scheduled_events",[]),key=lambda e:e.window)]
 
     @app.get("/api/runs/{run_id}/windows")
@@ -725,8 +745,22 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
             alternate = fork_run(parent,request,run_id,job_id)
             start(alternate)
             return alternate.snapshot()
-        spec=request.model_dump(mode="json",exclude={"route"} if request.route is None else set())
+        spec=request.model_dump(mode="json",exclude={name for name in ("route","event_move") if getattr(request,name) is None})
         return jobs.submit(job_id,"experiment",{"run_id":run_id,"parent_id":parent_id,"spec":spec},launch)
+
+    @app.get("/api/runs/{run_id}/ideas")
+    def study_ideas(run_id:str):
+        sim=get_run(run_id)
+        if not isinstance(sim.config,RunConfig11):
+            return []
+        if sim._idea_cache is None:
+            earliest=(sim.experiment or {}).get("window",0)
+            watches=repository.field_watches(sim.journal.directory).values()
+            ideas=useful_ideas(sim._scenario,sim.config,sim.journal.comparison_ideas,watches,earliest=earliest,reviewed=True)
+            with sim._lock:
+                sim._idea_cache=ideas
+        with sim._lock:
+            return [{**idea,"ready":idea["experiment"]["through"]<=sim.window} for idea in sim._idea_cache]
 
     @app.get("/api/runs/{run_id}/experiment")
     def experiment_result(run_id: str, window: int | None = Query(default=None,ge=0)):

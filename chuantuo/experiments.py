@@ -134,13 +134,19 @@ def compare(left, right, left_window=None, right_window=None):
             "note":"按主体和字段编号对齐，单位、类型与领域一致时才计算数值差。比较反映所选快照，不能归因于某个单一设定。"}
 
 
+class EventMove(Record):
+    event_id: Identifier
+    new_window: int = Field(ge=1,strict=True)
+
+
 class ExperimentRequest(Record):
     window: int = Field(ge=0)
     through: int = Field(ge=1)
-    kind: Literal["condition","field","transit","repeat"] = "condition"
+    kind: Literal["condition","field","transit","event_time","repeat"] = "condition"
     condition: str = Field(default="", max_length=1600)
     assignment: ScheduledValue | None = None
     route: RouteTiming | None = None
+    event_move: EventMove | None = None
     audience: Literal["public", "readers", "world"] = "world"
     readers: list[Identifier] = Field(default_factory=list)
 
@@ -156,6 +162,10 @@ class ExperimentRequest(Record):
             raise ValueError("线路实验需要一个发送方、一个收件方和送达时间")
         if self.kind=="transit" and (self.audience!="world" or self.condition.strip()):
             raise ValueError("线路实验只改变指定方向的通信时效，时效由通信双方知晓")
+        if (self.kind=="event_time")!=(self.event_move is not None):
+            raise ValueError("事件日期实验需要选择一个日历事件及新的发生窗口")
+        if self.kind=="event_time" and (self.audience!="world" or self.condition.strip() or self.event_move.new_window<=self.window):
+            raise ValueError("新日期必须晚于分岔点，原事件的内容与通知范围沿用原设定")
         if (self.audience == "readers") != bool(self.readers) or len(set(self.readers)) != len(self.readers):
             raise ValueError("请选择实际获知条件的主体")
         if self.kind == "repeat" and self.audience != "world":
@@ -172,20 +182,26 @@ def prepare_experiment(parent, spec):
     if parent.experiment and spec.window < parent.experiment["window"]:
         raise ValueError("请打开原路线以选择更早的分岔窗口")
     selected = boundary(parent, spec.window)
-    scene = parent.scenario.model_dump(mode="json")
+    scene,condition=apply_intervention(parent._scenario,spec,parent.run_id,selected["state"],parent.config.catalog.values())
+    return selected,scene,condition
+
+
+def apply_intervention(baseline,spec,source_id,state=None,configs=()):
+    """Use the same scenario contract for a proposed question and an actual fork."""
+    scene = baseline.model_dump(mode="json")
     condition = spec.condition.strip()
     if spec.kind=="field":
         change=spec.assignment
-        actor=next((a for a in parent._scenario.entities if a.id==change.entity_id),None)
+        actor=next((a for a in baseline.entities if a.id==change.entity_id),None)
         f=next((f for f in actor.fields if f.id==change.field_id),None) if actor else None
         if not f or not f.permits(change.value) or f.constraints and f.constraints.fixed:
             raise ValueError("请选择可以调整的已定义字段，并符合它的类型、范围和约束")
         period=f.entry_period(change.value)
         if period and not period.allows(spec.window+1):
             raise ValueError("分岔后的首个窗口不在该目标值允许转入的期限内")
-        if selected["state"][actor.id][f.id]==change.value:
+        if state is not None and state[actor.id][f.id]==change.value:
             raise ValueError("目标值与分岔时相同，可选择原样重跑")
-        event_key=hashlib.sha256(encode([parent.run_id,spec.model_dump(mode="json")]).encode()).hexdigest()[:12]
+        event_key=hashlib.sha256(encode([source_id,spec.model_dump(mode="json",exclude_none=True)]).encode()).hexdigest()[:12]
         scene["scheduled_events"].append({"id":"variation_"+event_key,"window":spec.window+1,
             "text":condition or "本窗有一项外部调整，将在结算时生效。",
             "visibility":{"public":spec.audience=="public","readers":spec.readers},
@@ -195,24 +211,37 @@ def prepare_experiment(parent, spec):
             condition=f"{actor.name}的{f.label or f.id}在第 {spec.window+1} 窗末设为{value}"
     elif spec.kind=="transit":
         r=spec.route
-        names={a.id:a.name for a in parent._scenario.entities}
+        names={a.id:a.name for a in baseline.entities}
         if not {r.source,r.target}<=names.keys() or r.source==r.target:
             raise ValueError("请选择不同的发送方和收件方")
         start=spec.window+1
-        if r.transit_windows==parent._perception.transit(r.source,r.target,start):
+        prior=max((p for p in baseline.mail_routes if (p.source,p.target)==(r.source,r.target) and p.active_from<=start),
+                  key=lambda p:p.active_from,default=None)
+        if r.transit_windows==(prior.transit_windows if prior else 0):
             raise ValueError("指定方向原本就是这个时效，可选择原样重跑")
         scene["mail_routes"]=[old for old in scene["mail_routes"] if (old["source"],old["target"],old["active_from"])!=(r.source,r.target,start)]
         scene["mail_routes"].append({**r.model_dump(),"active_from":start,
             "provenance":{"kind":"user","explanation":"操作者在对照实验中指定新发件的送达时效。"}})
         timing=f"发出后第 {r.transit_windows} 窗的窗首送达" if r.transit_windows else "发出当轮结束时送达"
         condition=f"{names[r.source]}发给{names[r.target]}的新消息，{timing}"
+    elif spec.kind=="event_time":
+        move=spec.event_move
+        event=next((item for item in scene["scheduled_events"] if item["id"]==move.event_id),None)
+        if not event or event["window"]<=spec.window:
+            raise ValueError("请选择在分岔时尚未发生的已定义事件")
+        original=event["window"]
+        if original==move.new_window or min(original,move.new_window)>spec.through:
+            raise ValueError("两个日期应不同，并至少有一个落在观察区间内")
+        event["window"]=move.new_window
+        event["provenance"]={"kind":"user","explanation":f"对照实验将原定第 {original} 窗的事件改至第 {move.new_window} 窗，沿用原事件内容和通知范围。"}
+        condition=f"把“{event['text'][:90]}”从第 {original} 窗改到第 {move.new_window} 窗"
     elif condition:
         scene["rules"].append({"text":condition, "active_from":spec.window + 1,
             "visibility":{"public":spec.audience == "public","readers":spec.readers},
             "provenance":{"kind":"user","explanation":f"对照实验设定，自第 {spec.window + 1} 窗起生效。"}})
     scene = Scenario11.model_validate(scene)
-    protect_credentials(scene.model_dump(mode="json"), parent.config.catalog.values())
-    return selected, scene, condition
+    protect_credentials(scene.model_dump(mode="json"), configs)
+    return scene, condition
 
 
 def fork_experiment(parent, spec, run_id, job_id, directory: Path, *, study=None, call_limit=None):
@@ -227,6 +256,12 @@ def fork_experiment(parent, spec, run_id, job_id, directory: Path, *, study=None
               "state_sha256":hashlib.sha256(encode(selected["state"]).encode()).hexdigest()}
     if study:
         marker["study"]=study
+    if spec.kind=="event_time":
+        source_event=next(e for e in parent._scenario.scheduled_events if e.id==spec.event_move.event_id)
+        marker["original_event"]={"id":source_event.id,"window":source_event.window,"provenance":source_event.provenance.model_dump(mode="json")}
+        if source_event.window<=parent.window:
+            receipts,_=parent.journal.window_rows(source_event.window,0,kind="external_event")
+            marker["original_event"]["record"]=next((e["id"] for e in receipts if e["data"]["id"]==source_event.id and e["id"] not in parent._discarded),None)
     directory.mkdir(parents=True, exist_ok=False)
     cutoff = int(selected["event_id"][1:])
     with (parent.journal.directory/"events.jsonl").open("rb") as source, (directory/"events.jsonl").open("xb") as dest:
@@ -277,22 +312,37 @@ def trajectory_comparison(parent,alternate,split,window=None):
         raise ValueError("只能对照两条路线都已提交的窗口")
     result = compare(parent, alternate, selected, selected)
     first_difference = None
+    first_event_difference=None
+    has_calendar=bool(getattr(parent._scenario,"scheduled_events",()) or getattr(alternate._scenario,"scheduled_events",()))
+    def actual_events(sim,w):
+        rows,_=sim.journal.window_rows(w,0,kind="external_event")
+        return [e for e in rows if e["id"] not in sim._discarded]
+    def signatures(sim,w):
+        keys=set()
+        for e in actual_events(sim,w):
+            d=e["data"]
+            keys.add(encode([d["id"],d["text"],d["visibility"]["public"],sorted(d["visibility"]["readers"]),d["assignments"]]))
+        return keys
     for number in range(split + 1, latest + 1):
         baseline = parent.journal.settlement(number)["data"]
         variant = alternate.journal.settlement(number)["data"]
-        if (baseline["changes"] or variant["changes"]) and baseline["state"] != variant["state"]:
+        if first_difference is None and (baseline["changes"] or variant["changes"]) and baseline["state"] != variant["state"]:
             first_difference = number
+        if has_calendar and first_event_difference is None and signatures(parent,number)!=signatures(alternate,number):
+            first_event_difference=number
+        if first_difference is not None and (not has_calendar or first_event_difference is not None):
             break
     def evidence(sim):
         commit = sim.journal.settlement(selected)
         if not commit:
-            return {"consequences":[],"actions":[]}
+            return {"consequences":[],"actions":[],"events":[]}
         rows, _ = sim.journal.window_rows(selected,0)
         actions = [{"id":e["id"],"actor_id":e["data"]["actor_id"],"round":e["data"]["round"],"kind":e["kind"],
                     "text":e["data"].get("text") or "延续此前的等待安排，本轮没有新的表达。"}
                    for e in rows if e["kind"] in {"expression","decision_deferred"} and sim.event_status(e)=="committed"]
-        return {"consequences":commit["data"]["consequences"],"actions":actions}
-    result.update(latest=latest, first_state_difference=first_difference,
+        events=[{"record":e["id"],"text":e["data"]["text"],"visibility":e["data"]["visibility"]} for e in actual_events(sim,selected)]
+        return {"consequences":commit["data"]["consequences"],"actions":actions,"events":events}
+    result.update(latest=latest, first_state_difference=first_difference,first_event_difference=first_event_difference,
                   baseline=evidence(parent), variant=evidence(alternate))
     return result
 
@@ -308,7 +358,7 @@ def outcome_groups(parent, catalog, actor_id=None, field_id=None):
         spec = row.get("experiment")
         if not spec or spec["parent_id"] != parent.run_id:
             continue
-        key = (spec["parent_event"],spec["state_sha256"],spec["through"],spec["kind"],spec["condition"],spec["audience"],tuple(sorted(spec["readers"])),encode(spec.get("assignment")),encode(spec.get("route")))
+        key = (spec["parent_event"],spec["state_sha256"],spec["through"],spec["kind"],spec["condition"],spec["audience"],tuple(sorted(spec["readers"])),encode(spec.get("assignment")),encode(spec.get("route")),encode(spec.get("event_move")))
         if key not in groups:
             original = boundary(parent,spec["through"])
             groups[key] = {"spec":spec,"baseline":original["state"][selected["actor"]][selected["field"]] if selected else None,
