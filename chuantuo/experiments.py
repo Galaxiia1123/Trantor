@@ -232,9 +232,10 @@ def experiment_comparison(parent, alternate, window=None):
         commit = sim.journal.settlement(selected)
         if not commit:
             return {"consequences":[],"actions":[]}
-        rows, _ = sim.journal.window_rows(selected,0,kind="expression")
-        actions = [{"id":e["id"],"actor_id":e["data"]["actor_id"],"round":e["data"]["round"],"text":e["data"]["text"]}
-                   for e in rows if e["kind"]=="expression" and sim.event_status(e)=="committed"]
+        rows, _ = sim.journal.window_rows(selected,0)
+        actions = [{"id":e["id"],"actor_id":e["data"]["actor_id"],"round":e["data"]["round"],"kind":e["kind"],
+                    "text":e["data"].get("text") or "延续此前的等待安排，本轮没有新的表达。"}
+                   for e in rows if e["kind"] in {"expression","decision_deferred"} and sim.event_status(e)=="committed"]
         return {"consequences":commit["data"]["consequences"],"actions":actions}
     result.update(experiment=marker, latest=latest, first_state_difference=first_difference,
                   baseline=evidence(parent), variant=evidence(alternate))

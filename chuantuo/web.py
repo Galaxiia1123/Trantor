@@ -558,7 +558,7 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
     @app.get("/api/runs/{run_id}/watch")
     def observe_window(run_id: str, window: int | None = Query(default=None,ge=0),
                        offset: int = Query(default=0,ge=0), limit: int = Query(default=100,ge=1,le=300),
-                       actor: str | None = None, kind: Literal["expression","message_delivered","window_committed","settlement_rejected","model_failure"] | None = None):
+                       actor: str | None = None, kind: Literal["expression","decision_deferred","message_delivered","window_committed","settlement_rejected","model_failure"] | None = None):
         return watch_window(get_run(run_id), window, offset, limit, actor, kind)
 
     @app.get("/api/runs/{run_id}/windows")

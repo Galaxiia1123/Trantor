@@ -2,7 +2,7 @@
 from collections import Counter
 
 from .engine import AGENT_SYSTEM, WORLD_SYSTEM, Simulation, encode
-from .continuity import AGENT_INSTRUCTION, WORLD_INSTRUCTION, Notebook, objective_input
+from .continuity import actor_instruction, WORLD_INSTRUCTION, Notebook, objective_input
 from .models import ModelError, credential_ready
 from .perception import Perception
 from .schema import RunConfig11, Settlement
@@ -33,7 +33,7 @@ def preflight(scene, config, depths):
             except ModelError as error:
                 blockers.append(f"{actor.name}（{key}）：{error}")
                 continue
-        size = len(AGENT_INSTRUCTION if native else AGENT_SYSTEM) + len(encode(payload))
+        size = len(actor_instruction(config) if native else AGENT_SYSTEM) + len(encode(payload))
         if size > largest["chars"]:
             largest = {"actor_id":actor.id,"chars":size}
         if size > limit:

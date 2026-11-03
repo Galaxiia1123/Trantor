@@ -341,13 +341,14 @@ function runPlanEditor(settings, specified) {
       if (max !== undefined) input.max = max;
     }
     input.setAttribute("aria-label",title); input.required = key !== "model_call_limit";
-    input.value = settings[key] ?? ""; if (key === "model_call_limit") input.placeholder = "未设置";
+    input.value = settings[key] ?? (key==="max_review_interval" ? 0 : ""); if (key === "model_call_limit") input.placeholder = "未设置";
     label.append(input); label.append(h("small", key in specified ? "已有设定" : "当前方案", "quiet"));
     group.append(label); controls.push({key,title,input});
   }
   add(timing,"windows","运行窗口数",1); add(timing,"window_duration","每窗时长"); add(timing,"rounds_per_window","每窗互动轮数",1);
   add(tuning,"recent_records","保留近期原文条数",1,32); add(tuning,"retrieval_count","每次检索历史条数",0,8);
   add(tuning,"history_windows","世界参照近期窗口数",1,24);
+  add(tuning,"max_review_interval","主体自主等待上限（窗，0 表示每轮判断）",0,4);
   add(tuning,"roster_policy","主体通讯录",undefined,undefined,[["neighbors","相关主体"],["all","全部主体"]]);
   add(tuning,"max_parallel","同时请求上限",1,64); add(tuning,"model_call_limit","主体与世界总调用上限",1);
   add(tuning,"settlement_retries","每窗结算纠正次数",0,2); add(tuning,"output_retries","每次表达格式纠正次数",0,2);
@@ -369,7 +370,8 @@ function renderDraft() {
   const root = $("draft"); root.replaceChildren();
   const top = h("div", null, "card-top"); top.append(h("div", "开局摘要", "eyebrow"), h("span", project ? "已存 · 第 " + project.version + " 版" : "待保存", "quiet"));
   root.append(top, h("h2", scene.title), h("p", draft.summary, "summary"), h("p", scene.entities.length + " 个主体　·　" + config.windows + " 个窗口　·　每窗 " + config.window_duration + "　·　" + config.model.model, "badge"));
-  root.append(h("p", "每窗互动 " + config.rounds_per_window + " 轮，主体与世界预计至少调用 " + (config.windows * (scene.entities.length * config.rounds_per_window + 1)) + " 次。", "hint"));
+  root.append(h("p", "每窗互动 " + config.rounds_per_window + " 轮，若逐轮判断共需 " + (config.windows * (scene.entities.length * config.rounds_per_window + 1)) + " 次基础调用。"+
+    (config.max_review_interval ? "主体可自行等待，最迟 "+config.max_review_interval+" 窗后重新判断；来信和可见变化会提前唤醒。" : "")+"纠正或重试另计。", "hint"));
   const proposed=applicableQuestions(scene,record.observation_questions || []);
   if (proposed.length) {
     const selected=draft.observation_questions ?? proposed, panel=h("div");
@@ -567,7 +569,9 @@ async function openActorContext(actor, window, turn, replace = false, run = acti
   const round=h("select"); round.setAttribute("aria-label","查看主体决策轮次");
   result.rounds.forEach(n=>{const o=h("option","第 "+n+" 轮");o.value=n;round.append(o);}); round.value=result.round;
   round.onchange=safe(()=>openActorContext(actor,window,Number(round.value),true,run));
-  body.append(h("p",actor.name+" · 第 "+window+" 窗 · 这次作决定时实际收到的内容。","hint"),round);
+  body.append(h("p",actor.name+" · 第 "+window+" 窗 · "+(result.deferred ? "引擎照常形成了这一轮的观察，主体按此前安排等待。" : "这次作决定时实际收到的内容。"),"hint"),round);
+  if(result.deferred) body.append(h("p","本轮没有新的模型请求或对外行动。若无来信和可见变化，最迟第 "+result.review_at+" 窗重新判断。"),evidenceLinks([result.plan_record,result.deferred_id],run));
+  if(result.resumed_plan) body.append(h("p",wakeText(result.resumed_plan.reason)),evidenceLinks([result.resumed_plan.plan_record],run));
   if(view.state){
     const names=Object.fromEntries(view.roster.map(a=>[a.id,a.name]));
     body.append(h("h3","可见处境"),bullets(Object.entries(view.state).map(([id,text])=>(names[id]||id)+" · "+text)));
@@ -583,9 +587,10 @@ async function openActorContext(actor, window, turn, replace = false, run = acti
     for(const [key,label] of [["recent","近期原文"],["earlier","历史摘录"],["retrieved","本轮检索"]]) {
       if(memory[key]?.length) body.append(disclosure(label+"（"+memory[key].length+"）",h("pre",json(memory[key]))));
     }
-  } else body.append(disclosure("当时的记忆输入",h("pre",json(memory))));
+  } else if (!result.deferred) body.append(disclosure("当时的记忆输入",h("pre",json(memory))));
   if (view.rules?.length) body.append(disclosure("当时已知的规则和条件",bullets(view.rules.map(r=>r.text))));
-  body.append(disclosure("完整可见信息",h("pre",json(view))),h("small","原始输入与对应决定","quiet"),evidenceLinks([result.input_id,result.action_id],run));
+  body.append(disclosure("完整可见信息",h("pre",json(view))),h("small",result.deferred ? "本轮观察" : "原始输入与对应决定","quiet"),
+    evidenceLinks(result.deferred ? [result.observation_id] : [result.input_id,result.action_id],run));
   if(replace && $("reading").open) { $("reading-title").textContent=actor.name+"的决策现场"; $("reading-content").replaceChildren(body); }
   else reading(actor.name+"的决策现场",body);
 }
@@ -675,7 +680,14 @@ function renderWindow(view) {
     if (e.to.length) {
       const sender = data.from || data.actor_id;
       row.append(h("span",(names[sender] || sender) + " → " + e.to.map(id => names[id] || id).join("、") + phase,"type"),h("p",data.text));
-    } else if (e.kind === "expression") row.append(h("span",(names[data.actor_id] || data.actor_id) + " · 决定" + phase,"type"), h("p",data.text));
+    } else if (e.kind === "expression") {
+      row.append(h("span",(names[data.actor_id] || data.actor_id) + " · 决定" + phase,"type"), h("p",data.text));
+      if(data.resumed_plan)row.append(h("small",wakeText(data.resumed_plan.reason),"quiet"));
+      if(data.next_review_window)row.append(h("small","已安排最迟第 "+data.next_review_window+" 窗重新判断。","quiet"));
+    } else if(e.kind==="decision_deferred") {
+      row.append(h("span",(names[data.actor_id]||data.actor_id)+" · 延续等待"+phase,"type"),
+        h("p","沿用此前决定，本轮没有新发言或投递。"),evidenceLinks([data.plan_record]));
+    }
     else if (e.kind === "window_committed") {
       row.append(h("strong","世界结算"));
       for (const c of data.consequences || []) row.append(h("p", c.text), evidenceLinks(c.action_ids));
@@ -696,7 +708,7 @@ function renderWindow(view) {
       }
     } else row.append(h("span","运行异常","type"), h("p",data.reason || "本窗口未完成，查看记录了解原因。"));
     row.append(button("记录 " + e.id, () => evidence(e.id), "link"));
-    if (!isCase && e.kind==="expression" && e.commit_status==="committed")
+    if (!isCase && ["expression","decision_deferred"].includes(e.kind) && e.commit_status==="committed")
       row.append(button("当时知道什么",()=>openActorContext({id:data.actor_id,name:names[data.actor_id]},e.window,data.round),"link"));
     if (e.receipts.length) row.append(disclosure("送达记录（" + e.receipts.length + "）",evidenceLinks(e.receipts)));
     if (settlement && e.kind === "expression" && !data.message_count && !cited.has(e.id)) {
@@ -721,6 +733,7 @@ function renderWindow(view) {
       const tokenText = u.with_usage ? "接口回报输入 " + u.input_tokens + "、输出 " + u.output_tokens + " token（" + u.with_usage + "/" + u.attempts + " 次有用量回执）" : "接口未回报 token";
       return h("p", stage + " · " + u.calls + " 次调用 · " + tokenText);
     });
+    if(s.max_review_interval)rows.push(h("p","已提交窗口中有 "+s.deferred_reviews+" 个主体轮次沿用原等待安排，没有发起新的主体请求。"));
     const cost = disclosure("模型用量", ...rows, h("p","持续事项随主体决定更新，历史摘录和检索在本机执行。关联场景的准备用量按原任务列示。","hint"));
     cost.dataset.actor = "_usage"; cost.open = open.has("_usage"); $("actors").append(cost);
   }

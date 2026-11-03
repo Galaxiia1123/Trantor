@@ -151,10 +151,12 @@ def ongoing_matters(simulation, through, actor_id=None, status=None, offset=0, l
                             note={"actor_id":key[0],"actor":titles[key[0]],"key":key[1],"status":"open","steps":[]}
                             episodes.append(note)
                             active[key]=note
-                        elif note["text"]==text:
+                        due=change.get("due_window",note.get("due_window"))
+                        if note["steps"] and note["text"]==text and note.get("due_window")==due:
                             continue
-                        note["steps"].append({**step,"kind":"updated" if note["steps"] else "opened","text":text})
+                        note["steps"].append({**step,"kind":"updated" if note["steps"] else "opened","text":text,"due_window":due})
                         note["text"]=text
+                        note["due_window"]=due
         chosen=[n for n in episodes if not status or n["status"]==status]
         chosen.sort(key=lambda n:int(n["steps"][-1]["record"][1:]),reverse=True)
         return {"through":end,"total":len(chosen),"open":len(active),"closed":len(episodes)-len(active),

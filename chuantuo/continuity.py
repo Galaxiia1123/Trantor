@@ -27,6 +27,15 @@ WORLD_INSTRUCTION = """你负责统一窗口的客观结算。主体表达和有
 不替主体选择、补造许可或宣告故事结束，不复述整场过程。"""
 
 
+def actor_instruction(config):
+    if not config.max_review_interval:
+        return AGENT_INSTRUCTION
+    return AGENT_INSTRUCTION + """
+如果此刻确实决定等待，可额外返回整数 review_at（重新判断的逻辑窗口）。正文写明等待什么。等待期间不重发决定或消息。
+持续事项有明确逻辑窗口期限时可在 matters 中填写 due_window，修改沿用原 key。未完成事项的较早期限优先触发复看。
+新收件、可见处境变化或到期会提前或按时让你重新决定。需要主动推进、监督期限或思考替代方案时省略 review_at。"""
+
+
 def terms(text):
     words = set(re.findall(r"[a-z0-9_.-]+", text.casefold()))
     for run in re.findall(r"[\u3400-\u9fff]+", text):
@@ -53,9 +62,12 @@ class Notebook:
                 self.open.pop(matter.key, None)
             else:
                 previous = self.open.get(matter.key)
-                if previous and previous["text"] == matter.text:
+                due=matter.due_window if "due_window" in matter.model_fields_set else (previous or {}).get("due_window")
+                if previous and previous["text"] == matter.text and previous.get("due_window")==due:
                     continue
                 entry = {"text":matter.text, "record":record_id, "window":window}
+                if due is not None:
+                    entry["due_window"]=due
                 if previous:
                     entry["first_record"] = previous.get("first_record",previous["record"])
                 self.open[matter.key] = entry
@@ -71,7 +83,7 @@ class Notebook:
             excerpt = old["text"].split("。", 1)[0][:96]
             self.older.append({"window": old["window"], "record": old["id"], "excerpt": excerpt})
 
-    def payload(self, observation, config):
+    def payload(self, observation, config, wake=None):
         view = decision_view(observation)
         end = max(0, len(self.records) - config.recent_records)
         query = " ".join(m["text"] for m in view["messages"]) or " ".join(item["text"] for item in self.open.values())
@@ -94,9 +106,14 @@ class Notebook:
             memory["sharing"] = self.sharing
         payload = {"task": "agent", "actor_id": view["self"]["id"], "window": view["window"],
                    "round": view["round"], "observation": view, "memory": memory}
+        if config.max_review_interval:
+            payload["latest_review_window"]=view["window"]+config.max_review_interval
+            if wake:
+                payload["resume_plan"]=wake
         limit = config.model.context_limit_chars
+        system_size=len(actor_instruction(config))
         def fits():
-            return len(AGENT_INSTRUCTION) + len(json.dumps(payload, ensure_ascii=False)) <= limit
+            return system_size + len(json.dumps(payload, ensure_ascii=False)) <= limit
         for key in ("earlier", "retrieved", "recent"):
             while memory[key] and not fits():
                 memory[key].pop(0)

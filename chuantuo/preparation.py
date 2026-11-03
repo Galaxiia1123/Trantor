@@ -149,6 +149,8 @@ def _explicit_plan(sources):
             values[key] = value if key == "window_duration" else int(value)
         elif hits:
             conflicts.append(key)
+    if any(re.search(r"每(?:一)?轮(?:都|均|必须|需要|都必须)?(?:重新|独立)?(?:调用模型|进行模型判断)|(?:禁用|关闭|不允许)延续等待",s.text) for s in sources):
+        values["max_review_interval"]=0
     return values, conflicts
 
 
@@ -348,6 +350,8 @@ def prepare(seed, model, gateway, materials, progress, search=None):
         *(q for q in normalized_scene["missing_information"] if q not in cleared), *(g.question for g in unresolved)]))
     scene = Scenario11.model_validate(normalized_scene)
     config = RunConfig11(model=model, **draft.plan.model_dump())
+    if "max_review_interval" not in draft.plan.model_fields_set and "max_review_interval" not in fixed:
+        config = config.model_copy(update={"max_review_interval":2})
     record = {**quality_record,"kind":"scene_parse","purpose":"preparation_v11","summary":draft.summary,"checklist":draft.checklist.model_dump(),
               "gaps":[g.model_dump(mode="json") for g in initial_gaps],"research":receipts,
               "findings":[f.model_dump() for f in draft.findings],"blocking_questions":questions,

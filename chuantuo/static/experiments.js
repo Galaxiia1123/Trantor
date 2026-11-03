@@ -63,7 +63,8 @@ function experimentForm(view) {
     group.hidden=!changed || audience.value!=="readers";
     const windows=Number(through.value)-Number(split.value);
     const calls=windows*(view.actors.length*view.rounds_per_window+1);
-    cost.textContent="只重跑新路线的 "+windows+" 个窗口。按当前主体和轮数预计 "+calls+" 次基础模型调用，纠正或重试另计。原路线直接使用已提交的记录。";
+    cost.textContent="只重跑新路线的 "+windows+" 个窗口。逐轮判断需要 "+calls+" 次基础模型调用，纠正或重试另计。"+
+      (view.status.max_review_interval ? "主体可选择延续等待，实际请求可能更少。" : "")+"原路线使用已提交记录。";
   }
   split.onchange=()=>{limits();update();}; through.onchange=kind.onchange=audience.onchange=update;
   limits(); update();
@@ -84,6 +85,7 @@ function experimentForm(view) {
 }
 
 const experimentKind = meta => meta.kind==="repeat" ? "原样重跑" : "条件实验";
+const wakeText = reason => ({message:"收到定向消息，重新判断。",visible_change:"可见处境发生变化，重新判断。",due:"到达复看窗口或事项期限，重新判断。"}[reason] || "主体重新判断。");
 
 async function experimentShelf(parent) {
   const body=h("div"), select=h("select"), content=h("div"), description=h("p","按同一分岔点、终点、条件和知情范围分组。次数只计入已走到终点的路线。","hint");
@@ -120,7 +122,7 @@ async function experimentShelf(parent) {
 
 function showExperimentTools(view) {
   const root=$("experiment-tools"), meta=view.status.experiment;
-  const letter=view.mode==="sample" && view.model==="letter-desk-v1";
+  const letter=view.mode==="sample" && ["letter-desk-v1","letter-desk-v2"].includes(view.model);
   const available=!playback() && view.format_version==="1.1" && view.status.window>(meta?.window || 0);
   const stamp=[activeRun,view.selected,view.status.window,view.settled_through].join("/");
   if (root.dataset.stamp===stamp && root.childElementCount) return;

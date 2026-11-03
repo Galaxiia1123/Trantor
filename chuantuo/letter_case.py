@@ -8,7 +8,7 @@ from .experiments import ExperimentRequest, fork_experiment
 from .schema import RunConfig11, Scenario11
 
 
-MODEL = "letter-desk-v1"
+MODEL = "letter-desk-v2"
 SIGNED = "第 2 窗开始时，有效签字函已送达收件台。"
 ACCEPT = "核对签章并将申请排入复核。"
 
@@ -33,6 +33,13 @@ def opening():
 
 def scripted_response(payload):
     """Only facts in the actor's own observation can activate its decision."""
+    answer=_response(payload)
+    if payload["task"]=="agent" and payload["window"]<3 and payload.get("latest_review_window"):
+        answer["review_at"]=payload["latest_review_window"]
+    return answer
+
+
+def _response(payload):
     if payload["task"] == "agent":
         actor, window, view = payload["actor_id"], payload["window"], payload["observation"]
         if window == 1:
@@ -51,18 +58,19 @@ def scripted_response(payload):
         return {"text":"跟进签字函的收件情况，保留申请并等待答复。"}
     if payload["task"] == "world":
         state=payload["state"]["desk"]
-        decision=next(a for a in payload["actions"] if a["actor_id"]=="desk")
+        decision=next((a for a in payload["actions"] if a["actor_id"]=="desk"),None)
         signed=any(r["text"]==SIGNED for r in payload["scenario"].get("rules",[]))
-        accepted=signed and decision["text"]==ACCEPT
+        accepted=signed and decision is not None and decision["text"]==ACCEPT
+        action_ids=[decision["id"]] if decision else []
         after="已排入复核" if accepted else state["agenda"]
         reason=("有效函件已到，运营社核验后登记复核。" if accepted else
                 "既有复核登记继续有效。" if after=="已排入复核" else
                 "函件到达，但运营社尚未看到收件通知，也没有作出登记决定。" if signed else "尚无已核验的签字函，申请仍待签收。")
         return {"reviews":[{"entity_id":"desk","field_id":"agenda","before":state["agenda"],"after":after,
-                            "reason":reason,"action_ids":[decision["id"]]},
+                            "reason":reason,"action_ids":action_ids},
                            {"entity_id":"desk","field_id":"paid","before":state["paid"],"after":state["paid"],
                             "reason":"担保意向未触发付款。","action_ids":[]}],
-                "consequences":[{"text":reason,"action_ids":[decision["id"]]}]}
+                "consequences":[{"text":reason,"action_ids":action_ids}]}
     return None
 
 
@@ -87,7 +95,7 @@ def run_example(root: Path, choice, gateway):
             sim.journal.directory=destination
             return sim
     root.mkdir(parents=True,exist_ok=True)
-    config=RunConfig11.model_validate({"model":{"provider":"demo","model":MODEL},"windows":3,
+    config=RunConfig11.model_validate({"model":{"provider":"demo","model":MODEL},"windows":3,"max_review_interval":2,
                                        "window_duration":"1 个工作日","rounds_per_window":1})
     parent=obtain("baseline",lambda rid,path:Simulation(opening(),config,gateway,path,_run_id=rid))
     observed=choice=="notified"

@@ -154,7 +154,7 @@ def _report_inputs(simulation):
              "message_delivered", "window_committed", "model_validation_error", "runtime_verification", "run_error",
              "run_status", "run_recovered", "provider_attempt"}
     if isinstance(simulation.config, RunConfig11):
-        kinds.update({"settlement_rejected","settlement_resume_requested","experiment_forked"})
+        kinds.update({"settlement_rejected","settlement_resume_requested","experiment_forked","decision_deferred"})
     snapshot, events = simulation.report_snapshot(kinds)
     discarded = {eid for event in events if event["kind"] == "run_recovered" for eid in event["data"].get("discarded_event_ids", [])}
     # Remove duplicated transport prompts from report input, not from the audit
@@ -286,7 +286,7 @@ def generate_report(simulation: Simulation, gateway=None, progress=None, *, max_
                         problems.append(where + "：模拟事件结论缺少已提交窗口内的证据。字段结果应引用提交 " + "、".join(commit_refs[-6:]) + "。若实际讨论请求、错误或完成状态，改用 method；若讨论局限，改用 interpretation")
                     if claim.basis == "source" and any(sources[sid].simulation_ref for sid in claim.source_ids):
                         problems.append(where + "的派生项目状态快照必须标注为模拟来源")
-                    if claim.basis == "method" and not any(e["kind"] in {"run_created","scene_parse","provider_attempt","model_validation_error","run_error","run_status","runtime_verification","run_recovered","settlement_rejected","settlement_resume_requested","experiment_forked"} for e in records):
+                    if claim.basis == "method" and not any(e["kind"] in {"run_created","scene_parse","provider_attempt","model_validation_error","run_error","run_status","runtime_verification","run_recovered","settlement_rejected","settlement_resume_requested","experiment_forked","decision_deferred"} for e in records):
                         problems.append(where + "缺少配置、请求或运行状态记录")
             if problems:
                 raise ValueError(" / ".join(problems[:8]))

@@ -14,9 +14,10 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from .bridge import Memory, act_together, make_agent, resolve
-from .continuity import AGENT_INSTRUCTION, WORLD_INSTRUCTION, Notebook, objective_input
+from .continuity import actor_instruction, WORLD_INSTRUCTION, Notebook, objective_input
 from .locking import writer_lock, writer_active
-from .perception import Perception
+from .perception import Perception, decision_view
+from .pacing import ReviewPlan, revised_deadlines
 from .models import ModelError, ModelGateway, RetryStopped, measured_call, protect_credentials
 from .schema import Decision, Expression, Influence, RunConfig, RunConfig11, Scenario, Scenario11, Settlement, load_config, load_scenario
 from .settlement import actor_evidence, settled_state, verify_commits
@@ -115,7 +116,7 @@ class Journal:
             keys = ("purpose", "actor_id", "config_id", "input_id", "level", "batch")
             event = {**event, "data": {k: event["data"][k] for k in keys if k in event["data"]}}
         self._events.append(event)
-        if event["kind"] in {"expression", "message_delivered", "window_committed", "settlement_rejected", "model_failure"}:
+        if event["kind"] in {"expression","decision_deferred","message_delivered","window_committed","settlement_rejected","model_failure"}:
             self._window_rows.setdefault(event["window"], []).append(event)
         if event["kind"] == "window_committed":
             self._settlements[event["window"]] = event
@@ -210,12 +211,22 @@ class Journal:
     def decision_context(self, actor_id, window, turn, discarded):
         """Read the accepted actor input. Historical journals predate direct expression/output links."""
         with self._lock:
-            actions = [e for e in self._window_rows.get(window,()) if e["kind"]=="expression" and e["id"] not in discarded
+            actions = [e for e in self._window_rows.get(window,()) if e["kind"] in {"expression","decision_deferred"} and e["id"] not in discarded
                        and e["data"]["actor_id"]==actor_id]
             rounds = sorted({a["data"]["round"] for a in actions})
             action = next((a for a in reversed(actions) if turn is None or a["data"]["round"]==turn),None)
             if action is None:
                 raise ValueError("该窗口或轮次没有这个主体的已提交决定")
+            if action["kind"]=="decision_deferred":
+                chosen=action["data"]
+                for i in range(int(action["id"][1:])-2,-1,-1):
+                    obs=self._events[i]
+                    if obs["window"]!=window: break
+                    if obs["kind"]=="observation" and obs["id"] not in discarded and obs["data"]["actor_id"]==actor_id and obs["data"]["visible"]["round"]==chosen["round"]:
+                        return {"actor_id":actor_id,"window":window,"round":chosen["round"],"rounds":rounds,
+                                "deferred":True,"plan_record":chosen["plan_record"],"review_at":chosen["review_at"],
+                                "observation_id":obs["id"],"deferred_id":action["id"],"observation":decision_view(self._full(obs)["data"]["visible"])}
+                raise ValueError("等待轮次缺少当时的观察记录")
             def match_output(event):
                 if event["kind"]!="model_output" or event["window"]!=window or event["id"] in discarded or event["data"].get("actor_id")!=actor_id:
                     return None
@@ -244,7 +255,8 @@ class Journal:
                 raise ValueError("原始输入与该主体、窗口或轮次不符")
             return {"actor_id":actor_id,"window":window,"round":payload["round"],"rounds":rounds,
                     "input_id":original["id"],"output_id":output["id"],"action_id":action["id"],
-                    "observation":payload["observation"],"memory":payload["memory"],"coverage":payload.get("memory_coverage")}
+                    "observation":payload["observation"],"memory":payload["memory"],"coverage":payload.get("memory_coverage"),
+                    **({"resumed_plan":payload["resume_plan"]} if payload.get("resume_plan") else {})}
 
     def page(self, after=0, limit=500, project=None):
         with self._lock:
@@ -310,6 +322,10 @@ class Simulation:
         self.status = "ready"
         self.error: str | None = None
         self._observations: dict[str, dict] = {}
+        self._plans = {}
+        self._wake = {}
+        self._waiting_steps = []
+        self._deferred_count = 0
         self._inbox: dict[str, list[dict]] = {a.id: [] for a in scenario.entities}
         self._actions: list[dict] = []
         self._accepted_outputs = {}
@@ -324,7 +340,16 @@ class Simulation:
         if _journal is None:
             self.journal.append("run_created", {"run_id": self.run_id, "launch_job_id":_launch_job_id,
                 "scenario": self._scenario.model_dump(mode="json"), "config": self.config.model_dump(mode="json"),
-                "concordia_version": "2.4.0", "schedule_policy": "all actors once per round; deliver after barrier; settle once per window"})
+                "concordia_version": "2.4.0", "schedule_policy": "all actors observed each round; honor explicit review plans; deliver after barrier; settle once per window"
+                if getattr(config,"max_review_interval",0) else "all actors once per round; deliver after barrier; settle once per window"})
+
+    def _remember_plan(self, actor, decision, record):
+        due=(item["due_window"] for item in self.notebooks[actor].open.values() if "due_window" in item)
+        plan=ReviewPlan.from_decision(decision,record,self._observations[actor],self.config.max_review_interval,due)
+        if plan:
+            self._plans[actor]=plan
+        else:
+            self._plans.pop(actor,None)
 
     def _make_actors(self):
         actors = {}
@@ -380,12 +405,14 @@ class Simulation:
         self._history = [{"id": e["id"], "window": e["window"], "consequences": deepcopy(e["data"]["consequences"])} for e in commits]
         inherited = int(self.experiment["parent_event"][1:]) if self.experiment else 0
         self._call_count = sum(e["kind"] == "model_input" for e in events[inherited:])
+        self._deferred_count = sum(e["data"].get("deferred_reviews",0) for e in events[inherited:] if e["kind"]=="window_committed")
         if [e["window"] for e in commits] != list(range(1, self.window + 1)) or self.window > self.config.windows:
             raise ValueError("已提交窗口的顺序或数量不合法，无法继续")
         self._inbox = {actor.id: [] for actor in self._scenario.entities}
         self.agents = self._make_actors()
         memories = {key:agent.get_component("memory",type_=Memory) for key,agent in self.agents.items()}
         self._observations, self._actions = {}, []
+        self._plans, self._wake, self._waiting_steps = {}, {}, []
         for event in events[:cutoff]:
             if event["id"] in discarded:
                 continue
@@ -401,15 +428,19 @@ class Simulation:
                     self._actions.append({"id":event["id"], **deepcopy(data)})
                 if self.notebooks:
                     owner = data["actor_id"]
-                    self.notebooks[owner].record(Decision.model_validate_json(data["raw"]), event["id"], event["window"],
+                    decision=Decision.model_validate_json(data["raw"])
+                    self.notebooks[owner].record(decision, event["id"], event["window"],
                                                  self._observations[owner]["messages"], self.config.recent_records)
+                    self._remember_plan(owner,decision,event["id"])
+            elif event["kind"]=="decision_deferred" and frozen and event["window"]==self._frozen_window:
+                self._waiting_steps.append({"actor_id":data["actor_id"],"round":data["round"]})
             elif event["kind"] == "message_delivered":
                 self._inbox[data["to"]].append(deepcopy(data))
         # Rebuild Concordia entities at their idle phase, then restore only their
         # own observations and expressions. No world/private cross-contamination.
         self.world = make_agent("world", self._world_callback, char_limit=0)
         return [event["id"] for event in events[cutoff:] if event["id"] not in discarded and event["kind"] in
-                {"observation", "expression", "message_delivered", "model_input", "model_output", "model_validation_error", "model_failure"}]
+                {"observation", "expression", "decision_deferred", "message_delivered", "model_input", "model_output", "model_validation_error", "model_failure"}]
 
     def recover(self):
         with self._lock:
@@ -477,6 +508,8 @@ class Simulation:
                     "pause_requested": self._pause.is_set(), "stop_requested": self._stop.is_set()}
             if self.experiment:
                 result["experiment"] = deepcopy(self.experiment)
+            if getattr(self.config,"max_review_interval",0):
+                result.update(max_review_interval=self.config.max_review_interval,deferred_reviews=self._deferred_count)
             if self.window != known_window:
                 result.update(state=deepcopy(self._state),depths=dict(self.depths))
             return result
@@ -487,7 +520,7 @@ class Simulation:
                 return "discarded"
             if event["kind"] == "settlement_rejected":
                 return "rejected"
-            if event["kind"] in {"observation","expression","message_delivered","model_input","model_output"}:
+            if event["kind"] in {"observation","expression","decision_deferred","message_delivered","model_input","model_output"}:
                 return "committed" if event["window"] in self._committed else "uncommitted"
             return None
 
@@ -560,8 +593,8 @@ class Simulation:
         def callback(memory):
             config_id = self.config.model_id("actor", self.depths[actor_id])
             if self.notebooks:
-                payload = self.notebooks[actor_id].payload(self._observations[actor_id], self.config)
-                return self._call(config_id, "agent", payload, AGENT_INSTRUCTION, actor_id, Decision)
+                payload = self.notebooks[actor_id].payload(self._observations[actor_id], self.config,self._wake.get(actor_id))
+                return self._call(config_id, "agent", payload, actor_instruction(self.config), actor_id, Decision)
             total = memory["total_items"] if isinstance(memory,dict) else len(memory)
             payload = {"task": "agent", "actor_id": actor_id, "window": self.window + 1, "round": self.round,
                        "observation": self._observations[actor_id], "memory": memory["items"] if isinstance(memory,dict) else memory}
@@ -612,23 +645,38 @@ class Simulation:
                     "response_schema": Settlement.model_json_schema()}
             if self._settlement_correction:
                 payload["settlement_correction"] = self._settlement_correction
-        return self._call(self.config.model_id("world"), "world", payload,
-                          WORLD_INSTRUCTION if self.notebooks else WORLD_SYSTEM, schema=Settlement)
+            if self._waiting_steps:
+                payload["continued_waits"] = self._waiting_steps
+        instruction=WORLD_INSTRUCTION if self.notebooks else WORLD_SYSTEM
+        if self._waiting_steps:
+            instruction+="\ncontinued_waits 只表示主体延续此前的等待。本轮没有由此产生的新承诺、行动或消息。结算可保持原值。"
+        return self._call(self.config.model_id("world"), "world", payload,instruction,schema=Settlement)
 
     def observation(self, actor_id: str) -> dict:
         return self._perception.observe(actor_id, self._state, self._inbox[actor_id], self.window + 1, self.round, self._last_feedback)
 
     def _collect_actions(self):
         self._actions = []
+        self._waiting_steps = []
         for round_index in range(1, self.config.rounds_per_window + 1):
             self.round = round_index
+            due, deferred = {}, {}
+            self._wake = {}
             for actor_id, agent in self.agents.items():
                 observation = self.observation(actor_id)
                 self._observations[actor_id] = observation
                 self.journal.append("observation", {"actor_id": actor_id, "visible": observation}, self.window + 1)
                 agent.observe(encode(observation))
                 self._inbox[actor_id] = []
-            outputs, errors = act_together(self.agents, self.config.max_parallel)
+                plan=self._plans.get(actor_id)
+                reason=plan.wake_reason(observation) if plan else None
+                if plan and reason is None:
+                    deferred[actor_id]=plan
+                else:
+                    due[actor_id]=agent
+                    if plan:
+                        self._wake[actor_id]={"reason":reason,"plan_record":plan.record,"review_at":plan.review_at}
+            outputs, errors = act_together(due, self.config.max_parallel) if due else ({},{})
             # Do not settle a partial batch or silently replace a failed actor.
             if errors:
                 details = {actor_id: str(error) if isinstance(error, ModelError) else type(error).__name__
@@ -645,16 +693,30 @@ class Simulation:
                         raise ValueError("主体消息包含不存在的收件人")
             # Stable record order, independent of HTTP completion speed.
             for actor_id in self.agents:
+                if actor_id in deferred:
+                    plan=deferred[actor_id]
+                    step={"actor_id":actor_id,"round":self.round}
+                    self.journal.append("decision_deferred",{**step,"plan_record":plan.record,"review_at":plan.review_at},self.window+1)
+                    self._waiting_steps.append(step)
+                    continue
                 expression = expressions[actor_id]
+                next_review=None
+                if self.notebooks and self.config.max_review_interval and expression.review_at:
+                    prior={k:m["due_window"] for k,m in self.notebooks[actor_id].open.items() if "due_window" in m}
+                    due=revised_deadlines(prior,expression.matters)
+                    next_review=ReviewPlan.next_window(expression,self.window+1,self.config.max_review_interval,due.values())
                 event = self.journal.append("expression", {"actor_id": actor_id, "round": self.round,
                     "text": expression.text, "messages": [m.model_dump() for m in expression.messages],
                     **({"model_output_id":self._accepted_outputs[actor_id]} if self.notebooks else {}),
+                    **({"resumed_plan":self._wake[actor_id]} if actor_id in self._wake else {}),
+                    **({"next_review_window":next_review} if next_review else {}),
                     "raw": outputs[actor_id]}, self.window + 1)
                 action = {"id": event["id"], **event["data"]}
                 self._actions.append(action)
                 if self.notebooks:
                     self.notebooks[actor_id].record(expression, event["id"], self.window + 1,
                                                     self._observations[actor_id]["messages"], self.config.recent_records)
+                    self._remember_plan(actor_id,expression,event["id"])
                 for message in expression.messages:
                     for recipient in dict.fromkeys(message.recipients):
                         delivered = {"from": actor_id, "to": recipient, "text": message.text, "action_id": event["id"]}
@@ -699,9 +761,12 @@ class Simulation:
             event = self.journal.append("window_committed", {"reviews": [r.model_dump(mode="json") for r in proposal.reviews],
                 "changes": changes, "consequences": [c.model_dump() for c in proposal.consequences],
                 "suggested_fields": proposal.suggested_fields,
+                **({"deferred_reviews":len(self._waiting_steps)} if self._waiting_steps else {}),
                 "state": next_state, "logical_time": {"elapsed_windows": window, "duration_per_window": self.config.window_duration}}, window)
             self._state = next_state
             self._committed.add(window)
+            self._deferred_count+=len(self._waiting_steps)
+            self._waiting_steps=[]
             self._last_feedback = {"window":window, "commit_id":event["id"], "changes":changes}
             self._history.append({"id": event["id"], "window": window, "consequences": event["data"]["consequences"]})
             self.window = window

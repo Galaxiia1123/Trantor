@@ -87,10 +87,12 @@ function openMatters(view) {
     for(const note of data.items) {
       const card=h("article",null,"cohort"), history=h("div");
       card.append(h("small",note.actor+" · "+(note.status==="open" ? "待处理" : "已结清"),"quiet"),h("p",note.text));
+      if(note.due_window)card.append(h("small","登记期限为第 "+note.due_window+" 窗。","quiet"));
       for(const step of note.steps) {
         const line=h("div",null,"matter-step");
         line.append(h("strong",windowName(step.window)+" · 第 "+step.round+" 轮 · "+verbs[step.kind]));
         if(step.text)line.append(h("p",step.text));
+        if(step.due_window)line.append(h("small","当时约定至第 "+step.due_window+" 窗。","quiet"));
         line.append(button("行动原文",()=>evidence(step.record,run),"link"),
           button("当时掌握的信息",()=>openActorContext({id:note.actor_id,name:note.actor},step.window,step.round,false,run),"link"));
         history.append(line);

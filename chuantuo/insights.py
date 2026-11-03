@@ -20,7 +20,7 @@ def event_preview(event):
     """A small, operator-facing list row. Full records are fetched on demand."""
     data = event["data"]
     row = {key: data[key] for key in ("actor_id", "from", "to", "action_id", "round", "status",
-                                      "window", "config_id", "purpose", "message") if key in data}
+                                      "window", "config_id", "purpose", "message","plan_record","review_at","resumed_plan","next_review_window") if key in data}
     kind = event["kind"]
     if kind == "run_created":
         row["scenario"] = {"title": data["scenario"]["title"]}
@@ -32,7 +32,7 @@ def event_preview(event):
                    material_count=len(view["visible_materials"]), message_count=len(view["messages"]))
     elif kind == "window_committed":
         row.update(changes=data["changes"], consequences=data["consequences"], suggested_fields=data["suggested_fields"],
-                   reviewed_actors=list(dict.fromkeys(r["entity_id"] for r in data["reviews"])))
+                   reviewed_actors=list(dict.fromkeys(r["entity_id"] for r in data["reviews"])),deferred_reviews=data.get("deferred_reviews",0))
     elif kind == "report_created":
         row["report"] = {"title": data["report"]["title"]}
     elif kind == "settlement_rejected":
@@ -46,7 +46,7 @@ def event_preview(event):
 
 def timeline(simulation):
     scene = simulation.scenario
-    events = simulation.journal.snapshot({"run_created", "window_committed", "expression", "message_delivered", "run_recovered", "provider_attempt"})
+    events = simulation.journal.snapshot({"run_created","window_committed","expression","decision_deferred","message_delivered","run_recovered","provider_attempt"})
     discarded = discarded_ids(events)
     effective = [event for event in events if event["id"] not in discarded]
     commits = [event for event in effective if event["kind"] == "window_committed"]
@@ -74,6 +74,7 @@ def timeline(simulation):
             "provider_usage": {"attempts": len(attempts), "transports": dict(Counter(a["transport"] for a in attempts)),
                                "reported": dict(usage), "with_usage": sum(bool(a.get("usage")) for a in attempts)},
             "statistics": {"expressions": sum(counts.values()), "messages": sum(messages.values()), "committed_windows": len(commits),
+                           "deferred":sum(e["kind"]=="decision_deferred" and e["window"] in committed for e in effective),
                            "discarded_records": len(discarded)},
             "actors": [{"id": actor.id, "name": actor.name, "depth": simulation.depths[actor.id], "expressions": counts[actor.id],
                         "sent": sum(count for (source, _), count in messages.items() if source == actor.id),
@@ -209,8 +210,8 @@ def _search_items(event):
 def search_evidence(simulation, query, limit=30, actor_id=None, cutoff=None, *, char_budget=None):
     if actor_id is not None and actor_id not in simulation.depths:
         raise ValueError("主体不存在")
-    kinds = {"observation", "expression", "message_delivered", "run_recovered"} if actor_id else {
-        "run_created", "window_committed", "observation", "expression", "message_delivered", "runtime_verification", "run_error", "run_recovered"}
+    kinds = {"observation","expression","decision_deferred","message_delivered","run_recovered"} if actor_id else {
+        "run_created","window_committed","observation","expression","decision_deferred","message_delivered","runtime_verification","run_error","run_recovered"}
     events = simulation.journal.private_history(actor_id,cutoff) if actor_id else simulation.journal.snapshot(kinds)
     discarded = discarded_ids(events)
     terms = set(re.findall(r"[a-z0-9_.-]+", query.lower()))

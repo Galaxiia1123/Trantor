@@ -359,7 +359,7 @@ class ModelGateway:
         if config.provider == "demo":
             try:
                 from .demo import respond
-                if config.model == "letter-desk-v1":
+                if config.model in {"letter-desk-v1","letter-desk-v2"}:
                     from .letter_case import scripted_response
                     answer = scripted_response(json.loads(copied[-1]["content"]))
                     result = respond(copied) if answer is None else json.dumps(answer,ensure_ascii=False)

@@ -479,6 +479,7 @@ class RunPlan(RunSettings):
     retrieval_count: int = Field(default=2, ge=0, le=8)
     history_windows: int = Field(default=3, ge=1, le=24)
     output_retries: int = Field(default=1, ge=0, le=2)
+    max_review_interval: int = Field(default=0,ge=0,le=4,strict=True)
 
 
 class RunConfig11(RunPlan):
@@ -511,6 +512,7 @@ class MatterUpdate(Record):
     key: Identifier
     text: str = Field(default="", max_length=800)
     status: Literal["open", "closed"] = "open"
+    due_window: int | None = Field(default=None,ge=1,strict=True)
 
     @model_validator(mode="after")
     def has_open_content(self):
@@ -520,6 +522,7 @@ class MatterUpdate(Record):
 
 
 class Decision(Expression):
+    review_at: int | None = Field(default=None,ge=1,strict=True)
     matters: list[MatterUpdate] = Field(default_factory=list, max_length=12)
 
     @model_validator(mode="after")
