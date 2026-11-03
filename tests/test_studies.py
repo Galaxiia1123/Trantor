@@ -8,6 +8,7 @@ from chuantuo.engine import Simulation, encode
 from chuantuo.letter_case import opening, scripted_response
 from chuantuo.repository import atomic_json
 from chuantuo.schema import RunConfig11
+from chuantuo.studies import outcomes_for
 from chuantuo.web import create_app
 
 
@@ -82,3 +83,19 @@ def test_partial_budget_and_explicit_restart_share_a_sealed_prefix(tmp_path):
         capped=until(client,"/api/studies/"+small_id,{"limit"})
         assert capped["completed"]==1 and capped["calls"]==4 and capped["members"][-1]["status"]=="queued"
         assert capped["outcomes"][0]["indices"]==[1] and gateway.calls==original_calls+16
+        paired_id="d"*32
+        paired={**small,"compare_original":True,"repetitions":1,"experiment":{**small["experiment"],"kind":"condition","condition":"窗口中有一项新的通知。"}}
+        assert client.put(launch+paired_id,json=paired).is_success
+        partial=until(client,"/api/studies/"+paired_id,{"limit"})
+        assert [(arm["arm"],arm["completed"]) for arm in partial["arms"]]==[("original",1),("changed",0)]
+        assert partial["arms"][0]["outcomes"][0]["indices"]==[1] and not partial["arms"][1]["outcomes"]
+        assert partial["calls"]==4 and not partial["outcomes"]
+
+
+def test_numeric_distributions_merge_equivalent_representations_and_keep_unknowns():
+    results=[(1,"1"),(1.0,"1.0"),(9007199254740993,"9007199254740993"),(None,None)]
+    members=[{"index":i,"calls":1,"status":"completed","outcome":{"status":"tracking","value":v,"numeric_text":text}}
+             for i,(v,text) in enumerate(results,1)]
+    summary=outcomes_for(members)
+    assert [r["indices"] for r in summary["outcomes"]]==[[1,2],[3],[4]]
+    assert summary["numeric"]=={"known":3,"unknown":1,"min":"1","max":"9007199254740993","median":"1.0"}

@@ -119,3 +119,11 @@
 .sample-switch{display:flex;flex-wrap:wrap;gap:5px;margin:.6rem 0}
 .sample-switch button{font:inherit;font-size:12px;padding:.2rem .5rem;min-height:26px;border-radius:16px;background:transparent}
 .sample-switch button[aria-pressed=true]{background:#514166;color:#fff;border-color:#514166}
+.pair-choice[hidden]{display:none}.pair-choice{align-items:start}
+.study-contrast{width:100%;border-collapse:collapse;margin:1rem 0;font-size:14px;table-layout:fixed}
+.study-contrast th,.study-contrast td{padding:.55rem .35rem;border-bottom:1px solid var(--line);text-align:center;overflow-wrap:anywhere}
+.study-contrast th:first-child{text-align:left}.study-contrast thead th{color:#655a73;background:#f5f1f7}
+.arm-notes{padding:.45rem 0}.arm-notes strong,.arm-notes small{display:block;font-size:13px}
+.study-compare-controls{display:flex;align-items:end;gap:.6rem;flex-wrap:wrap;margin:1rem 0}
+.study-compare-controls label{display:grid;gap:.3rem;max-width:100%;font-size:13px}
+.study-compare-controls select{max-width:18rem}.study-compare-controls input{width:6rem}

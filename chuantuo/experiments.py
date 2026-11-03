@@ -266,7 +266,11 @@ def experiment_comparison(parent, alternate, window=None):
     marker = alternate.experiment
     if not marker or marker["parent_id"] != parent.run_id:
         raise ValueError("两条路线没有共同的分岔记录")
-    split = marker["window"]
+    result=trajectory_comparison(parent,alternate,marker["window"],window)
+    return {**result,"experiment":marker}
+
+
+def trajectory_comparison(parent,alternate,split,window=None):
     latest = min(parent.window, alternate.window)
     selected = latest if window is None else window
     if not split <= selected <= latest:
@@ -288,7 +292,7 @@ def experiment_comparison(parent, alternate, window=None):
                     "text":e["data"].get("text") or "延续此前的等待安排，本轮没有新的表达。"}
                    for e in rows if e["kind"] in {"expression","decision_deferred"} and sim.event_status(e)=="committed"]
         return {"consequences":commit["data"]["consequences"],"actions":actions}
-    result.update(experiment=marker, latest=latest, first_state_difference=first_difference,
+    result.update(latest=latest, first_state_difference=first_difference,
                   baseline=evidence(parent), variant=evidence(alternate))
     return result
 

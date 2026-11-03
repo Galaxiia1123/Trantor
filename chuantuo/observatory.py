@@ -164,12 +164,15 @@ def ongoing_matters(simulation, through, actor_id=None, status=None, offset=0, l
                 "items":chosen[offset:offset+limit],"next":min(offset+limit,len(chosen))}
 
 
+def note_text(value):
+    escaped=html.escape(" ".join(str(value).splitlines()),quote=False)
+    return re.sub(r"([\\`*_[\]()#!|~])",r"\\\1",escaped)
+
+
 def observation_notes(simulation, watches, through=None):
     if not watches:
         raise ValueError("先固定一个观察问题，再导出观察笔记")
-    def plain(text):
-        escaped=html.escape(" ".join(str(text).splitlines()),quote=False)
-        return re.sub(r"([\\`*_[\]()#!|~])",r"\\\1",escaped)
+    plain=note_text
     def phrase(value,unit):
         if value is None: return "未知"
         if isinstance(value,bool): return "是" if value else "否"

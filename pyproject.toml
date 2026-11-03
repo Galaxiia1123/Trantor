@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chuantuo"
-version = "1.10.0"
+version = "1.11.0"
 description = "Trantor（川陀）· 支持多层主体、私有观察与证据回放的本地 AI 沙盘"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"

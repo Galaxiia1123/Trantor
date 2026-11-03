@@ -42,7 +42,7 @@ from .experiments import Adoption, ExperimentRequest, adopt_suggestion, branch_p
 from .recovery import salvage
 from .observatory import FieldWatch, observe_field, observation_notes, ongoing_matters
 from .interactions import interaction_map, conversation, dispatch_ledger
-from .studies import Studies, StudyRequest
+from .studies import Studies, StudyRequest, study_notes
 from .story import field_reason, window_strip
 from .documents import document_history
 from .insights import Question, actor_observation, answer_question, event_preview, search_evidence, timeline, watch_window, window_history
@@ -700,6 +700,15 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
     @app.get("/api/studies/{study_id}")
     def read_study(study_id:str):
         return studies.view(study_id)
+
+    @app.get("/api/studies/{study_id}/notes")
+    def study_note(study_id:str):
+        return Response(study_notes(studies.view(study_id)),media_type="text/markdown; charset=utf-8",
+                        headers={"Content-Disposition":f'attachment; filename="trantor-study-{study_id}.md"'})
+
+    @app.get("/api/studies/{study_id}/compare")
+    def compare_study_members(study_id:str,original:int=Query(ge=1),changed:int=Query(ge=1),window:int|None=Query(default=None,ge=0)):
+        return studies.compare_members(study_id,original,changed,window)
 
     @app.post("/api/studies/{study_id}/{action}")
     def control_study(study_id:str, action:Literal["pause","stop","resume"]):

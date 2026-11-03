@@ -296,10 +296,34 @@ def main():
                 page.get_by_role("link",name="回到项目与记录").click()
                 page.locator("#studies").get_by_role("button",name="比较结果").first.click()
                 expect(page.locator(".study-progress")).to_contain_text("2 / 2 条完成")
-            assert len([task for _,task in endpoint.calls if task=="agent"]) == 120
-            assert len(endpoint.calls)==135 and {m for m,_ in endpoint.calls}=={"local-script-http"},endpoint.calls
+                page.goto(run_url);page.get_by_role("button",name="试一个条件",exact=True).click()
+                page.get_by_label("从哪里分岔").select_option("8");page.get_by_label("探索方式").select_option("field")
+                page.get_by_label("要改变的字段").select_option(label="市议会 · 资金缺口")
+                page.get_by_label("窗末目标值（万元）",exact=True).fill("1500")
+                page.get_by_label("也按原条件运行相同次数",exact=False).check()
+                page.get_by_label("想比较什么",exact=True).select_option(label="市议会 · 资金缺口的终值")
+                page.get_by_label("全组模型调用上限",exact=True).fill("22")
+                page.get_by_role("button",name="启动双条件对照").click()
+                expect(page.locator(".study-progress")).to_contain_text("2 / 2 条完成",timeout=30000)
+                expect(page.locator(".study-contrast")).to_contain_text("1500万元")
+                expect(page.locator(".study-contrast")).to_contain_text("2000万元")
+                with page.expect_download() as notes:page.get_by_role("link",name="下载实验记录").click()
+                assert notes.value.suggested_filename.startswith("trantor-study-") and "1500万元" in notes.value.path().read_text("utf-8")
+                page.get_by_role("button",name="改后条件 · 1500万元 · 查看 1 条路线",exact=True).click()
+                expect(page.locator(".study-member")).to_have_count(1)
+                page.get_by_role("button",name="并排读两条路线").click()
+                expect(page.locator("#reading .comparison-side").first).to_contain_text("2000万元")
+                expect(page.locator("#reading .comparison-side").last).to_contain_text("1500万元")
+                page.get_by_label("并排回看窗口",exact=True).fill("8");page.get_by_role("button",name="查看这一窗").click()
+                expect(page.locator("#reading .comparison-heading")).to_contain_text("0 项状态不同")
+                page.get_by_role("button",name="首次状态分化 · 第 9 窗").click()
+                expect(page.locator("#reading .comparison-heading")).to_contain_text("1 项状态不同")
+                page.keyboard.press("Escape")
+                if args.screenshots:page.locator("#study-page").screenshot(path=args.screenshots/"dual-study.png")
+            assert len([task for _,task in endpoint.calls if task=="agent"]) == 140
+            assert len(endpoint.calls)==157 and {m for m,_ in endpoint.calls}=={"local-script-http"},endpoint.calls
             assert not errors and not endpoint.errors,(errors,endpoint.errors)
-            browser.close(); print("Browser acceptance passed: Markdown intake, nine windows, field experiment, private interview, report and two budgeted repetitions; 135 local HTTP calls including mobile navigation.")
+            browser.close(); print("Browser acceptance passed: source intake, nine windows, field experiment, private interview, report, repetitions and two-condition comparison; 157 loopback model calls.")
     finally:
         endpoint.shutdown(); endpoint.server_close()
 

@@ -5,30 +5,125 @@ import json
 import re
 import threading
 import uuid
+from decimal import Decimal, localcontext
 from pathlib import Path
 
-from pydantic import Field, ValidationError
+from pydantic import Field, ValidationError, model_validator
 
 from .engine import encode
-from .experiments import ExperimentRequest, prepare_experiment
+from .experiments import ExperimentRequest, prepare_experiment, trajectory_comparison
 from .models import protect_credentials
-from .observatory import FieldWatch, observe_field
+from .observatory import FieldWatch, note_text, observe_field
 from .repository import VersionConflict, atomic_json, now
 from .schema import Record
 
 
 class StudyRequest(Record):
     experiment: ExperimentRequest
-    repetitions: int = Field(default=3, ge=2, le=16)
+    repetitions: int = Field(default=3, ge=1, le=16)
+    compare_original: bool = False
     call_limit: int = Field(gt=0, le=1_000_000)
     watch: FieldWatch | None = None
+
+    @model_validator(mode="after")
+    def distinct_conditions(self):
+        if self.compare_original and self.experiment.kind=="repeat":
+            raise ValueError("双条件对照需要具体改变一个条件；原样重跑可直接使用重复实验")
+        if not self.compare_original and self.repetitions<2:
+            raise ValueError("重复实验至少需要两条路线")
+        return self
 
 
 def measured(sim, watch, through):
     if watch is None:
         return None
     result = observe_field(sim, watch, through, details=False, close_horizon=True)
-    return {k:result[k] for k in ("actor","label","unit","value","numeric_text","record","status","first_hit")}
+    return {k:result[k] for k in ("actor","label","unit","kind","value","numeric_text","record","status","first_hit")}
+
+
+def outcomes_for(members):
+    groups={}
+    samples=[]
+    completed=unknown=0
+    for member in members:
+        if member["status"]!="completed":
+            continue
+        completed+=1
+        result=member["outcome"]
+        if result is None:
+            continue
+        if result["status"]!="tracking":
+            key=("finding",result["status"])
+        elif result["numeric_text"] is not None:
+            number=Decimal(result["numeric_text"])
+            literal=format(number,"f") if number else "0"
+            if "." in literal:
+                literal=literal.rstrip("0").rstrip(".")
+            key=("number",literal)
+            samples.append(number)
+        else:
+            key=("value",encode(result["value"]))
+            unknown+=result["value"] is None
+        group=groups.setdefault(key,{"key":encode(key),"example":result,"indices":[]})
+        group["indices"].append(member["index"])
+    numeric=None
+    if samples:
+        samples.sort()
+        middle=len(samples)//2
+        with localcontext() as ctx:
+            ctx.prec=max(28,max(n.adjusted() for n in samples)-min(n.as_tuple().exponent for n in samples)+3)
+            median=samples[middle] if len(samples)%2 else (samples[middle-1]+samples[middle])/2
+        numeric={"known":len(samples),"unknown":unknown,"min":str(samples[0]),"max":str(samples[-1]),"median":str(median)}
+    return {"total":len(members),"completed":completed,"calls":sum(m["calls"] for m in members),
+            "outcomes":list(groups.values()),"numeric":numeric}
+
+
+def member_marker(record,member):
+    marker={"id":record["id"],"index":member["index"]}
+    if "arm" in member:
+        marker.update(arm=member["arm"],replicate=member["replicate"])
+    return marker
+
+
+def study_notes(record):
+    spec=record["request"]["experiment"]
+    labels={"original":"原条件","changed":"改后条件","single":"新路线","queued":"未启动","opening":"正在恢复",
+            "completed":"已完成","stopped":"已结束","running":"运行中","failed":"失败","paused":"已暂停","interrupted":"中断",
+            "limit":"已到上限","pausing":"正在暂停","stopping":"正在结束"}
+    findings={"observed":"出现过目标结果","not_observed":"未出现目标结果","maintained":"全程满足","violated":"曾偏离条件",
+              "met_at_end":"终点达成","missed_at_end":"终点未达成","undetermined":"有未知窗口","undetermined_end":"终值未知","ended_early":"未覆盖期限"}
+    def outcome(row):
+        if not row:return "—"
+        if row["status"]!="tracking":return findings.get(row["status"],row["status"])
+        value=row["value"]
+        if value is None:return "未知"
+        if isinstance(value,bool):return "是" if value else "否"
+        return note_text(row["numeric_text"] or value)+note_text(row.get("unit") or "")
+    lines=["# "+note_text(record["title"])+" · 条件实验","",
+           f'实验组 `{record["id"]}`，原路线 `{record["parent_id"]}`。从第 {spec["window"]} 窗后运行到第 {spec["through"]} 窗。',
+           "",note_text(record["condition"] or "保留原条件重复运行。"),"",
+           f'已完成 {record["completed"]}/{len(record["members"])} 条。全组主体与世界模型调用 {record["calls"]}/{record["request"]["call_limit"]}。']
+    b=record["baseline"]
+    if b:
+        title=(record["request"]["watch"] or {}).get("title") or b["actor"]+" · "+b["label"]
+        lines+=["","## "+note_text(title),"",f'存档原路线的结果为{outcome(b)}，依据 `{b["record"]}`。']
+    for arm in record.get("arms") or [{"arm":"single",**outcomes_for(record["members"])}]:
+        label=labels[arm["arm"]]
+        lines+=["","### "+label,"",f'{arm["completed"]}/{arm["total"]} 条到达共同终点。']
+        for o in arm["outcomes"]:
+            indices="、".join(str(i) for i in o["indices"])
+            lines.append(f'- {outcome(o["example"])}，{len(o["indices"])}/{arm["completed"]} 次，对应路线 {indices}。')
+        if (stats:=arm["numeric"]) and stats["known"]>=2:
+            unit=note_text((b or {}).get("unit") or "")
+            lines.append(f'已知数值 {stats["known"]} 个，中位数 {stats["median"]}{unit}，范围 {stats["min"]}{unit} 至 {stats["max"]}{unit}。')
+    lines+=["","## 路线与依据","","| 路线 | 条件 | 状态 | 提交窗口 | 调用 | 观测结果 | 运行与证据编号 |",
+            "| --- | --- | --- | --- | --- | --- | --- |"]
+    for m in record["members"]:
+        doc=m["outcome"]
+        evidence=f'`{m["run_id"]}`'+(f' / `{doc["record"]}`' if doc else "") if m.get("created") or m["status"]=="completed" else "—"
+        lines.append(f'| {m["index"]} | {labels[m.get("arm","single")]} | {labels.get(m["status"],m["status"])} | {m["window"]} | {m["calls"]} | {outcome(doc)} | {evidence} |')
+    lines+=["","次数来自本机已完成的独立推演。未完成路线保留在清单中。",""]
+    return "\n".join(lines)
 
 
 class Studies:
@@ -67,10 +162,15 @@ class Studies:
             _, _, condition = prepare_experiment(parent, request.experiment)
             baseline = measured(parent, request.watch, request.experiment.through)
             members = []
-            for index in range(1, request.repetitions + 1):
-                key = uuid.uuid5(uuid.NAMESPACE_URL, f"trantor:study:{study_id}:{index}").hex
-                members.append({"index":index, "run_id":key[:12], "status":"queued", "calls":0,
-                                "window":request.experiment.window, "outcome":None})
+            for replicate in range(1,request.repetitions+1):
+                arms=("original","changed") if request.compare_original else (None,)
+                for arm in arms if replicate%2 else reversed(arms):
+                    index=len(members)+1
+                    key=uuid.uuid5(uuid.NAMESPACE_URL,f"trantor:study:{study_id}:{index}").hex
+                    member={"index":index,"run_id":key[:12],"status":"queued","calls":0,"window":request.experiment.window,"outcome":None}
+                    if arm:
+                        member.update(arm=arm,replicate=replicate)
+                    members.append(member)
             record = {"id":study_id, "parent_id":parent.run_id, "title":parent._scenario.title,
                       "condition":condition, "request":payload, "created_at":now(), "status":"running",
                       "baseline":baseline, "members":members, "error":None}
@@ -87,7 +187,7 @@ class Studies:
     @staticmethod
     def _check_member(sim, record, member):
         marker = sim.experiment or {}
-        if marker.get("study") != {"id":record["id"], "index":member["index"]} or marker.get("parent_id") != record["parent_id"]:
+        if marker.get("study") != member_marker(record,member) or marker.get("parent_id") != record["parent_id"]:
             raise ValueError("路线记录与实验组不匹配，请检查本机资料")
 
     def _capture(self, record, member, sim):
@@ -121,17 +221,28 @@ class Studies:
     def view(self, study_id):
         with self.lock:
             record = self._refresh(self.read(study_id))
-            outcomes = {}
-            for member in record["members"]:
-                value = member["outcome"]
-                if member["status"] != "completed" or value is None:
-                    continue
-                key = encode(value["value"]) if value["status"]=="tracking" else value["status"]
-                group = outcomes.setdefault(key, {"example":value,"indices":[]})
-                group["indices"].append(member["index"])
-            return {**record, "outcomes":list(outcomes.values()),
-                    "calls":sum(m["calls"] for m in record["members"]),
-                    "completed":sum(m["status"]=="completed" for m in record["members"])}
+            members=record["members"]
+            if record["request"].get("compare_original"):
+                arms=[{"arm":name,**outcomes_for([m for m in members if m["arm"]==name])} for name in ("original","changed")]
+                return {**record,"outcomes":[],"arms":arms,"calls":sum(g["calls"] for g in arms),"completed":sum(g["completed"] for g in arms)}
+            return {**record,**outcomes_for(members),"arms":[]}
+
+    def compare_members(self,study_id,original,changed,window):
+        record=self.view(study_id)
+        members={m["index"]:m for m in record["members"]}
+        routes=[]
+        for index,arm in ((original,"original"),(changed,"changed")):
+            item=members.get(index)
+            if not item or item.get("arm")!=arm or item["status"]!="completed":
+                raise ValueError("请从两个条件中分别选择一条已完成的路线")
+            sim=self.get_run(item["run_id"])
+            self._check_member(sim,record,item)
+            routes.append(sim)
+        left,right=routes
+        if any(left.experiment[k]!=right.experiment[k] for k in ("parent_id","parent_event","state_sha256","window","through")):
+            raise ValueError("所选路线的分岔起点或观察终点不一致")
+        result=trajectory_comparison(left,right,left.experiment["window"],window)
+        return {**result,"actors":[{"id":a.id,"name":a.name} for a in left._scenario.entities]}
 
     def catalog(self):
         with self.lock:
@@ -141,7 +252,8 @@ class Studies:
                 if record["status"] in {"running","pausing","stopping"}:
                     self._refresh(record)
                 rows.append({**{k:record[k] for k in ("id","parent_id","title","condition","status","updated_at")},
-                             "count":len(record["members"]), "completed":sum(m["status"]=="completed" for m in record["members"])})
+                             "count":len(record["members"]), "paired":record["request"].get("compare_original",False),
+                             "completed":sum(m["status"]=="completed" for m in record["members"])})
             return sorted(rows, key=lambda r:r["updated_at"], reverse=True)
 
     def control(self, study_id, action):
@@ -194,7 +306,10 @@ class Studies:
                 else:
                     if member.get("created"):
                         raise ValueError("已开始路线的本地记录缺失，无法继续计数。请先恢复原记录。")
-                    sim = self.fork(parent, spec.experiment, rid, None, study={"id":study_id,"index":index}, call_limit=remaining)
+                    exp=spec.experiment
+                    if member.get("arm")=="original":
+                        exp=ExperimentRequest(window=exp.window,through=exp.through,kind="repeat")
+                    sim=self.fork(parent,exp,rid,None,study=member_marker(record,member),call_limit=remaining)
                 self._check_member(sim, record, member)
                 with self.lock:
                     record = self.read(study_id)

@@ -66,6 +66,8 @@ function experimentForm(view) {
     label.append(box,document.createTextNode(actor.name)); group.append(label);
   }
   const repeats=select("新路线数量",[[1,"1 条"],[2,"2 条"],[3,"3 条"],[5,"5 条"],[8,"8 条"],[16,"16 条"]]);
+  const pair=h("input"),pairLabel=h("label",null,"check pair-choice");pair.type="checkbox";
+  pairLabel.append(pair,document.createTextNode("也按原条件运行相同次数，分别比较两组结果"));form.append(pairLabel);
   const study=studyOptions(view,run);
   const cost=h("p",null,"experiment-estimate");
   const submit=h("button","启动新路线","primary"); submit.type="submit";
@@ -84,13 +86,16 @@ function experimentForm(view) {
     const windows=Number(through.value)-Number(split.value);
     const calls=windows*(view.actors.length*view.rounds_per_window+1);
     const count=Number(repeats.value);
-    study.update(count,calls);
-    submit.textContent=count===1 ? "启动新路线" : "启动这组实验";
-    cost.textContent=(count===1 ? "只重跑新路线的 "+windows+" 个窗口。" : count+" 条路线依次各跑 "+windows+" 个窗口。")+
-      "全部主体逐轮判断约需 "+(calls*count)+" 次基础调用，纠正与重试会增加用量。"+
-      (view.status.max_review_interval ? "主体可选择延续等待。" : "")+"原路线使用已提交记录。";
+    pairLabel.hidden=pair.disabled=kind.value==="repeat";
+    const contrast=!pair.disabled && pair.checked, total=contrast ? count*2 : count;
+    study.update(total,calls);
+    submit.textContent=contrast ? "启动双条件对照" : count===1 ? "启动新路线" : "启动这组实验";
+    cost.textContent=(contrast ? "原条件与改后条件分别运行 "+count+" 次，每条 "+windows+" 窗。" :
+      count===1 ? "只重跑新路线的 "+windows+" 个窗口。" : count+" 条路线依次各跑 "+windows+" 个窗口。")+
+      "全部主体逐轮判断约需 "+(calls*total)+" 次基础调用，纠正与重试会增加用量。"+
+      (view.status.max_review_interval ? "主体可选择延续等待。" : "")+(contrast ? "存档原路线另作参照。" : "原路线使用已提交记录。");
   }
-  split.onchange=()=>{limits();update();}; through.onchange=kind.onchange=audience.onchange=repeats.onchange=update;
+  split.onchange=()=>{limits();update();}; through.onchange=kind.onchange=audience.onchange=repeats.onchange=pair.onchange=update;
   limits(); update();
   form.onsubmit=async event=>{
     event.preventDefault(); if (busy || submit.disabled || activeRun!==run) return;
@@ -102,8 +107,9 @@ function experimentForm(view) {
     try {
       const spec={window:Number(split.value),through:Number(through.value),kind:kind.value,condition:kind.value==="condition" ? prompt.value.trim() : "",
                   assignment:kind.value==="field" ? picker.read() : null,route:kind.value==="transit" ? timing.read() : null,audience:scope,readers};
-      if(Number(repeats.value)>1) {
-        const result=await study.submit(spec,Number(repeats.value));
+      const contrast=!pair.disabled && pair.checked;
+      if(Number(repeats.value)>1 || contrast) {
+        const result=await study.submit(spec,Number(repeats.value),contrast);
         if(activeRun===run && form.isConnected && $("reading").open) {$("reading").close(); location.hash="study/"+result.id;}
       } else await job("experiment","/api/jobs/{id}/experiment/"+run,spec,
                 async result=>{ $("reading").close(); location.hash="run/"+result.run_id; });
@@ -187,19 +193,22 @@ function showExperimentTools(view) {
   }).catch(error=>{if(summary.isConnected) summary.replaceChildren(h("p",error.message,"error"));});
 }
 
-function drawExperimentComparison(root, result, actors, isLetter) {
+function drawExperimentComparison(root, result, actors, isLetter, options={}) {
+  const [leftLabel,rightLabel]=options.labels || ["原路线","新路线"];
   const w=result.right.window, changed=result.rows.filter(r=>r.status==="different");
   const names=Object.fromEntries(actors.map(a=>[a.id,a.name]));
   const intro=h("div",null,"comparison-heading");
   intro.append(h("strong","第 "+w+" 窗 · "+changed.length+" 项状态不同"));
   const first=result.first_state_difference;
   if (first && first!==w) {
-    const link=h("a","首次状态分化 · 第 "+first+" 窗"); link.href="#run/"+result.right.run_id+"/"+first; intro.append(link);
+    const caption="首次状态分化 · 第 "+first+" 窗";
+    if(options.selectWindow)intro.append(button(caption,()=>options.selectWindow(first),"link"));
+    else{const link=h("a",caption);link.href="#run/"+result.right.run_id+"/"+first;intro.append(link);}
   } else intro.append(h("small",first ? "首次状态分化" : "截至共同终点，字段值一致","quiet"));
   root.append(intro);
   const value=side=>side?.value==null ? "未知" : typeof side.value==="boolean" ? (side.value ? "是" : "否") : String(side.value)+(side.unit || "");
   const grid=h("div",null,"comparison-grid");
-  for (const [side,head,proof,label] of [["left",result.left,result.baseline,"原路线"],["right",result.right,result.variant,"新路线"]]) {
+  for (const [side,head,proof,label] of [["left",result.left,result.baseline,leftLabel],["right",result.right,result.variant,rightLabel]]) {
     const card=h("article",null,"comparison-side"); card.append(h("h3",label));
     for (const r of changed) card.append(h("p",(names[r.actor_id]||r.actor_id)+" · "+r[side].label+"　"+value(r[side]),"comparison-fact"));
     for (const c of proof.consequences.slice(0,2)) card.append(h("p",c.text));
@@ -211,7 +220,7 @@ function drawExperimentComparison(root, result, actors, isLetter) {
   select.append(...actors.map(a=>new Option(a.name,a.id))); const decisions=h("div"); details.append(select,decisions);
   const redraw=()=>{
     decisions.replaceChildren();
-    for (const [label,proof,head] of [["原路线",result.baseline,result.left],["新路线",result.variant,result.right]]) {
+    for (const [label,proof,head] of [[leftLabel,result.baseline,result.left],[rightLabel,result.variant,result.right]]) {
       const section=h("section"); section.append(h("h4",label));
       for (const a of proof.actions.filter(x=>x.actor_id===select.value)) {
         section.append(h("p","第 "+a.round+" 轮 · "+a.text),
