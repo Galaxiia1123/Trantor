@@ -93,6 +93,10 @@ class EstimateRequest(Record):
     model: ModelConfig
 
 
+class WebMaterialRequest(Record):
+    url: str = Field(min_length=1, max_length=2048)
+
+
 class BranchRequest(Record):
     window: int = Field(ge=0)
     title: str = Field(default="", max_length=250)
@@ -340,6 +344,11 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
     def upload_material(file: UploadFile = File(...)):
         raw = file.file.read(MAX_FILE_BYTES + 1)
         source = materials.ingest(file.filename or "material", raw, credential_configs=[profile.model] if profile.model else [])
+        return {"source": source.model_dump(mode="json")}
+
+    @app.post("/api/materials/web")
+    def import_web_material(request: WebMaterialRequest):
+        source = materials.ingest_web(request.url.strip(), credential_configs=[profile.model] if profile.model else [])
         return {"source": source.model_dump(mode="json")}
 
     @app.get("/api/materials/{asset_id}/original")
@@ -982,6 +991,7 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
                         "class":("night-class.md","榆街社区夜课 · 席位与开班 · 2 窗",None),
                         "letters":("loan-correspondence.md","榆岸档案馆 · 两封并行来信 · 3 窗",None),
                         "mail":("mountain-mail.md","山线货运站 · 跨窗通信 · 3 窗",None)}
+    material_templates["guide"]=("example-domain-guide.md","栖灯手册 · 引用公开资料 · 2 窗",None)
     asset_names=[row[0] for row in material_templates.values()]+["tidal-replay.json","verified-replay.json"]
     case_assets = {name:(static.parent/"templates"/name).read_bytes() for name in asset_names}
     revision = hashlib.sha256(b"".join(assets.values())).hexdigest()[:12]

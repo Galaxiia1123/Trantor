@@ -40,3 +40,9 @@ dialog{width:min(520px,94vw);max-height:88vh;border:1px solid var(--line);border
 .cohort{padding:12px 0;border-top:1px solid var(--line)}.cohort h3,.cohort p{margin:4px 0}
 .outcome-count{display:inline-block;margin:3px 6px 0 0;border-radius:12px;padding:3px 9px;background:var(--soft);color:var(--violet);font-size:13px}
 .cohort-links{display:flex;gap:9px;flex-wrap:wrap}.cohort-links a{font-size:13px}
+
+.source-actions,.web-input{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.source-actions .link{padding:5px 0}#web-intake{border-top:1px solid var(--line);margin-top:14px;padding-top:12px}#web-intake label{display:block;font-weight:600;font-size:14px;margin-bottom:5px}.web-input input{flex:1;min-width:9em}.file-chip button.source-name{font-size:inherit;font-weight:550;padding:2px 5px;max-width:100%;overflow-wrap:anywhere;text-align:left}.source-preview pre{white-space:pre-wrap;overflow-wrap:anywhere}.source-preview a{display:inline-block;margin-bottom:6px}
+
+.source-links:not([hidden]){display:flex;gap:4px 12px;align-items:baseline;flex-wrap:wrap;margin:0 0 14px}.source-links small{color:var(--muted)}.source-links button{overflow-wrap:anywhere;text-align:left;max-width:100%;padding:2px 0}
+
+.source-citations{display:grid;justify-items:start;gap:4px}.source-citations button{white-space:normal;text-align:left}.cited-passage{line-height:1.9}.cited-passage mark{background:#f6e9c8;color:inherit}

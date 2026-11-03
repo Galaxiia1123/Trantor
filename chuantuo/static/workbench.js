@@ -69,10 +69,41 @@ function persistSeed() {
 }
 function showFiles() {
   $("files").replaceChildren(...sources.map((s, i) => {
-    const chip = h("span", s.name, "file-chip"); chip.append(button("×", () => {
+    const chip = h("span", null, "file-chip"); chip.append(button(s.name, () => readSeedSource(s), "source-name"),button("×", () => {
       sources.splice(i, 1); showFiles(); persistSeed();
     })); chip.lastChild.setAttribute("aria-label", "移除" + s.name); return chip;
   }));
+  const links=new Map();
+  for(const s of sources.filter(s=>!s.public_reference && !s.simulation_ref)){
+    for(const match of s.text.matchAll(/https:\/\/[^\s<>()\[\]{}"'，。；、]+/gi)){
+      if(links.size>=4)break;
+      try {
+        const url=new URL(match[0]);url.hash="";
+        if(!url.username && !url.password && !url.search && !sources.some(v=>v.public_reference?.url===url.href))links.set(url.href,url);
+      } catch {}
+    }
+  }
+  const linksBox=$("source-links");linksBox.hidden=!links.size;linksBox.replaceChildren();
+  if(links.size)linksBox.append(h("small","文稿中提到的网页"),...Array.from(links.values(),url=>button(url.hostname+url.pathname,()=>{
+    $("web-intake").hidden=false;$("open-web").setAttribute("aria-expanded","true");$("web-url").value=url.href;$("fetch-web").focus();
+  },"link")));
+}
+function readSeedSource(source, scene) {
+  const ref=source.public_reference, content=h("div",null,"source-preview");
+  if(ref) {
+    const original=h("a",new URL(ref.url).hostname+" ↗");original.href=ref.url;original.target="_blank";original.rel="noopener noreferrer";
+    content.append(h("p",[ref.service,"读取于 "+new Date(ref.retrieved_at).toLocaleString(),ref.published && "原页日期 "+ref.published].filter(Boolean).join(" · "),"hint"),original);
+  }
+  if(source.warnings?.length)content.append(bullets(source.warnings));
+  if(scene)content.append(sourceCitations(scene,source));
+  const text=h("pre",source.text.slice(0,3000));content.append(text);
+  if(source.text.length>3000) {
+    const more=button("展开全文（"+source.text.length.toLocaleString()+" 字符）",()=>{text.textContent=source.text;more.remove();},"link");content.append(more);
+  }
+  if(source.asset_id) {
+    const download=h("a",ref?"下载这份文字快照":"下载导入的原件");download.href="/api/materials/"+encodeURIComponent(source.asset_id)+"/original";download.download=source.name;content.append(h("p"));content.lastChild.append(download);
+  }
+  reading(source.name,content);
 }
 function showProfile() {
   const m = profile?.model;
@@ -129,6 +160,22 @@ function reading(title, ...content) {
 $("reading").addEventListener("close", () => { if (!$("reading").open) { readingTrail.length = 0; readingRequest++; } });
 window.addEventListener("keydown", event => { if (event.key === "Escape") readingRequest++; });
 $("brief").addEventListener("input", persistSeed); $("allow-search").onchange = persistSeed;
+$("open-web").onclick=()=>{
+  const panel=$("web-intake");panel.hidden=!panel.hidden;$("open-web").setAttribute("aria-expanded",String(!panel.hidden));
+  if(!panel.hidden)$("web-url").focus();
+};
+$("web-intake").onsubmit=async event=>{
+  event.preventDefault();const input=$("web-url"),submit=$("fetch-web"),status=$("web-status");
+  submit.disabled=true;input.readOnly=true;status.textContent="正在读取公开正文…";
+  try {
+    const {source}=await api("/api/materials/web","POST",{url:input.value.trim()});
+    const exists=sources.some(s=>s.id===source.id);
+    if(!exists)sources.push(source);
+    input.value="";showFiles();persistSeed();
+    status.textContent=exists?"这份网页快照已在材料中。":"已加入网页快照。点击材料名称可核对文字、日期与来源。";
+  } catch(err) {status.textContent=err.message;}
+  finally {submit.disabled=false;input.readOnly=false;}
+};
 $("material").onchange = safe(async () => {
   const files = Array.from($("material").files); $("material").value = ""; $("prepare").disabled = true;
   try {
@@ -233,6 +280,43 @@ $("retry-prepare").onclick = safe(async () => {
   if (!failed || failed.project !== (project?.id || null)) throw new Error("请打开原项目后重试，或重新整理当前文稿。");
   await job("prepare","/api/jobs/" + failed.id + "/retry/{id}",undefined,acceptedDraft);
 });
+function sourceCitations(scene,source) {
+  const list=h("div"), lines=[], seen=new Set();
+  const names=Object.fromEntries(scene.entities.map(a=>[a.id,a.name]));
+  function visit(node, path) {
+    for(const q of node?.provenance?.quotes||[]) {
+      if(q.source_id!==source.id)continue;
+      const key=JSON.stringify([path,q.page,q.quote]);if(seen.has(key))continue;
+      seen.add(key);lines.push({path,q});
+    }
+  }
+  visit(scene.public_brief,"全员开局背景");
+  for(const actor of scene.entities) {
+    const at=actor.name;visit(actor,at+" · 主体");
+    for(const f of actor.fields) {
+      const label=at+" · "+(f.label||f.id);visit(f,label);
+      for(const def of [...(f.constraints?.meanings||[]),...(f.constraints?.entry_windows||[])])visit(def,label+" · "+def.value);
+    }
+    for(const m of actor.materials) {
+      const label=at+" · "+(m.document?.title||m.text.slice(0,35));
+      visit(m,label);visit(m.sharing,label+" · 可转交范围");
+    }
+  }
+  for(const edge of [...scene.influences,...(scene.mail_routes||[])])visit(edge,(names[edge.source]||edge.source)+" → "+(names[edge.target]||edge.target));
+  for(const rule of scene.rules)visit(rule,"规则 · "+rule.text.slice(0,45));
+  for(const event of scene.scheduled_events||[])visit(event,"日历 · "+(event.title||event.id));
+  if(!lines.length)return h("p","草案中还没有逐字引用这份资料的设定。","hint");
+  for(const {path,q} of lines)list.append(button(path,()=>{
+    const page=source.pages?.find(p=>p.number===q.page);
+    const area=page?source.text.slice(page.text_start,page.text_end):source.text, pos=area.indexOf(q.quote);
+    if(pos<0)throw new Error("在对应材料范围内未找到该引句。");
+    const excerpt=h("p",null,"cited-passage");
+    excerpt.append(document.createTextNode((pos>180?"…":"")+area.slice(Math.max(0,pos-180),pos)),h("mark",q.quote),
+      document.createTextNode(area.slice(pos+q.quote.length,pos+q.quote.length+180)+(area.length>pos+q.quote.length+180?"…":"")));
+    reading(path,h("p",source.name+(q.page?" · 第 "+q.page+" 页":""),"hint"),excerpt);
+  },"link"));
+  list.className="source-citations";return disclosure("有原文依据的设定（"+lines.length+"）",list);
+}
 function sourceReview(record) {
   const list = h("div");
   draft.scenario.sources.forEach(s => {
@@ -242,7 +326,9 @@ function sourceReview(record) {
       const link = h("a", "打开来源 ↗"); link.href = ref.url; link.target = "_blank"; link.rel = "noopener noreferrer";
       box.append(h("p", [ref.service, ref.published, ref.retrieved_at].filter(Boolean).join(" · "), "hint"), link);
     }
-    box.append(disclosure("阅读保留的原文", h("pre", s.text))); list.append(box);
+    if(s.warnings?.length)box.append(bullets(s.warnings));
+    box.append(button(s.public_reference?"核对公开资料与引用":"核对文稿与引用",()=>readSeedSource(s,draft.scenario),"link"));
+    list.append(box);
   });
   for (const f of record.findings || []) list.append(h("p", f.quote.quote + " — " + f.relevance + "。 " + f.time_and_authority));
   if (record.research?.length) list.append(disclosure("查询与候选来源", h("pre", json(record.research))));

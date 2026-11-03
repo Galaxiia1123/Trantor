@@ -16,13 +16,15 @@
   <main id="main">
     <section id="prepare-page">
       <div class="eyebrow"><span class="dash"></span> 场景准备</div>
-      <h1>准备一场推演</h1><p class="lead">写下想模拟的局面，或导入已有文稿。川陀会整理参与者、关系与开局条件。</p>
+      <h1>准备一场推演</h1><p class="lead">从一个“如果……会怎样”的问题开始。写下已知条件，或带入文稿和公开资料，看看各方会怎么做。</p>
       <div class="prepare-grid">
         <article class="card seed"><div class="card-top"><h2><label for="brief">场景背景</label></h2><span class="quiet">文字或文稿</span></div>
           <textarea id="brief" rows="7" placeholder="谁在参与？各方有哪些约束？你希望观察什么变化？"></textarea>
           <div id="files" class="files"></div>
-          <div class="seed-actions"><label class="file-button" for="material"><b>＋</b> 导入文稿</label><input type="file" id="material" accept=".md,.markdown,.txt,.docx,.pdf" multiple>
+          <div id="source-links" class="source-links" hidden></div>
+          <div class="seed-actions"><div class="source-actions"><label class="file-button" for="material"><b>＋</b> 导入文稿</label><input type="file" id="material" accept=".md,.markdown,.txt,.docx,.pdf" multiple><button type="button" class="link" id="open-web" aria-controls="web-intake" aria-expanded="false">导入网页</button></div>
             <button class="primary" id="prepare">整理场景 <span aria-hidden="true">→</span></button></div>
+          <form id="web-intake" hidden><label for="web-url">公开资料网址</label><div class="web-input"><input id="web-url" type="url" required maxlength="2048" autocomplete="off" placeholder="https://…"><button id="fetch-web" type="submit">读取正文</button></div><p class="hint" id="web-status" role="status">使用无需登录的 HTTPS 永久链接。川陀会保存当时读到的文字，可在整理前核对。</p></form>
           <details class="subtle"><summary>准备选项</summary><label class="check"><input type="checkbox" id="allow-search" checked> 按需查询公开资料</label><p class="hint">仅检索公开事实的关键词。用户意图和虚构设定以文稿为准。</p></details>
           <div id="retry-panel" class="line" hidden><p class="hint">上次整理未完成。按原请求重试会复用输入完全一致且已核对的步骤。修改过文稿时请使用“整理场景”。</p><button id="retry-prepare">按原请求重试</button></div>
         </article>

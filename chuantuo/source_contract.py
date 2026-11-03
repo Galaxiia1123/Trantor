@@ -126,7 +126,7 @@ def _sharing_rules(bundle):
     version=2 if any(m.get("document") for a in scene["entities"] for m in a["materials"]) else 1
     if record.get("sharing_review",{}).get("version") == version:
         return bundle
-    sources = {s["id"]:s["text"] for s in scene["sources"]}
+    sources = {s["id"]:s["text"] for s in scene["sources"] if not s.get("public_reference") and not s.get("simulation_ref")}
     defaults = []
     for actor in scene["entities"]:
         for m in actor["materials"]:
@@ -167,7 +167,7 @@ def _initial_access(bundle):
             for grant in visibility.get("reader_evidence",[]):
                 q = grant["quote"]
                 source = sources.get(q["source_id"])
-                if not source or not q["quote"]:
+                if not source or source.get("public_reference") or source.get("simulation_ref") or not q["quote"]:
                     continue
                 body = source["text"]
                 if q.get("page") is not None:

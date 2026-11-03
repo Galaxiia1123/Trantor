@@ -7,6 +7,8 @@ import io
 import re
 import threading
 import uuid
+from datetime import datetime, timezone
+from http.client import HTTPException
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from xml.etree import ElementTree
@@ -16,8 +18,9 @@ import numpy as np
 import pypdfium2 as pdfium
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from .schema import Source, SourcePage
+from .schema import PublicReference, Source, SourcePage
 from .models import protect_credentials
+from .public_sources import fetch_public_page
 
 MAX_FILE_BYTES = 32 * 1024 * 1024
 MAX_PDF_PAGES = 100
@@ -82,7 +85,22 @@ class MaterialStore:
         self.directory = Path(directory)
         self.ocr = ocr or recognize
 
-    def ingest(self, filename: str, raw: bytes, progress=None, *, asset_id=None, credential_configs=()) -> Source:
+    def ingest_web(self, url, *, credential_configs=()):
+        try:
+            page = fetch_public_page(url, for_import=True, credential_configs=credential_configs)
+        except (OSError, HTTPException):
+            raise ValueError("未能连接或验证原站。可稍后重试，或将网页保存为文稿后导入。") from None
+        if not page.text.strip():
+            raise ValueError("该页没有可读取的正文。可以将可见文字复制为文稿后导入。")
+        reference = PublicReference(url=page.url, query="用户导入", service="网页文字快照",
+                                    retrieved_at=datetime.now(timezone.utc).isoformat(timespec="seconds"), published=page.published)
+        title = re.sub(r'[<>:"/\\|?*\x00-\x1f]', " ", page.title).strip(" .")[:100] or "网页"
+        notes = ["原页超过读取上限，快照仅包含前 512,000 字节可提取的文字。"] if page.truncated else []
+        return self.ingest(title + ".txt", page.text.encode("utf-8"), public_reference=reference,
+                           intake_notes=notes, credential_configs=credential_configs)
+
+    def ingest(self, filename: str, raw: bytes, progress=None, *, asset_id=None, credential_configs=(),
+               public_reference=None, intake_notes=()) -> Source:
         progress = progress or (lambda stage, message: None)
         name = filename.replace("\\", "/").rsplit("/", 1)[-1]
         suffix = Path(name).suffix.lower()
@@ -94,7 +112,7 @@ class MaterialStore:
         if not re.fullmatch(r"[a-f0-9]{32}",asset_id):
             raise ValueError("材料编号无效")
         folder = self.directory / asset_id
-        texts, pages, warnings, previews = [], [], [], []
+        texts, pages, warnings, previews = [], [], list(intake_notes), []
         offset = 0
 
         def add_page(number, text, method, confidence=None):
@@ -182,11 +200,13 @@ class MaterialStore:
             warnings.append("OCR 只提取文字，照片、图形和空间关系需由视觉模型或人工核对。")
         preview_hashes = {number:hashlib.sha256(data).hexdigest() for number,data in previews}
         pages = [p.model_copy(update={"preview_sha256":preview_hashes.get(p.number)}) for p in pages]
-        source = Source(id=f"material_{asset_id[:12]}", name=name, text="\n\n".join(texts),
+        source_id = (f"web_{hashlib.sha256(public_reference.url.encode()+bytes(1)+raw).hexdigest()[:24]}"
+                     if public_reference else f"material_{asset_id[:12]}")
+        source = Source(id=source_id, public_reference=public_reference, name=name, text="\n\n".join(texts),
                         asset_id=asset_id, mime_type=mime, sha256=hashlib.sha256(raw).hexdigest(),
                         pages=pages, warnings=warnings)
         self.directory.mkdir(parents=True,exist_ok=True)
-        protect_credentials([name,source.text], credential_configs)
+        protect_credentials(source.model_dump(mode="json"), credential_configs)
         with TemporaryDirectory(dir=self.directory,prefix="_upload-") as temporary:
             stage = Path(temporary)/"asset"
             stage.mkdir()
@@ -231,6 +251,9 @@ class MaterialStore:
     def check_metadata(source, original):
         if (source.sha256, source.text, source.pages, source.mime_type) != (original.sha256, original.text, original.pages, original.mime_type):
             raise ValueError(f"材料「{source.name}」的原件摘要、提取文字或页码与本机原件不符，请另建补充材料")
+        if source.public_reference != original.public_reference or (original.public_reference and
+                (source.id, source.name, source.warnings) != (original.id, original.name, original.warnings)):
+            raise ValueError("网页快照的来源、名称或读取范围与本机保存的版本不符")
 
     def check_sources(self, sources):
         missing = []

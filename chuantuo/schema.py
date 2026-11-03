@@ -66,6 +66,13 @@ class Source(Record):
     pages: list[SourcePage] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 
+    def origin_context(self):
+        if self.public_reference:
+            return {"public_reference": self.public_reference.model_dump(exclude_defaults=True)}
+        if self.simulation_ref:
+            return {"simulation_ref": self.simulation_ref.model_dump()}
+        return {}
+
     @model_validator(mode="after")
     def valid_page_spans(self):
         last_number, last_end = 0, 0

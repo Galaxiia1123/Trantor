@@ -23,7 +23,7 @@ def _pieces(sources):
         for page in source.pages or [None]:
             start, end = (page.text_start, page.text_end) if page else (0,len(source.text))
             if end > start:
-                yield {"source_id":source.id, "page":page.number if page else None, "source_start":start,
+                yield {"source_id":source.id, **source.origin_context(), "page":page.number if page else None, "source_start":start,
                        "text":source.text[start:end]}
 
 
@@ -34,7 +34,7 @@ def prepare_long_sources(request, sources, payload, parser_system, gateway, prog
         return [], None
     if not request.max_source_batches:
         raise ValueError("完整场景材料超出解析模型的字符限额。可在补充范围与条件中启用长材料摘引，或缩减材料后继续")
-    descriptions = [{"id":s.id, "name":s.name, "sha256":s.sha256, "characters":len(s.text),
+    descriptions = [{"id":s.id, "name":s.name, **s.origin_context(), "sha256":s.sha256, "characters":len(s.text),
                      "excerpt_only":True, "selected_quotes":[]} for s in sources]
     payload["sources"] = descriptions
     payload["source_coverage"] = "原文按片段筛选，模型只接收选定短引文；未覆盖的事实须保留为缺失。"

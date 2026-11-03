@@ -6,10 +6,11 @@ import os
 import re
 import socket
 import ssl
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from http.client import HTTPSConnection, HTTPException
-from urllib.parse import quote, urljoin, urlsplit
+from urllib.parse import parse_qsl, quote, unquote, urljoin, urlsplit, urlunsplit
 from xml.etree import ElementTree
 
 import httpx
@@ -17,68 +18,131 @@ import httpx
 from .schema import PublicReference, Source
 
 
+PAGE_BYTES = 512_000
+
+
 class PageText(HTMLParser):
+    breaks = {"article", "blockquote", "br", "dd", "div", "dt", "h1", "h2", "h3", "h4", "h5", "h6",
+              "li", "p", "section", "td", "th", "tr"}
+
     def __init__(self):
         super().__init__()
         self.hidden = 0
+        self.in_title = False
+        self.title = []
         self.pieces = []
         self.published = None
 
     def handle_starttag(self, tag, attrs):
-        if tag in {"script", "style", "noscript", "svg"}:
+        if tag in {"head", "script", "style", "noscript", "svg", "template"}:
             self.hidden += 1
+        if tag == "title":
+            self.in_title = True
+        if tag in self.breaks and not self.hidden:
+            self.pieces.append("\n")
         data = dict(attrs)
         if tag == "meta" and (data.get("property") or data.get("name")) in {"article:published_time", "datePublished", "citation_publication_date"}:
             self.published = (data.get("content") or "")[:32]
 
     def handle_endtag(self, tag):
-        if tag in {"script", "style", "noscript", "svg"}:
+        if tag == "title":
+            self.in_title = False
+        if tag in {"head", "script", "style", "noscript", "svg", "template"}:
             self.hidden = max(0, self.hidden - 1)
+        if tag in self.breaks and not self.hidden:
+            self.pieces.append("\n")
 
     def handle_data(self, data):
-        if not self.hidden and data.strip():
-            self.pieces.append(data.strip())
+        if self.in_title:
+            self.title.append(data)
+        elif not self.hidden:
+            self.pieces.append(re.sub(r"\s+", " ", data))
+
+    def body(self):
+        return "\n\n".join(line.strip() for line in "".join(self.pieces).splitlines() if line.strip())
 
 
-def read_public_page(url):
-    """Pin each HTTPS connection to a validated public address while verifying the requested hostname."""
-    for _ in range(3):
+@dataclass(frozen=True)
+class WebPage:
+    url: str
+    title: str
+    text: str
+    published: str | None
+    truncated: bool
+
+
+def public_url(url, *, for_import=False):
+    if len(url) > 2048 or any(ord(c) < 32 for c in url) or "\\" in url:
+        raise ValueError("请输入有效的公开 HTTPS 网址")
+    try:
         parts = urlsplit(url)
-        if parts.scheme != "https" or not parts.hostname or parts.username or parts.password or parts.port not in (None, 443):
-            raise ValueError("只读取公开 HTTPS 网页")
+        if parts.scheme != "https" or not parts.hostname or parts.username is not None or parts.password is not None or parts.port not in (None, 443):
+            raise ValueError
         host = parts.hostname.encode("idna").decode()
+    except (ValueError, UnicodeError):
+        raise ValueError("只读取无需登录的公开 HTTPS 网页") from None
+    if for_import:
+        # Only durable document locators belong in a stored, exportable source.
+        for key, value in parse_qsl(parts.query, keep_blank_values=True):
+            if key.lower() not in {"id", "p", "page", "title", "article", "articleid", "docid", "lang", "v"} or len(value)>160:
+                raise ValueError("请使用文章永久链接，移除分享签名、追踪或登录参数")
+    netloc = f"[{host}]" if ":" in host else host
+    return urlunsplit(("https", netloc, parts.path or "/", parts.query, ""))
+
+
+def fetch_public_page(url, *, for_import=False, credential_configs=()):
+    """Pin each HTTPS connection to a validated public address and recheck every redirect."""
+    from .models import protect_credentials
+    for _ in range(3):
+        url = public_url(url, for_import=for_import)
+        protect_credentials([url, unquote(url)], credential_configs)
+        parts = urlsplit(url)
+        host = parts.hostname
         addresses = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
-        public = []
         for answer in addresses:
             address = ipaddress.ip_address(answer[4][0])
-            address = getattr(address,"ipv4_mapped",None) or address
-            public.append(address.is_global and not address.is_multicast and not address.is_reserved)
-        if not public or not all(public):
+            address = getattr(address, "ipv4_mapped", None) or address
+            if not address.is_global or address.is_multicast or address.is_reserved:
+                raise ValueError("网址未解析到公共地址")
+        if not addresses:
             raise ValueError("网址未解析到公共地址")
         conn = HTTPSConnection(host, timeout=5)
         try:
             with socket.create_connection((addresses[0][4][0], 443), timeout=5) as raw:
                 conn.sock = ssl.create_default_context().wrap_socket(raw, server_hostname=host)
-                path = (parts.path or "/") + ("?" + parts.query if parts.query else "")
-                conn.request("GET", quote(path, safe="/%:?=&;+,$@!~*'()_-"), headers={"User-Agent":"Chuantuo/1.1 public research","Accept":"text/html,text/plain"})
+                path = parts.path + ("?" + parts.query if parts.query else "")
+                conn.request("GET", quote(path, safe="/%:?=&;+,$@!~*'()_-"), headers={
+                    "User-Agent":"Trantor public research", "Accept":"text/html,text/plain", "Accept-Encoding":"identity"})
                 response = conn.getresponse()
                 if 300 <= response.status < 400 and response.getheader("Location"):
                     url = urljoin(url, response.getheader("Location"))
                     continue
                 mime = response.headers.get_content_type()
                 if response.status != 200 or mime not in {"text/html", "text/plain"}:
-                    raise ValueError("原页未提供可核验正文")
-                data = response.read(512_000)
+                    raise ValueError("原页未提供可读取的 HTML 或纯文字正文")
+                if (response.getheader("Content-Encoding") or "identity").lower() != "identity":
+                    raise ValueError("此网页只提供压缩内容，暂不能直接导入")
+                data = response.read(PAGE_BYTES + 1)
                 charset = response.headers.get_content_charset() or "utf-8"
-                source = data.decode(charset, errors="replace")
+                try:
+                    source = data[:PAGE_BYTES].decode(charset, errors="replace")
+                except LookupError:
+                    raise ValueError("网页使用了无法识别的文字编码") from None
                 parser = PageText()
                 if mime == "text/html":
                     parser.feed(source)
-                    source = " ".join(parser.pieces)
-                return url, source, parser.published
+                    parser.close()
+                    source = parser.body()
+                title = " ".join("".join(parser.title).split())
+                return WebPage(url, title or host, source.strip(), parser.published, len(data) > PAGE_BYTES)
         finally:
             conn.close()
     raise ValueError("原页重定向次数过多")
+
+
+def read_public_page(url):
+    page = fetch_public_page(url)
+    return page.url, page.text, page.published
 
 
 def relevant_excerpt(title, body, query):
