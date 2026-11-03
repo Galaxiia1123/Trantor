@@ -5,7 +5,7 @@
   <meta name="theme-color" content="#f7f7f4">
   <title>Trantor 川陀 · 推演工作台</title>
   <link rel="stylesheet" href="/static/workbench.css"><link rel="stylesheet" href="/static/observatory.css">
-  <script defer src="/static/route-graph.js"></script><script defer src="/static/interactions.js"></script><script defer src="/static/mail.js"></script><script defer src="/static/documents.js"></script><script defer src="/static/calendar.js"></script><script defer src="/static/observatory.js"></script><script defer src="/static/story.js"></script><script defer src="/static/ideas.js"></script><script defer src="/static/studies.js"></script><script defer src="/static/experiments.js"></script><script defer src="/static/workbench.js"></script>
+  <script defer src="/static/route-graph.js"></script><script defer src="/static/interactions.js"></script><script defer src="/static/mail.js"></script><script defer src="/static/documents.js"></script><script defer src="/static/calendar.js"></script><script defer src="/static/observatory.js"></script><script defer src="/static/story.js"></script><script defer src="/static/ideas.js"></script><script defer src="/static/studies.js"></script><script defer src="/static/experiments.js"></script><script defer src="/static/perspective.js"></script><script defer src="/static/workbench.js"></script>
 </head>
 <body>
   <a class="skip" href="#main">跳到正文</a>
@@ -37,6 +37,7 @@
     </section>
     <section id="library-page" hidden><div class="eyebrow"><span class="dash"></span> 本机记录</div><h1>项目与记录</h1><p class="lead">从已保存的场景继续，或回看某次推演的完整过程。</p><label class="library-find">查找场景、推演或实验组<input id="library-search" type="search" placeholder="名称、编号或运行状态"></label><article class="card library-studies" hidden><h2>重复实验</h2><div id="studies"></div></article><div class="library-grid"><article class="card"><h2>已保存场景</h2><div id="projects"></div></article><article class="card"><h2>推演记录</h2><div id="runs"></div></article></div><details class="foot-tools"><summary>导入项目包与历史工具</summary><label>导入已导出的项目包 <input id="import-bundle" type="file" accept=".zip"></label><p><a href="/archive">打开旧版工作台 ↗</a></p></details></section>
     <section id="study-page" hidden></section>
+    <section id="perspective-page" hidden aria-label="主体手记"></section>
     <section id="watch-page" hidden><div class="eyebrow"><span class="dash"></span> 推演观察</div><div class="watch-head"><div><h1 id="watch-title"></h1><p class="lead" id="watch-meta"></p></div><div class="actions" id="run-actions"></div></div>
       <div class="window-bar"><label for="window">观察窗口</label><button type="button" id="previous-window" aria-label="上一窗">‹</button><select id="window"></select><button type="button" id="next-window" aria-label="下一窗">›</button><span id="window-status"></span></div>
       <section id="window-strip" class="window-strip" aria-label="局势时间带" hidden></section>

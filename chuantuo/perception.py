@@ -52,9 +52,15 @@ def decision_view(observation):
         window=observation["window"]
         view["mail_timing"]="下面是本窗生效的线路时效，旧材料与来信中的预计日期只代表当时的说法。"
         view["mail_routes"]=[{**r,"本窗发件的送达时点":f"第 {window+r['transit_windows']} 窗开始" if r["transit_windows"] else "本轮结束"} for r in routes]
-    if any(m.get("dispatch_id") for m in observation["messages"]):
-        view["messages"]=[{**m,"到件记录":f"第 {m['due_window']} 窗首已实际进入你的收件箱；text 为收到的原信。"}
-                          if m.get("dispatch_id") else m for m in observation["messages"]]
+    if observation["messages"] and (view.get("documents") or any(m.get("dispatch_id") or m.get("enclosures") for m in observation["messages"])):
+        view["messages"]=[]
+        for message in observation["messages"]:
+            when=f"第 {message['due_window']} 窗首" if message.get("dispatch_id") else "上一轮结束时"
+            attachments=[d["title"] for d in message.get("enclosures",())]
+            contents="实际随信附件："+"、".join(attachments) if attachments else "本信只有文字，无随信附件"
+            view["messages"].append({**message,"到件记录":when+"收到这封信。"+contents+"。"})
+    if any(d.get("first_delivery") for d in view.get("documents",())):
+        view["document_timing"]="已持有副本的 received_window 和 first_delivery 记录首次取得的窗口和凭据。之后收到文字说明或再次获得副本，都沿用首次取得时间。"
     if observation.get("external_events"):
         view["external_events"]=[{**e,"实际通知窗口":observation["window"]} for e in observation["external_events"]]
     if feedback := observation.get("world_feedback"):

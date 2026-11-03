@@ -7,6 +7,7 @@ from chuantuo.documents import document_history
 from chuantuo.engine import Simulation
 from chuantuo.experiments import ExperimentRequest, fork_experiment
 from chuantuo.models import ModelError
+from chuantuo.perspective import held_paper, journey, letter_at
 from chuantuo.schema import RunConfig11, Scenario11, Settlement, Source
 from chuantuo.settlement import settled_state, verify_commits
 from chuantuo.source_contract import reconcile
@@ -63,6 +64,14 @@ def test_only_actual_holders_forward_identical_copies_to_authorized_recipients(t
     assert [h["actor"] for h in pending["holders"]]==["a"] and pending["items"][0]["receipt"] is None
     resumed=Simulation.restore(tmp_path/"base",g);resumed.recover()
     assert resumed.run()["status"]=="completed" and sorted(g.denials)==["scope","unheld"]
+    with pytest.raises(ValueError,match="没有持有"):
+        held_paper(resumed,"c","slip",2,1)
+    later=journey(resumed,"c",2,2)["current"]
+    assert later["inbox"][0]["enclosures"]==[{"id":"slip","title":"来料单"}]
+    assert letter_at(resumed,"c",2,2,"inbox",0)["letter"]["text"]=="请核对副本。"
+    assert held_paper(resumed,"c","slip",2,2)["text"]==BODY
+    assert held_paper(resumed,"a","slip",1,1)["acquired"]==0
+    assert BODY not in str(journey(resumed,"d",3,2))
     finished=document_history(resumed,3)
     assert finished["total"]==2 and {h["actor"] for h in finished["holders"]}=={"a","b","c"}
     assert {r["arrived_window"] for r in finished["items"]}=={2}

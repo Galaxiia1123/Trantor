@@ -789,6 +789,23 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
                      right_window: int | None = Query(default=None,ge=0)):
         return compare(get_run(run_id),get_run(other_id),left_window,right_window)
 
+    @app.get("/api/runs/{run_id}/actors/{actor_id}/journey")
+    def actor_journey(run_id:str, actor_id:str, window:int|None=Query(default=None,ge=1),
+                      turn:int|None=Query(default=None,ge=1), news_only:bool=False, through:int|None=Query(default=None,ge=1)):
+        from .perspective import journey
+        return journey(get_run(run_id),actor_id,window,turn,news_only,through)
+
+    @app.get("/api/runs/{run_id}/actors/{actor_id}/letters")
+    def read_letter(run_id:str,actor_id:str,window:int=Query(ge=1),turn:int=Query(ge=1),
+                    direction:Literal["inbox","outbox"]="inbox",index:int=Query(default=0,ge=0)):
+        from .perspective import letter_at
+        return letter_at(get_run(run_id),actor_id,window,turn,direction,index)
+
+    @app.get("/api/runs/{run_id}/actors/{actor_id}/papers/{document_id}")
+    def paper_at(run_id:str,actor_id:str,document_id:str,window:int=Query(ge=1),turn:int=Query(ge=1)):
+        from .perspective import held_paper
+        return held_paper(get_run(run_id),actor_id,document_id,window,turn)
+
     @app.get("/api/runs/{run_id}/actors/{actor_id}/observation")
     def actor_view(run_id: str, actor_id: str, window: int = Query(ge=0)):
         return actor_observation(get_run(run_id), actor_id, window)

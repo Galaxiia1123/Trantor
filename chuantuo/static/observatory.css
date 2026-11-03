@@ -133,3 +133,15 @@
 .comparison-idea small,.comparison-idea>.link{display:block;margin-top:.45rem}
 .decision-statement{padding:.65rem 1rem;margin:.85rem 0;border-left:3px solid var(--accent,#765770);background:#f7f3f8}
 .decision-statement p{margin:.3rem 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.perspective-header{margin:12px 0 20px}.perspective-header .eyebrow{margin:22px 0 4px}
+.perspective-nav{padding:15px 20px;background:#f0edf4;border:1px solid #d7d0e0;border-radius:12px}
+.perspective-nav .actions{flex-wrap:wrap;align-items:center}.perspective-nav .check{font-size:14px}
+.perspective-nav .eyebrow{margin:0 0 10px}.perspective-nav details{margin:0}.perspective-seek{display:flex;flex-wrap:wrap;align-items:end;gap:8px;padding:6px 0}
+.perspective-seek label{display:grid;font-size:12px}.perspective-seek input{width:5.5rem}
+.perspective-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;margin:18px 0}
+.perspective-column{background:#fffefa;border:1px solid #d9d5d0;border-radius:14px;padding:clamp(16px,2.4vw,28px);overflow-wrap:anywhere}
+.perspective-column h2{font-size:clamp(18px,2.2vw,24px)}.perspective-column p{white-space:pre-wrap}.perspective-column.decision{border-top:3px solid #796284}
+.perspective-letter{padding:12px 0;border-bottom:1px solid #e3dce4}.perspective-letter p{margin:.4rem 0}
+.perspective-column small{display:block}.perspective-choice{font-size:1.08rem;line-height:1.8}.perspective-change{padding-left:.65rem;border-left:2px solid #657e71}
+.perspective-name{border:0;background:none;font-weight:700;padding:0;color:#534166;text-align:left}
+@media(max-width:700px){.perspective-columns{grid-template-columns:minmax(0,1fr)}.perspective-nav{padding:12px}}

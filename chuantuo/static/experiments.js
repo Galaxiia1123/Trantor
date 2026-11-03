@@ -36,7 +36,7 @@ function caseChoices(heading,intro,path,choices) {
   reading(heading,body);
 }
 
-function experimentForm(view,idea=null) {
+function experimentForm(view,idea=null,priorWindow=null) {
   const run = activeRun, committed = view.status.window, earliest = view.status.experiment?.window || 0;
   const preset=idea?.experiment;
   const form = h("form", null, "experiment-form"), warning = h("p", null, "form-error");
@@ -57,7 +57,7 @@ function experimentForm(view,idea=null) {
   const kind = select("探索方式",modes);
   const range = Array.from({length:committed - earliest}, (_,i) => earliest + i);
   const split = select("从哪里分岔",range.map(w=>[w,w ? "第 " + w + " 窗结算后" : "从开局"]));
-  split.value = String(Math.max(earliest,Math.min(view.settled_through,committed-1)));
+  split.value = String(Math.max(earliest,Math.min(priorWindow ?? view.settled_through,committed-1)));
   const through = select("比较到哪个窗口",[]);
   const prompt = h("textarea",null,"editor"); prompt.maxLength = 1600; prompt.rows = 3;
   prompt.placeholder = "例如：运营社在本窗开始时收到一份有效签字函。";

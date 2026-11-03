@@ -160,15 +160,19 @@ class Journal:
                     return obs["id"]
         return None
 
-    def inbox_before(self, action, discarded):
+    def observation_before(self, action, discarded):
         data=action["data"]
         key=(action["window"],data["round"],data["actor_id"])
         with self._lock:
             for obs in reversed(self._round_observations.get(key,())):
                 if obs["id"] not in discarded and int(obs["id"][1:])<int(action["id"][1:]):
-                    inbox=obs["data"]["visible"]["messages"]
-                    return obs["id"],len(inbox),inbox[:3]
+                    return obs
         return None
+
+    def inbox_before(self, action, discarded):
+        if obs:=self.observation_before(action,discarded):
+            inbox=obs["data"]["visible"]["messages"]
+            return obs["id"],len(inbox),inbox[:3]
 
     def usage(self):
         with self._lock:

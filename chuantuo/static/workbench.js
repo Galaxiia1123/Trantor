@@ -619,14 +619,15 @@ async function openActorContext(actor, window, turn, replace = false, run = acti
   if(view.messages?.length) {
     body.append(h("h3","本轮收到的消息"));
     view.messages.forEach(m=>{
-      body.append(h("p",m.from+" → "+m.to+"　"+m.text),evidenceLinks([m.action_id],run));
+      body.append(h("p",m.from+" → "+m.to+"　"+m.text),evidenceLinks([m.receipt_id || result.observation_id || result.input_id],run));
       for(const doc of m.enclosures || [])body.append(disclosure("收到附件 · "+doc.title,h("p",doc.text),evidenceLinks([m.receipt_id].filter(Boolean),run)));
     });
   }
   if(view.documents?.length)body.append(disclosure("当时持有的原件或副本",...view.documents.map(d=>{
     const original=view.visible_materials?.find(m=>m.document?.id===d.id),line=h("div");
     line.append(h("strong",d.title),h("small",d.first_delivery ? " · 第 "+d.received_window+" 窗取得副本" : " · 开局已持有","quiet"));
-    if(original)line.append(h("p",original.text));if(d.first_delivery)line.append(evidenceLinks([d.first_delivery],run));
+    if(original)line.append(h("p",original.text));
+    if(d.first_delivery)line.append(button("查阅签收的副本",paperReader(run,actor.id,d,{window,round:result.round}),"link"),evidenceLinks([d.first_delivery],run));
     return line;
   })));
   if(view.mail_routes?.length) {
@@ -803,7 +804,10 @@ function renderWindow(view) {
   $("actors").replaceChildren(); $("state-time").textContent = view.settled_through ? "来自第 " + view.settled_through + " 窗的已提交状态" : "来自开局配置";
   const displayActors=focus ? view.actors.filter(a=>a.id===focus) : view.actors;
   for (const a of displayActors.slice(0,actorLimit)) {
-    const card = h("div",null,"actor"); card.append(h("strong",a.name),h("p",a.profile || "未定义结算字段。"));
+    const card = h("div",null,"actor");
+    const who=!isCase && view.settled_through ? button(a.name+" ↗",()=>enterPerspective(a.id,view.settled_through),"perspective-name") : h("strong",a.name);
+    if(who.tagName==="BUTTON")who.setAttribute("aria-label","沿"+a.name+"的视角回看");
+    card.append(who,h("p",a.profile || "未定义结算字段。"));
     if (Object.keys(a.fields).length) { const d = fieldDetails(a,view.state_record,view); d.dataset.actor = a.id; d.open = open.has(a.id); card.append(d); }
     if (!isCase && view.settled_through) card.append(button("当时可见的信息",()=>openActorContext(a,view.settled_through),"link"));
     $("actors").append(card);
@@ -1011,7 +1015,9 @@ async function route() {
   const gen = ++routeGeneration; clearTimeout(timer); notice(""); lastView = reportsSignature = "";
   const [kind = "new", id, pinned] = location.hash.slice(1).split("/"); activeRun = null; selectedWindow = null; eventLimit = 100;
   const showWatch = ["run","case","recording"].includes(kind), showLibrary = kind === "library", showStudy=kind==="study";
-  const showSaved=showWatch || showLibrary || showStudy;
+  const showPerspective=kind==="actor";
+  const showSaved=showWatch || showLibrary || showStudy || showPerspective;
+  $("perspective-page").hidden=!showPerspective;
   $("watch-page").hidden = !showWatch; $("library-page").hidden = !showLibrary; $("study-page").hidden=!showStudy; $("prepare-page").hidden = showSaved;
   $("nav-new").classList.toggle("active", !showSaved); $("nav-library").classList.toggle("active", showSaved);
   if (showWatch) {
@@ -1029,6 +1035,14 @@ async function route() {
     $("open-interactions").hidden=true;$("window").disabled=$("next-window").disabled=$("previous-window").disabled=true;
     $("events").append(h("p","正在读取该窗口的推演记录…","hint"));
     await refreshWatch(gen);
+    if(gen===routeGeneration && perspectiveOrigin?.run===id && perspectiveOrigin.url===location.hash) {
+      const saved=perspectiveOrigin;perspectiveOrigin=null;
+      requestAnimationFrame(()=>{if(gen===routeGeneration)scrollTo(0,saved.scroll);});
+    }
+  }
+  else if (showPerspective) {
+    activeRun=id;$("perspective-page").replaceChildren(h("p","正在打开这个主体的手记…","hint"));scrollTo(0,0);
+    await perspectivePage(gen);
   }
   else if (showStudy) await studyPage(id,gen);
   else if (showLibrary) await library(gen);
