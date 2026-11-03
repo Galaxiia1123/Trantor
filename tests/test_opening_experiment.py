@@ -5,6 +5,7 @@ import pytest
 from chuantuo.contrast import field_contrast
 from chuantuo.engine import Simulation
 from chuantuo.experiments import ExperimentRequest, experiment_comparison, fork_experiment, prepare_experiment
+from chuantuo.paired_notes import brief_markdown, paired_brief
 from chuantuo.schema import RunConfig11, Scenario11
 
 
@@ -38,3 +39,8 @@ def test_opening_edit_is_private_from_first_decision_and_stays_fixed_on_restore(
             assert ("备用用途" in e["data"]["messages"][-1]["content"]) == (e["data"]["actor_id"]=="a")
     restored=Simulation.restore(tmp_path/"variant")
     assert restored.state==child.state and restored.journal.settlement(1)["data"]["reviews"][0]["after"]=="备用用途"
+    at_open=paired_brief(original,restored,"a","use",0)
+    assert [row["window"] for row in at_open["points"]]==[0] and sum(at_open["counts"].values())==0
+    notes=brief_markdown(at_open)
+    assert original.run_id+"/e000001" in notes and restored.run_id+"/e000001" in notes
+    assert "一种用途" in notes and "备用用途" in notes

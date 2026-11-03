@@ -309,6 +309,10 @@ function drawExperimentComparison(root, result, actors, isLetter, options={}) {
     else{const link=h("a",caption);link.href="#run/"+result.right.run_id+"/"+first;intro.append(link);}
   } else intro.append(h("small",first===0?"开局初值不同":first!=null?"首次状态分化":"截至共同终点，未观察到字段差异","quiet"));
   root.append(intro);
+  const assigned=result.experiment?.assignment, defined=result.rows.filter(row=>row.left && row.right);
+  const outcomes=defined.filter(row=>row.actor_id!==assigned?.entity_id || row.field_id!==assigned?.field_id);
+  const target=result.focus || outcomes.find(row=>row.status==="different") || outcomes[0] || defined[0];
+  if(target)root.append(briefLink(result.left.run_id,result.right.run_id,target.actor_id,target.field_id,w));
   if(result.focus)root.append(fieldContrastCard(result.focus,result,[leftLabel,rightLabel]));
   else root.append(fieldContrastPicker(result,names,[leftLabel,rightLabel]));
   if(result.first_event_difference){

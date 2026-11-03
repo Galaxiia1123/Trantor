@@ -1116,8 +1116,10 @@ async function route() {
   const [kind = "new", id, pinned] = location.hash.slice(1).split("/"); activeRun = null; selectedWindow = null; eventLimit = 100;
   const showWatch = ["run","case","recording"].includes(kind), showLibrary = kind === "library", showStudy=kind==="study";
   const showPerspective=kind==="actor";
-  const showSaved=showWatch || showLibrary || showStudy || showPerspective;
+  const showCompare=kind==="compare";
+  const showSaved=showWatch || showLibrary || showStudy || showPerspective || showCompare;
   $("perspective-page").hidden=!showPerspective;
+  $("compare-page").hidden=!showCompare;
   $("watch-page").hidden = !showWatch; $("library-page").hidden = !showLibrary; $("study-page").hidden=!showStudy; $("prepare-page").hidden = showSaved;
   $("nav-new").classList.toggle("active", !showSaved); $("nav-library").classList.toggle("active", showSaved);
   if (showWatch) {
@@ -1140,6 +1142,7 @@ async function route() {
       requestAnimationFrame(()=>{if(gen===routeGeneration)scrollTo(0,saved.scroll);});
     }
   }
+  else if (showCompare) await briefPage(gen);
   else if (showPerspective) {
     activeRun=id;$("perspective-page").replaceChildren(h("p","正在打开这个主体的手记…","hint"));scrollTo(0,0);
     await perspectivePage(gen);
