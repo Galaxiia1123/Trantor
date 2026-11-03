@@ -1,0 +1,9 @@
+{
+  "model": {
+    "provider": "custom",
+    "model": "your-model-id",
+    "base_url": "http://127.0.0.1:8000/v1",
+    "api_key_env": "TRANTOR_EXAMPLE_API_KEY",
+    "protocol": "chat_completions"
+  }
+}

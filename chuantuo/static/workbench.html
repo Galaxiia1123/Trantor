@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f7f7f4">
+  <title>Trantor 川陀 · 推演工作台</title>
+  <link rel="stylesheet" href="/static/workbench.css"><script defer src="/static/workbench.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">跳到正文</a>
+  <header><div class="bar"><a class="brand" href="#new" aria-label="Trantor 川陀首页"><svg viewBox="0 0 36 36" aria-hidden="true"><rect width="36" height="36" rx="10" fill="#393353"/><g stroke="#fdf9f3" stroke-width="2.2" stroke-linecap="round" fill="none"><path d="M8 23c5-1 1-12 7-13M15 26c5-3 0-14 6-17M23 25c4-2 1-11 5-14"/></g></svg>Trantor</a><span class="brand-sub">推演工作台</span>
+    <nav aria-label="主导航"><a href="#new" id="nav-new">场景准备</a><a href="#library" id="nav-library">项目与记录</a></nav>
+    <button class="model-pill" id="open-model"><i></i><span>模型设置</span></button>
+  </div></header>
+  <main id="main">
+    <section id="prepare-page">
+      <div class="eyebrow"><span class="dash"></span> 场景准备</div>
+      <h1>准备一场推演</h1><p class="lead">写下想模拟的局面，或导入已有文稿。川陀会整理参与者、关系与开局条件。</p>
+      <div class="prepare-grid">
+        <article class="card seed"><div class="card-top"><h2><label for="brief">场景背景</label></h2><span class="quiet">文字或文稿</span></div>
+          <textarea id="brief" rows="7" placeholder="谁在参与？各方有哪些约束？你希望观察什么变化？"></textarea>
+          <div id="files" class="files"></div>
+          <div class="seed-actions"><label class="file-button" for="material"><b>＋</b> 导入文稿</label><input type="file" id="material" accept=".md,.markdown,.txt,.docx,.pdf" multiple>
+            <button class="primary" id="prepare">整理场景 <span aria-hidden="true">→</span></button></div>
+          <details class="subtle"><summary>准备选项</summary><label class="check"><input type="checkbox" id="allow-search" checked> 按需查询公开资料</label><p class="hint">仅检索公开事实的关键词。用户意图和虚构设定以文稿为准。</p></details>
+          <div id="retry-panel" class="line" hidden><p class="hint">上次整理未完成。按原请求重试会复用输入完全一致且已核对的步骤。修改过文稿时请使用“整理场景”。</p><button id="retry-prepare">按原请求重试</button></div>
+        </article>
+        <aside class="case-card">
+          <div class="case-art" aria-hidden="true"><svg viewBox="0 0 350 126"><defs><pattern id="dots" width="12" height="12" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#cdc9d9"/></pattern></defs><rect width="350" height="126" fill="url(#dots)"/><g fill="none" stroke="#817b9b" stroke-width="1.5"><path d="M55 86 Q99 88 139 40 T243 67 T322 37"/><path d="M55 86 Q136 59 191 101 L243 67" stroke-dasharray="3 4"/><path d="M139 40 Q178 24 243 67"/></g><g stroke="#fbfaf7" stroke-width="4"><circle cx="55" cy="86" r="8" fill="#8a84aa"/><circle cx="139" cy="40" r="10" fill="#554469"/><circle cx="243" cy="67" r="13" fill="#ad6452"/><circle cx="191" cy="101" r="6" fill="#817b9b"/><circle cx="322" cy="37" r="6" fill="#817b9b"/></g></svg></div>
+          <div class="case-copy"><div class="eyebrow">案例文稿</div><h2>潮汐港的窗口期</h2><p>一份附带期限的担保，如何影响港口扩建的预算审批？</p><button id="use-case" class="link">使用这份文稿 <span aria-hidden="true">↗</span></button><button id="read-case" class="link secondary-link">看案例回放</button></div>
+        </aside>
+      </div>
+      <div id="draft" hidden class="card draft"></div>
+      <div class="recording-entry"><span class="eyebrow">真实推演实录</span><span>芦湾维修押保协商 <small>已归档 · 2 个窗口</small></span><a href="#recording">阅读这次推演 ↗</a></div>
+    </section>
+    <section id="library-page" hidden><div class="eyebrow"><span class="dash"></span> 本机记录</div><h1>项目与记录</h1><p class="lead">从已保存的场景继续，或回看某次推演的完整过程。</p><label class="library-find">查找项目或推演<input id="library-search" type="search" placeholder="名称、编号或运行状态"></label><div class="library-grid"><article class="card"><h2>已保存场景</h2><div id="projects"></div></article><article class="card"><h2>推演记录</h2><div id="runs"></div></article></div><details class="foot-tools"><summary>导入项目包与历史工具</summary><label>导入已导出的项目包 <input id="import-bundle" type="file" accept=".zip"></label><p><a href="/archive">打开旧版工作台 ↗</a></p></details></section>
+    <section id="watch-page" hidden><div class="eyebrow"><span class="dash"></span> 推演观察</div><div class="watch-head"><div><h1 id="watch-title"></h1><p class="lead" id="watch-meta"></p></div><div class="actions" id="run-actions"></div></div>
+      <div class="window-bar"><label for="window">观察窗口</label><select id="window"></select><span id="window-status"></span></div>
+      <details id="all-windows" class="whole-run"><summary>按时间回顾整场推演</summary><div id="window-list"></div></details>
+      <div class="watch-grid"><article class="card"><div class="card-top"><h2>事件经过</h2><span class="quiet">按发生顺序</span></div><div id="events" class="feed"></div></article><aside class="card"><h2>主体处境</h2><p class="hint" id="state-time"></p><div id="actors"></div></aside></div>
+      <article id="report-panel" class="card draft"><div class="card-top"><h2>推演报告</h2><button id="write-report">生成报告</button></div><div id="reports"></div></article>
+      <details id="followup" class="foot-tools"><summary>追问记录或从此窗口另开场景</summary><div class="card advanced"><h2>向记录提问</h2><label>证据范围<select id="question-scope"></select></label>
+        <label>想追问什么？<textarea id="question-text" class="editor" rows="2" placeholder="例如：工程师当时为什么决定将意见直接递交议会？"></textarea></label>
+        <button id="ask">根据记录回答</button><div id="answers"></div><hr><button id="branch">从所选状态另开场景</button><p class="hint">新场景采用该窗口已提交的字段值。主体记忆从新开局开始。</p></div></details>
+    </section>
+    <p id="notice" class="notice" role="status" aria-live="polite" hidden></p>
+  </main>
+  <dialog id="model-dialog"><form id="model-form"><div class="card-top"><h2>模型设置</h2><button type="button" class="close" aria-label="关闭">×</button></div><p class="hint">场景整理、各主体、世界结算与报告共用这里的配置。</p>
+    <label>提供商<select id="provider"><option value="custom">兼容接口</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic</option><option value="deepseek">DeepSeek</option></select></label>
+    <label>模型名称<input id="model-name" required autocomplete="off" placeholder="输入接口提供的模型标识"></label>
+    <label>API 地址<input id="base-url" placeholder="官方提供商可留空" autocomplete="off"></label>
+    <label>API 密钥<input type="password" id="model-key" autocomplete="new-password" placeholder="已配置时可留空"></label><p id="key-hint" class="hint"></p>
+    <details class="subtle"><summary>高级连接设置</summary><label>接口协议<select id="protocol"><option value="">按接口识别</option><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option><option value="messages">Messages</option></select></label><label id="thinking-label">DeepSeek 思考设置<select id="thinking"><option value="default">使用接口默认</option><option value="disabled">关闭额外思考</option><option value="low">低</option><option value="high">高</option><option value="max">最高</option></select></label><label>输入字符上限<input id="context-limit" type="number" min="1" value="120000"></label><label>输出 token 上限<input id="output-limit" type="number" min="1" value="4096"></label></details>
+    <p class="form-error" id="model-error" role="alert"></p><div class="actions right"><button type="submit" class="primary">保存模型</button></div>
+  </form></dialog>
+  <dialog id="reading"><div class="card-top"><h2 id="reading-title">记录原文</h2><button class="close" aria-label="关闭">×</button></div><div id="reading-content"></div></dialog>
+</body></html>

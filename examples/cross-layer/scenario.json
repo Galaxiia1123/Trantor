@@ -1,0 +1,263 @@
+{
+  "title": "跨层协作：港口改造协商",
+  "background": "虚构海岚城正在协商港口改造，市府、港务署、一线工程师、社区和外部企业参与。此为离线脚本演示，只验证系统流程。",
+  "domains": [
+    "基础设施",
+    "社区协作"
+  ],
+  "entities": [
+    {
+      "id": "city",
+      "name": "海岚市府",
+      "identity": "城市治理主体，拥有独立决策权",
+      "preferences": "权衡公共服务与施工影响",
+      "subsystem_id": null,
+      "fields": [
+        {
+          "id": "readiness",
+          "domain": "基础设施",
+          "kind": "number",
+          "value": 20,
+          "unit": "演示指数",
+          "visibility": {
+            "public": true,
+            "readers": []
+          },
+          "provenance": {
+            "kind": "user",
+            "source_ids": [],
+            "explanation": "用户显式配置"
+          }
+        }
+      ],
+      "materials": [],
+      "provenance": {
+        "kind": "user",
+        "source_ids": [],
+        "explanation": "用户显式配置"
+      }
+    },
+    {
+      "id": "port",
+      "name": "港务署",
+      "identity": "港口组织管理者",
+      "preferences": "保障运营",
+      "subsystem_id": "city_services",
+      "fields": [
+        {
+          "id": "status",
+          "domain": "基础设施",
+          "kind": "string",
+          "value": "方案准备",
+          "unit": null,
+          "visibility": {
+            "public": false,
+            "readers": []
+          },
+          "provenance": {
+            "kind": "user",
+            "source_ids": [],
+            "explanation": "用户显式配置"
+          }
+        }
+      ],
+      "materials": [
+        {
+          "domain": "基础设施",
+          "text": "PRIVATE_PORT：内部备用设备信息，仅港务署可见。",
+          "visibility": {
+            "public": false,
+            "readers": []
+          },
+          "provenance": {
+            "kind": "user",
+            "source_ids": [],
+            "explanation": "用户显式配置"
+          }
+        }
+      ],
+      "provenance": {
+        "kind": "user",
+        "source_ids": [],
+        "explanation": "用户显式配置"
+      }
+    },
+    {
+      "id": "engineer",
+      "name": "一线工程师",
+      "identity": "掌握施工细节的个人",
+      "preferences": "提前反映现场问题",
+      "subsystem_id": "port_team",
+      "fields": [
+        {
+          "id": "capacity",
+          "domain": "基础设施",
+          "kind": "number",
+          "value": 3,
+          "unit": "演示工作包",
+          "visibility": {
+            "public": false,
+            "readers": []
+          },
+          "provenance": {
+            "kind": "user",
+            "source_ids": [],
+            "explanation": "用户显式配置"
+          }
+        }
+      ],
+      "materials": [],
+      "provenance": {
+        "kind": "user",
+        "source_ids": [],
+        "explanation": "用户显式配置"
+      }
+    },
+    {
+      "id": "community",
+      "name": "沿港社区",
+      "identity": "居民组织",
+      "preferences": "保护通行和生活便利",
+      "subsystem_id": "city_community",
+      "fields": [
+        {
+          "id": "access",
+          "domain": "社区协作",
+          "kind": "string",
+          "value": "正常",
+          "unit": null,
+          "visibility": {
+            "public": true,
+            "readers": []
+          },
+          "provenance": {
+            "kind": "user",
+            "source_ids": [],
+            "explanation": "用户显式配置"
+          }
+        }
+      ],
+      "materials": [],
+      "provenance": {
+        "kind": "user",
+        "source_ids": [],
+        "explanation": "用户显式配置"
+      }
+    },
+    {
+      "id": "company",
+      "name": "远航工程公司",
+      "identity": "外部企业，不展开内部部门",
+      "preferences": "保持交付质量",
+      "subsystem_id": null,
+      "fields": [
+        {
+          "id": "schedule",
+          "domain": "基础设施",
+          "kind": "string",
+          "value": "等待信息",
+          "unit": null,
+          "visibility": {
+            "public": true,
+            "readers": []
+          },
+          "provenance": {
+            "kind": "user",
+            "source_ids": [],
+            "explanation": "用户显式配置"
+          }
+        }
+      ],
+      "materials": [],
+      "provenance": {
+        "kind": "user",
+        "source_ids": [],
+        "explanation": "用户显式配置"
+      }
+    }
+  ],
+  "subsystems": [
+    {
+      "id": "city_services",
+      "name": "公共服务系统",
+      "owner_id": "city"
+    },
+    {
+      "id": "city_community",
+      "name": "社区协商系统",
+      "owner_id": "city"
+    },
+    {
+      "id": "port_team",
+      "name": "港口现场团队",
+      "owner_id": "port"
+    }
+  ],
+  "influences": [
+    {
+      "source": "engineer",
+      "target": "city",
+      "weight": 0.8,
+      "provenance": {
+        "kind": "user",
+        "source_ids": [],
+        "explanation": "用户显式配置"
+      }
+    },
+    {
+      "source": "engineer",
+      "target": "company",
+      "weight": 0.65,
+      "provenance": {
+        "kind": "user",
+        "source_ids": [],
+        "explanation": "用户显式配置"
+      }
+    },
+    {
+      "source": "engineer",
+      "target": "community",
+      "weight": 0.6,
+      "provenance": {
+        "kind": "user",
+        "source_ids": [],
+        "explanation": "用户显式配置"
+      }
+    },
+    {
+      "source": "city",
+      "target": "engineer",
+      "weight": 0.4,
+      "provenance": {
+        "kind": "user",
+        "source_ids": [],
+        "explanation": "用户显式配置"
+      }
+    },
+    {
+      "source": "port",
+      "target": "city",
+      "weight": 0.7,
+      "provenance": {
+        "kind": "user",
+        "source_ids": [],
+        "explanation": "用户显式配置"
+      }
+    }
+  ],
+  "rules": [
+    {
+      "text": "表达是意图或沟通，不因声称完成就确认施工完成；各组织保持独立决策。",
+      "provenance": {
+        "kind": "user",
+        "source_ids": [],
+        "explanation": "用户显式配置"
+      }
+    }
+  ],
+  "sources": [],
+  "assumptions": [
+    "所有人物、状态和权重均为用户可编辑的虚构演示设定。"
+  ],
+  "missing_information": []
+}

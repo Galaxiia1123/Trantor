@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="川陀本地多主体仿真操作台">
+  <title>川陀 · 本地操作台</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/definition.css">
+  <link rel="stylesheet" href="/static/assistant-definition.css">
+  <script src="/static/definition.js" defer></script>
+  <script src="/static/assistant-definition.js" defer></script>
+  <link rel="stylesheet" href="/static/studio.css">
+  <script src="/static/route-graph.js" defer></script>
+  <script src="/static/studio.js" defer></script>
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#workspace">跳到运行观察</a>
+  <header class="app-header">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">川</span><div><h1>川陀</h1><p>本地多主体仿真</p></div><span class="tag">工作台</span></div>
+    <nav class="workspace-switch" aria-label="工作区"><button id="show-library" type="button" aria-pressed="false">项目与历史</button><button id="show-definition" type="button" aria-pressed="true">场景定义</button><button id="show-observer" type="button" aria-pressed="false">运行观察</button></nav>
+    <div class="header-actions"><span id="mode-badge" class="tag mode-tag">正在连接</span><button id="save-project" type="button">保存项目版本</button><button id="load-demo" type="button">加载演示</button></div>
+  </header>
+
+  <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+  <div id="error-notice" class="notice error" role="alert" hidden></div>
+  <noscript><p class="notice error">此操作台需要启用 JavaScript。启用后刷新页面。</p></noscript>
+
+  <section id="library-workspace" class="studio-library" aria-labelledby="library-title" hidden>
+    <header class="library-head"><div><p class="eyebrow">川陀 · 本地资料库</p><h2 id="library-title">项目与推演历史</h2><p>打开已保存的场景版本，或回到一次推演，沿着证据复盘结果。</p></div><button id="library-refresh" type="button">刷新资料库</button></header>
+    <div class="library-tools"><label for="library-search">查找项目或运行</label><input type="search" id="library-search" placeholder="搜索场景、项目名称或运行 ID"><span id="current-project" class="tag">独立草稿</span><button id="project-copy" type="button">将草稿另存为项目</button><button id="import-package" type="button">导入项目材料包</button><input type="file" id="package-file" accept=".zip,application/zip" hidden></div>
+    <div class="library-grid"><section><h3>已保存的项目</h3><div id="project-list"></div></section><section><h3>推演记录</h3><div id="run-list"></div></section></div><p id="catalog-warning" class="field-help"></p>
+    <details class="surface task-shelf"><summary>最近提交的材料、草案、运行和报告任务</summary><p class="field-help">从资料库查看任务凭据或找回结果。打开任务只读取已经提交的工作。</p><div id="job-list"></div></details>
+  </section>
+
+  <section id="definition-workspace" class="definition-workspace" aria-label="场景定义工作区">
+    <div class="definition-mode-bar"><div><button id="definition-guided" type="button" aria-pressed="true">AI 帮我定义</button><button id="definition-expert" type="button" aria-pressed="false">高级编辑</button></div><span class="muted small">先整理草案，审阅后启动</span></div>
+    <section id="assistant-definition" class="assistant-definition" aria-label="AI 场景定义">
+      <div class="assistant-intro"><h2>告诉 AI，你想推演什么</h2><p>放入材料，说明目标。AI 负责搭建主体、层级、领域和关系，你只需审阅关键选择。</p></div>
+      <fieldset id="assistant-controls" class="plain-fieldset"><legend class="sr-only">材料、目标与 AI 草案</legend>
+        <div class="assistant-layout">
+          <section class="assistant-input editor-surface">
+            <label for="assistant-goal">想观察的问题</label><textarea id="assistant-goal" rows="4" placeholder="例如：港口改造方案公布后，市府、企业和社区会如何协商？哪些条件会推动各方形成共识？"></textarea>
+            <label class="assistant-upload" id="assistant-dropzone"><strong>添加原始材料</strong><span>PDF · Word · 图片 · TXT · Markdown，可一次选择多份</span><input id="assistant-files" type="file" multiple accept=".pdf,.docx,.png,.jpg,.jpeg,.webp,.txt,.md" aria-label="上传 PDF、Word、图片或文字材料"></label>
+            <div id="assistant-sources" class="assistant-sources"></div>
+            <details class="assistant-options"><summary>或直接粘贴材料</summary><label for="assistant-text" class="sr-only">粘贴原始材料</label><textarea id="assistant-text" rows="5" placeholder="可以是新闻、访谈、会议记录、故事或散乱笔记。AI 会整理结构，并标注缺失与假设。"></textarea></details>
+            <details class="assistant-options"><summary>补充范围与条件 <span>可选</span></summary><label for="assistant-granularity">希望展开到什么程度</label><input id="assistant-granularity" placeholder="例如：企业到部门，社区保留为整体"><label for="assistant-constraints">必须遵守的条件</label><textarea id="assistant-constraints" rows="3" placeholder="例如：不新增原文没有的资金数据；各组织保留独立决策权。"></textarea><label for="assistant-batches">长材料摘引批次上限</label><input id="assistant-batches" type="number" min="0" max="64" value="0"><p class="field-help">0 表示只用完整材料。超过模型限额时，正整数允许分批提取逐字引文，每批最多调用两次解析模型。</p></details>
+            <div class="assistant-models"><div><label for="assistant-parser-model">场景整理模型</label><select id="assistant-parser-model"></select></div><div><label for="assistant-world-model">影响估权模型</label><select id="assistant-world-model"></select></div></div>
+            <p id="assistant-model-note" class="field-help"></p>
+            <details class="assistant-options"><summary>配置模型接口</summary><div class="editor-row"><div class="editor-field"><label for="assistant-provider">提供商</label><select id="assistant-provider"><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="anthropic">Claude / Anthropic</option><option value="custom">自定义兼容接口</option></select></div><div class="editor-field"><label for="assistant-model-name">模型名称</label><input id="assistant-model-name" placeholder="填写你已确认可用的模型 ID"></div></div><label for="assistant-protocol">接口协议</label><select id="assistant-protocol"><option value="">按提供商或完整端点确定</option><option value="chat_completions">Chat Completions</option><option value="responses">Responses</option><option value="messages">Anthropic Messages</option></select><label for="assistant-model-url">API 地址</label><input id="assistant-model-url" value="https://api.deepseek.com"><label for="assistant-key-env">密钥的环境变量名</label><input id="assistant-key-env" value="DEEPSEEK_API_KEY" placeholder="这里只填变量名，不填密钥"><label class="checkbox-label"><input id="assistant-vision" type="checkbox">此模型明确支持图片输入</label><p class="field-help">未启用图片时，使用本地提取文字。图片能力与模型由你确认，系统不自动替换。</p><button id="assistant-add-model" type="button">添加并用于场景整理</button></details>
+            <button id="assistant-generate" type="button" class="primary full-width">让 AI 整理场景</button><p class="field-help">只生成草案，不自动启动推演。</p><button id="assistant-use-current" type="button" class="text-button">基于当前已保存的场景继续完善</button>
+          </section>
+          <section class="assistant-result editor-surface" aria-label="AI 草案审阅">
+            <div id="assistant-progress" class="assistant-progress" role="status" hidden></div>
+            <div id="assistant-empty" class="assistant-empty"><span class="assistant-placeholder-mark" aria-hidden="true">川</span><h3>从散乱材料到完整草案</h3><p>AI 会整理参与主体、内部层级、领域状态和影响关系，保留材料依据，列出值得你确认的假设。</p><ol><li>上传材料，说明目标</li><li>AI 搭建场景并提出少量问题</li><li>审阅或用一句话调整，采纳后运行</li></ol><div class="sample-picks"><p class="field-help">也可先用一个完整场景体验</p><button id="example-harbor" type="button">港口改造协商</button><button id="example-release" type="button">辅助阅读插件发布</button></div></div>
+            <div id="assistant-proposal" hidden><div class="editor-title"><h3>场景草案</h3><span class="tag">待采纳</span></div><p id="assistant-summary" class="assistant-summary"></p><div id="assistant-stats" class="assistant-stats"></div><div id="assistant-preview"></div><div id="assistant-questions"></div><label for="assistant-revision">还想怎样调整？</label><textarea id="assistant-revision" rows="3" placeholder="例如：把港务署展开到工程部和运营部；让一线工程师直接影响市府。"></textarea><div class="button-row assistant-proposal-actions"><button id="assistant-refine" type="button">根据补充更新草案</button><button id="assistant-accept" type="button" class="primary">采纳草案，设置推演</button></div><p class="field-help">草案采纳前，当前已保存的场景保持原样。</p></div>
+          </section>
+        </div>
+      </fieldset>
+    </section>
+    <header class="definition-heading"><div><p class="muted small">从材料到可运行的世界</p><h2 id="definition-title">定义你的场景</h2><p id="definition-summary" class="field-help">载入中…</p></div><div class="button-row"><button id="definition-undo" type="button" class="text-button" hidden>恢复上次替换</button><button id="definition-new" type="button">新建场景</button><button id="definition-import" type="button">导入场景</button><button id="definition-export" type="button">保存场景</button><input id="definition-file" type="file" accept=".json,application/json" hidden></div></header>
+    <nav id="definition-steps" class="definition-steps" aria-label="定义步骤">
+      <button type="button" data-step="materials" aria-current="step"><span>01</span> 材料与目标 <small>保留原始依据</small></button>
+      <button type="button" data-step="actors"><span>02</span> 主体与层级 <small>决定模拟粒度</small></button>
+      <button type="button" data-step="relations"><span>03</span> 影响关系 <small>连接跨层影响</small></button>
+      <button type="button" data-step="review"><span>04</span> 开局检查 <small>审阅后启动</small></button>
+    </nav>
+    <p id="definition-lock" class="definition-lock" hidden>推演进行中，场景定义已锁定。</p>
+    <fieldset id="definition-controls" class="plain-fieldset">
+      <legend class="sr-only">可视化场景编辑</legend>
+      <div id="definition-materials" class="definition-stage"><div class="definition-columns"><div id="definition-basics" class="editor-surface"></div><div class="editor-surface"><div id="definition-sources"></div><div id="definition-parser"></div></div></div></div>
+      <div id="definition-actors" class="definition-stage" hidden><div class="actor-editor-layout"><aside class="editor-surface actor-browser"><div class="editor-title"><h3>包含结构</h3><button id="definition-add-actor" type="button" class="text-button">＋ 主体</button></div><label for="definition-search" class="sr-only">搜索主体</label><input id="definition-search" type="search" placeholder="查找主体名称或 ID"><div id="definition-tree"></div><div id="definition-subsystems"></div></aside><div id="definition-actor-detail" class="editor-surface"></div></div></div>
+      <div id="definition-relations" class="definition-stage" hidden><div class="relation-editor-layout"><div class="editor-surface graph-surface"><div class="editor-title"><div><h3>跨层影响图</h3><p class="field-help">点击边编辑，点击主体查看档案。纵列仅表示包含深度。</p></div><div class="button-row"><button id="graph-zoom-out" type="button" aria-label="缩小影响图">−</button><button id="graph-reset" type="button">适应</button><button id="graph-zoom-in" type="button" aria-label="放大影响图">＋</button></div></div><div id="definition-graph" class="definition-graph"></div><div id="graph-caption" class="field-help"></div></div><aside class="editor-surface"><div class="editor-title"><h3>有向关系</h3><button id="definition-add-edge" type="button" class="text-button">＋ 关系</button></div><div id="definition-edge-list" class="definition-edge-list"></div><div id="definition-edge-detail"></div></aside></div></div>
+      <div id="definition-review" class="definition-stage" hidden><div class="review-editor-layout"><div class="editor-surface"><h3>启动前审阅</h3><div id="definition-checks"></div><div id="definition-assumptions"></div></div><div id="definition-settings"></div></div></div>
+    </fieldset>
+    <footer class="definition-footer"><p id="definition-save-status" class="muted small" role="status">修改即时同步到场景；“保存场景”下载文件。</p><div class="button-row"><button id="definition-back" type="button">上一步</button><button id="definition-next" type="button" class="primary">下一步：主体与层级</button></div></footer>
+  </section>
+
+  <main class="app-layout" id="observer-workspace" hidden>
+    <aside class="configuration" aria-label="场景与运行配置">
+      <div class="panel-heading"><h2>场景与配置</h2><span id="draft-status" class="muted small">加载中</span></div>
+      <fieldset id="draft-controls" class="plain-fieldset">
+        <legend class="sr-only">推演草稿</legend>
+        <details class="config-section" id="material-section">
+          <summary>从材料创建草稿<span class="summary-note">可选</span></summary>
+          <div class="details-body">
+            <label for="material-file">读取 TXT / Markdown 文件</label>
+            <input id="material-file" type="file" accept=".txt,.md,text/plain,text/markdown">
+            <label for="material-text">场景材料</label>
+            <textarea id="material-text" rows="7" placeholder="粘贴背景、主体、目标、关系和已有事实。解析只生成可编辑草稿。"></textarea>
+            <p id="parser-note" class="field-help">使用配置中独立指定的解析模型。</p>
+            <button id="parse-material" type="button" class="full-width">解析为场景草稿</button>
+          </div>
+        </details>
+
+        <section class="config-section scenario-section" aria-labelledby="scenario-label">
+          <div class="section-title"><label id="scenario-label" for="scenario-json">场景 JSON</label><button id="format-scenario" type="button" class="text-button">格式化</button></div>
+          <textarea id="scenario-json" class="code-input" rows="17" spellcheck="false" autocapitalize="off" aria-describedby="scenario-help" placeholder="加载演示，或从材料解析场景。"></textarea>
+          <p id="scenario-help" class="field-help">主体、字段、领域与可见性均由场景定义；缺失值可保留为 null。</p>
+          <div id="draft-facts" class="draft-facts"></div>
+          <details id="review-notes" class="review-notes" hidden><summary id="review-summary">草稿审阅</summary><div id="review-content"></div></details>
+          <div class="button-row"><button id="validate-draft" type="button">验证配置</button><button id="estimate-weights" type="button">估算缺失权重</button></div>
+          <p id="preparation-note" class="field-help">尚无解析或估权记录。</p>
+        </section>
+
+        <section class="config-section" aria-labelledby="schedule-title">
+          <h3 id="schedule-title">运行安排</h3>
+          <div class="input-pair">
+            <div><label for="window-count">窗口数</label><input id="window-count" type="number" min="1" step="1" inputmode="numeric"></div>
+            <div><label for="round-count">每窗口轮次</label><input id="round-count" type="number" min="1" step="1" inputmode="numeric"></div>
+          </div>
+          <label for="window-duration">统一窗口长度</label><input id="window-duration" type="text" placeholder="例如：1 个模拟日">
+          <p id="call-estimate" class="field-help">所有主体共享窗口长度，每轮各表达一次。</p>
+          <label for="settlement-retries">世界结算未通过业务校验时</label><select id="settlement-retries"><option value="0">停止并保留现场</option><option value="1">允许世界模型修正一次</option><option value="2">最多修正两次</option></select>
+          <label for="memory-policy">主体历史过长时</label><select id="memory-policy"><option value="full">保留完整记忆，超限时停止</option><option value="budgeted">保留当前观察和能容纳的最近完整记录</option></select>
+          <label for="roster-policy">主体每轮收到的名录</label><select id="roster-policy"><option value="all">完整公开名录</option><option value="neighbors">相关层级、影响关系与通信对象</option></select>
+          <label for="world-sources">世界模型的原始材料</label><select id="world-sources"><option value="full">附完整原始材料</option><option value="defined">使用已审阅定义、领域资料、引文和原件索引</option></select>
+          <label for="call-limit">主体与世界模型调用上限（可留空）</label><input id="call-limit" type="number" min="1" step="1" placeholder="不设上限"><p class="field-help">计入输出纠正和恢复尝试。报告、解析及接口内部网络重试另计。</p>
+        </section>
+
+        <details class="config-section" id="model-section" open>
+          <summary>模型与接口<span class="summary-note" id="model-count">独立指定</span></summary>
+          <div class="details-body">
+            <div id="model-assignments" class="model-assignments"></div>
+            <p id="model-help" class="field-help">世界、各层主体、解析、报告分别选择模型配置。</p>
+            <div class="api-example-row"><div><label for="api-provider">真实 API 示例</label><select id="api-provider"><option value="openai">OpenAI</option><option value="anthropic">Claude / Anthropic</option><option value="deepseek">DeepSeek</option><option value="custom">自定义兼容接口</option></select></div><button id="add-api-example" type="button">添加示例</button></div>
+            <p class="field-help">示例只新增配置，保留当前选择。请修改模型名和密钥环境变量名，再将所需角色切换到该配置。</p>
+            <div class="section-title"><label for="config-json">完整运行配置 JSON</label><button id="format-config" type="button" class="text-button">格式化</button></div>
+            <textarea id="config-json" class="code-input" rows="13" spellcheck="false" autocapitalize="off" aria-describedby="config-help"></textarea>
+            <p id="config-help" class="field-help">密钥只写环境变量名 api_key_env，真实密钥在启动服务的环境中设置。不要在任何文本框填写密钥。</p>
+          </div>
+        </details>
+      </fieldset>
+      <div class="launch-area"><button id="start-run" class="primary full-width" type="button" disabled>启动推演</button><p class="field-help" id="launch-note">仅显式点击启动后运行；离线演示不调用真实模型。</p></div>
+    </aside>
+
+    <section class="workspace" id="workspace" tabindex="-1" aria-label="运行观察与记录">
+      <section class="run-panel" aria-labelledby="run-title">
+        <div class="run-heading"><div><p class="eyebrow">当前推演</p><h2 id="run-title">准备你的第一个场景</h2></div><span id="run-status" class="status-chip" data-state="idle">未启动</span></div>
+        <div class="run-meta"><span id="run-id">运行 ID：尚未创建</span><span id="runtime-mode">配置载入后可开始</span></div>
+        <div class="progress-label"><span id="progress-text">已提交 0 个窗口</span><span id="round-text">等待启动</span></div>
+        <progress id="run-progress" value="0" max="1" aria-label="已提交的窗口进度"></progress>
+        <div class="run-control-row"><div class="button-row"><button id="pause-run" type="button" disabled>暂停</button><button id="resume-run" type="button" disabled>继续</button><button id="stop-run" class="danger-button" type="button" disabled>提前结束</button></div><button id="refresh-run" type="button" class="text-button" disabled>刷新状态</button></div>
+        <p id="boundary-note" class="field-help">暂停和提前结束在完整窗口边界生效。</p>
+        <p id="connection-status" class="field-help" aria-live="polite"></p>
+        <p id="run-error" class="inline-error" role="alert" hidden></p>
+      </section>
+
+      <div class="workspace-toolbar"><div class="tabs" role="tablist" aria-label="查看内容"><button id="tab-overview" class="tab" type="button" role="tab" aria-selected="true" aria-controls="panel-overview" tabindex="0">主体与关系</button><button id="tab-replay" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-replay" tabindex="-1">窗口回放</button><button id="tab-events" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-events" tabindex="-1">事件记录 <span id="event-total" class="tab-count">0</span></button><button id="tab-report" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-report" tabindex="-1">分析报告</button></div><button id="export-records" type="button" class="text-button" disabled>下载记录 ↓</button></div>
+
+      <section id="panel-overview" class="tab-panel" role="tabpanel" aria-labelledby="tab-overview">
+        <div class="observer-note"><strong>操作者视图</strong><span>此处可回看私有信息。每个主体只接收获授权的观察信息，包含关系不会自动授予权限。</span></div>
+        <div class="overview-stats"><div><span class="stat-value" id="actor-count">0</span><span>显式主体</span></div><div><span class="stat-value" id="layer-count">0</span><span>包含层级</span></div><div><span class="stat-value" id="edge-count">0</span><span>有向影响边</span></div></div>
+        <div class="structure-grid"><section class="surface" aria-labelledby="tree-title"><div class="surface-heading"><h3 id="tree-title">包含结构</h3><span class="muted small">L0 为顶层</span></div><div id="containment-tree" class="containment-tree"><p class="empty-state">加载场景后显示主体结构。</p></div></section><section class="surface" aria-labelledby="edges-title"><div class="surface-heading"><h3 id="edges-title">跨层影响</h3><span class="muted small">方向与权重各自独立</span></div><div class="table-scroll"><table class="edge-table"><caption class="sr-only">有向影响边及其独立权重</caption><thead><tr><th scope="col">来源 → 目标</th><th scope="col">权重</th><th scope="col">依据</th></tr></thead><tbody id="influence-edges"></tbody></table></div><p id="edges-empty" class="empty-state">尚未配置影响边。</p></section></div>
+        <section class="state-section" aria-labelledby="state-title"><div class="surface-heading"><h3 id="state-title">主体状态</h3><span id="state-caption" class="muted small">草稿初始值</span></div><div id="actor-states" class="actor-states"><p class="empty-state">尚无主体状态。</p></div></section>
+      </section>
+
+      <section id="panel-replay" class="tab-panel" role="tabpanel" aria-labelledby="tab-replay" hidden>
+        <div id="replay-empty" class="empty-state spacious">启动或打开一场推演后，可逐窗回看客观后果和各主体当时看见的信息。</div>
+        <div id="replay-content" hidden>
+          <div class="replay-heading"><div><p class="eyebrow">世界记录</p><h3 id="replay-title">初始状态</h3></div><span id="replay-counts" class="muted small"></span></div>
+          <label for="replay-window">选择已结算窗口</label><input id="replay-window" type="range" min="0" max="0" value="0">
+          <div class="replay-grid"><section class="surface"><h3>客观后果与变化</h3><div id="replay-changes"></div></section>
+          <section class="surface"><label for="replay-field">字段演化</label><select id="replay-field"></select><div id="field-series" class="field-series"></div></section></div>
+          <section class="surface view-card"><div><label for="replay-actor">回看主体视角</label><select id="replay-actor"></select><a id="actor-export" class="source-original" download>下载截至本窗的主体记录</a></div><div id="actor-observation"></div></section>
+          <section class="surface route-section"><div class="surface-heading"><div><p class="eyebrow">方向与证据</p><h3>该主体的影响关系与实际往来</h3></div></div>
+            <p class="field-help">对照所选窗口中已投递的消息与开局设定的影响权重。每个方向独立计算。</p>
+            <div class="route-tools"><label>连线<select id="route-mode"><option value="both">影响与消息</option><option value="influences">预设影响</option><option value="messages">已投递消息</option></select></label><label>查找相邻主体<input id="route-search" type="search" placeholder="主体名称或编号"></label></div>
+            <div class="route-legend"><span>实线表示影响强度</span><span>虚线表示本窗消息</span></div><div class="route-canvas" id="route-canvas"></div><p id="route-count" class="field-help"></p><button id="route-more" class="text-button" type="button" hidden>显示更多关系</button><div class="route-grid"><div><h4>其他主体 → 当前主体</h4><div id="route-in"></div></div><div><h4>当前主体 → 其他主体</h4><div id="route-out"></div></div></div></section>
+          <details class="surface experiment"><summary>以此窗口为起点，建立对照项目</summary><p>复制当前场景和所选窗口已提交的字段值。新项目从窗口 0 开始，主体重新建立记忆。来源记录会指向这次推演。</p><label for="branch-title">新项目名称（可选）</label><input id="branch-title" maxlength="250"><button id="branch-create" type="button">建立并编辑新项目</button></details>
+          <details id="compare-box" class="surface experiment"><summary>与另一场推演比较字段</summary><label for="compare-run">另一场推演</label><select id="compare-run"></select><label for="compare-window">对方窗口（留空取最近提交）</label><input id="compare-window" type="number" min="0" step="1"><button id="compare-go" type="button">比较所选快照</button><div id="compare-result"></div></details>
+          <details class="surface"><summary>提供商调用回执</summary><p id="provider-usage" class="field-help"></p></details>
+        </div>
+      </section>
+
+      <section id="panel-events" class="tab-panel" role="tabpanel" aria-labelledby="tab-events" hidden>
+        <div class="observer-note"><strong>完整记录回看</strong><span>表达原文不等于客观事实。仅窗口结算通过后更新状态；消息只投递给指定收件人。</span></div>
+        <form id="evidence-search-form" class="evidence-search"><label for="evidence-search">检索已提交窗口与开局材料</label><div class="button-row"><input type="search" id="evidence-search" placeholder="输入材料原句、字段、主体或事件关键词" maxlength="2000"><button type="submit">查找依据</button></div><p class="field-help">选择下方主体时，只搜索该主体自己的观察、表达和收件。</p></form><div id="evidence-results" aria-live="polite"></div>
+        <div class="event-filters"><div><label for="actor-filter">主体</label><select id="actor-filter"><option value="">全部主体</option></select></div><div><label for="window-filter">窗口</label><select id="window-filter"><option value="">全部窗口</option></select></div><div><label for="kind-filter">事件类型</label><select id="kind-filter"><option value="">全部观察事件</option><option value="expression">表达原文</option><option value="message_delivered">消息投递</option><option value="window_committed">窗口结算</option><option value="observation">主体观察</option><option value="lifecycle">运行与准备记录</option></select></div></div>
+        <div class="event-list-toolbar"><span id="event-summary" class="muted small" aria-live="polite">尚无事件记录</span><label class="checkbox-label"><input id="include-technical" type="checkbox">包含模型调用记录</label></div>
+        <div id="event-list" class="event-list"><div class="empty-state spacious">启动推演后，表达、消息和状态变化会在这里出现。</div></div>
+        <nav id="event-pagination" class="pagination" aria-label="事件分页" hidden><button id="events-newer" type="button">较新记录</button><span id="event-page-label" class="muted small"></span><button id="events-older" type="button">较早记录</button></nav>
+      </section>
+
+      <section id="panel-report" class="tab-panel" role="tabpanel" aria-labelledby="tab-report" hidden>
+        <section class="surface report-panel"><div class="surface-heading"><div><h3>证据驱动的分析报告</h3><p id="report-model" class="field-help">使用配置中独立指定的报告模型。</p></div><button id="generate-report" class="primary" type="button" disabled>生成报告</button></div><p id="report-note" class="field-help">运行暂停、完成或提前结束后可生成。超过上下文时分批归纳，可能增加报告模型调用。点击引用可核对原始记录。</p><details class="report-budget"><summary>报告调用预算与证据覆盖</summary><div class="input-pair"><label>本次报告调用上限<input type="number" id="report-budget" min="1" step="1" value="32" placeholder="留空表示不设上限"></label><label class="checkbox-label"><input id="report-reuse" type="checkbox" checked>复用相同证据和模型的已校验摘要</label></div><button type="button" id="report-estimate">估算最低调用次数</button><p id="report-plan" class="field-help" aria-live="polite"></p></details><div id="report-empty" class="empty-state spacious">报告将梳理场景、方法、状态演化与局限。<br>仿真结果不直接代表现实世界。</div><label for="report-versions" id="report-versions-label" hidden>已保存的报告</label><select id="report-versions" hidden></select><article id="report-reading" class="report-reading" hidden></article><details id="report-source" hidden><summary>查看 Markdown 原文</summary><pre id="report-markdown" class="report-markdown" tabindex="0"></pre></details><div class="report-footer"><span id="report-record" class="muted small"></span><button id="download-report" type="button" disabled>下载 Markdown ↓</button></div></section>
+      </section>
+      <section id="inquiry" class="surface inquiry" aria-labelledby="inquiry-title" hidden>
+        <div class="surface-heading"><div><p class="eyebrow">推演后访谈</p><h3 id="inquiry-title">向记录或主体提问</h3></div></div>
+        <label for="ask-actor">回答视角</label><select id="ask-actor"><option value="">全局记录分析</option></select>
+        <label for="ask-text">问题</label><textarea id="ask-text" rows="2" placeholder="例如：哪些沟通影响了本窗口的结果？"></textarea>
+        <div class="button-row"><button type="button" id="ask-question">生成带引用的回答</button><span class="field-help">主体访谈只使用当时可见的信息，回答单独存档。</span></div>
+        <div id="answers-list" aria-live="polite"></div>
+      </section>
+    </section>
+  </main>
+  <dialog id="evidence-dialog" aria-labelledby="evidence-title"><div class="surface-heading"><h2 id="evidence-title">证据原文</h2><form method="dialog"><button>关闭</button></form></div><div id="evidence-body"></div></dialog>
+  <footer class="app-footer">川陀 · 本地沙盘<span>离线演示用于验证流程，真实推演需显式配置模型接口。</span></footer>
+</body>
+</html>

@@ -1,0 +1,1296 @@
+{
+  "kind": "recorded_model_run",
+  "run_id": "luwan-public-example",
+  "windows": [
+    {
+      "title": "芦湾维修押保协商",
+      "selected": 0,
+      "latest": 2,
+      "settled_through": 0,
+      "state_record": "e000001",
+      "actors": [
+        {
+          "id": "lw-repair",
+          "name": "芦湾维修社",
+          "profile": "提出有条件书面担保的一方，偏好尽快恢复通航但不愿在复核前占用现金。",
+          "fields": {}
+        },
+        {
+          "id": "dk-operation",
+          "name": "渡口运营社",
+          "profile": "实际到账为0万元（下限0万元，上限0万元，固定值），复议状态待材料（可取待材料、已列入复议）。",
+          "fields": {
+            "dk-actual-receipt": {
+              "value": 0,
+              "label": "实际到账",
+              "unit": "万元",
+              "domain": "维修协商",
+              "provenance": {
+                "kind": "material",
+                "source_ids": [
+                  "luwan_brief"
+                ],
+                "quotes": [
+                  {
+                    "source_id": "luwan_brief",
+                    "quote": "运营社的公开字段“实际到账”为 0 万元。"
+                  }
+                ]
+              },
+              "constraints": {
+                "minimum": 0,
+                "maximum": 0,
+                "allow_unknown": false,
+                "fixed": true
+              }
+            },
+            "dk-review-status": {
+              "value": "待材料",
+              "label": "复议状态",
+              "unit": null,
+              "domain": "维修协商",
+              "provenance": {
+                "kind": "material",
+                "source_ids": [
+                  "luwan_brief"
+                ],
+                "quotes": [
+                  {
+                    "source_id": "luwan_brief",
+                    "quote": "运营社的另一公开字段“复议状态”初始为“待材料”，可取“待材料”或“已列入复议”。"
+                  }
+                ]
+              },
+              "constraints": {
+                "choices": [
+                  "待材料",
+                  "已列入复议"
+                ],
+                "allow_unknown": false
+              }
+            }
+          }
+        }
+      ],
+      "mode": "recorded_api",
+      "status": {
+        "status": "completed",
+        "window": 2,
+        "round": 0,
+        "windows": 2,
+        "window_duration": "1 个模拟日"
+      },
+      "events": [],
+      "total": 0,
+      "next": 0
+    },
+    {
+      "title": "芦湾维修押保协商",
+      "selected": 1,
+      "latest": 2,
+      "settled_through": 1,
+      "state_record": "e000036",
+      "actors": [
+        {
+          "id": "lw-repair",
+          "name": "芦湾维修社",
+          "profile": "提出有条件书面担保的一方，偏好尽快恢复通航但不愿在复核前占用现金。",
+          "fields": {}
+        },
+        {
+          "id": "dk-operation",
+          "name": "渡口运营社",
+          "profile": "实际到账为0万元（下限0万元，上限0万元，固定值），复议状态待材料（可取待材料、已列入复议）。",
+          "fields": {
+            "dk-actual-receipt": {
+              "value": 0,
+              "label": "实际到账",
+              "unit": "万元",
+              "domain": "维修协商",
+              "provenance": {
+                "kind": "material",
+                "source_ids": [
+                  "luwan_brief"
+                ],
+                "quotes": [
+                  {
+                    "source_id": "luwan_brief",
+                    "quote": "运营社的公开字段“实际到账”为 0 万元。"
+                  }
+                ]
+              },
+              "constraints": {
+                "minimum": 0,
+                "maximum": 0,
+                "allow_unknown": false,
+                "fixed": true
+              }
+            },
+            "dk-review-status": {
+              "value": "待材料",
+              "label": "复议状态",
+              "unit": null,
+              "domain": "维修协商",
+              "provenance": {
+                "kind": "material",
+                "source_ids": [
+                  "luwan_brief"
+                ],
+                "quotes": [
+                  {
+                    "source_id": "luwan_brief",
+                    "quote": "运营社的另一公开字段“复议状态”初始为“待材料”，可取“待材料”或“已列入复议”。"
+                  }
+                ]
+              },
+              "constraints": {
+                "choices": [
+                  "待材料",
+                  "已列入复议"
+                ],
+                "allow_unknown": false
+              }
+            }
+          }
+        }
+      ],
+      "mode": "recorded_api",
+      "status": {
+        "status": "completed",
+        "window": 2,
+        "round": 0,
+        "windows": 2,
+        "window_duration": "1 个模拟日"
+      },
+      "events": [
+        {
+          "id": "e000013",
+          "kind": "expression",
+          "window": 1,
+          "data": {
+            "actor_id": "lw-repair",
+            "round": 1,
+            "text": "首窗向运营社提出有条件书面担保：若其在第2窗结束前收到有效签字复核函，我方愿提供200万元书面担保；并请其明示复议所需材料。同时说明该意向在未收到复核函时到期，且我方不在复核前占用现金。",
+            "message_count": 1
+          },
+          "commit_status": "committed"
+        },
+        {
+          "id": "e000014",
+          "kind": "message_delivered",
+          "window": 1,
+          "data": {
+            "from": "lw-repair",
+            "to": "dk-operation",
+            "action_id": "e000013",
+            "text": "关于复议推进：我方意向为——若贵社在第2窗结束前收到有效签字复核函，芦湾维修社愿提供200万元书面担保；若届时未收到，该担保意向自动到期。我方不愿在复核前占用现金，支付通道本两窗内实际到账为0万元。请贵社明示复议受理所需的具体材料清单与格式要求。我社无权替贵社作出受理决定，也不代贵社签字或划款。",
+            "message_count": 0
+          },
+          "commit_status": "committed"
+        },
+        {
+          "id": "e000015",
+          "kind": "expression",
+          "window": 1,
+          "data": {
+            "actor_id": "dk-operation",
+            "round": 1,
+            "text": "向维修社明示复议受理所需材料与担保函形式，并要求书面回传签署函；本轮不作受理决定。",
+            "message_count": 1
+          },
+          "commit_status": "committed"
+        },
+        {
+          "id": "e000016",
+          "kind": "message_delivered",
+          "window": 1,
+          "data": {
+            "from": "dk-operation",
+            "to": "lw-repair",
+            "action_id": "e000015",
+            "text": "渡口运营社说明：复议受理以收到有效签字的书面复核函为前提，受理决定由我方自主作出。请提交：1）加盖维修社印章的书面复核函，载明复议事由、请求范围与签署人；2）有条件书面担保的正本或清晰扫描件，注明担保条件、生效时点与期限。两窗内支付通道关闭、实际到账固定为0万元，故我方不会以到账金额为受理前提，但担保条款需明确金额与触发条件。材料齐全并送达后，我方再决定是否列入复议。我方无权代签或代划款。",
+            "message_count": 0
+          },
+          "commit_status": "committed"
+        },
+        {
+          "id": "e000020",
+          "kind": "settlement_rejected",
+          "window": 1,
+          "data": {
+            "reason": "直接影响引用必须匹配开局的有向边、受影响字段所属主体及源主体在本窗口的行动"
+          },
+          "commit_status": "rejected"
+        },
+        {
+          "id": "e000024",
+          "kind": "settlement_rejected",
+          "window": 1,
+          "data": {
+            "reason": "直接影响引用必须匹配开局的有向边、受影响字段所属主体及源主体在本窗口的行动"
+          },
+          "commit_status": "rejected"
+        },
+        {
+          "id": "e000032",
+          "kind": "settlement_rejected",
+          "window": 1,
+          "data": {
+            "reason": "直接影响引用 dk-operation.dk-review-status（lw-repair → dk-operation） 的 e000013 未列入同一字段的 action_ids。若确有影响，同时在该字段列出这些行动；无直接作用则移除这条 influence_refs"
+          },
+          "commit_status": "rejected"
+        },
+        {
+          "id": "e000036",
+          "kind": "window_committed",
+          "window": 1,
+          "data": {
+            "changes": [],
+            "consequences": [
+              {
+                "text": "维修社首窗提出有条件书面担保意向：若运营社在第2窗结束前收到有效签字复核函，愿提供200万元书面担保，否则意向到期；并请求明示复议材料。",
+                "action_ids": [
+                  "e000013"
+                ]
+              },
+              {
+                "text": "运营社向维修社明示复议受理所需材料与担保函格式，要求书面回传签署函，声明材料齐全送达后再自主决定；复议状态仍为待材料。",
+                "action_ids": [
+                  "e000015"
+                ]
+              }
+            ],
+            "suggested_fields": [
+              "lw-repair 的公开担保意向状态字段（如“担保意向：已提出/到期”）",
+              "dk-operation 的“所需材料清单”公开字段"
+            ],
+            "reviewed_actors": [
+              "dk-operation"
+            ]
+          },
+          "commit_status": null
+        }
+      ],
+      "total": 8,
+      "next": 8
+    },
+    {
+      "title": "芦湾维修押保协商",
+      "selected": 2,
+      "latest": 2,
+      "settled_through": 2,
+      "state_record": "e000052",
+      "actors": [
+        {
+          "id": "lw-repair",
+          "name": "芦湾维修社",
+          "profile": "提出有条件书面担保的一方，偏好尽快恢复通航但不愿在复核前占用现金。",
+          "fields": {}
+        },
+        {
+          "id": "dk-operation",
+          "name": "渡口运营社",
+          "profile": "实际到账为0万元（下限0万元，上限0万元，固定值），复议状态待材料（可取待材料、已列入复议）。",
+          "fields": {
+            "dk-actual-receipt": {
+              "value": 0,
+              "label": "实际到账",
+              "unit": "万元",
+              "domain": "维修协商",
+              "provenance": {
+                "kind": "material",
+                "source_ids": [
+                  "luwan_brief"
+                ],
+                "quotes": [
+                  {
+                    "source_id": "luwan_brief",
+                    "quote": "运营社的公开字段“实际到账”为 0 万元。"
+                  }
+                ]
+              },
+              "constraints": {
+                "minimum": 0,
+                "maximum": 0,
+                "allow_unknown": false,
+                "fixed": true
+              }
+            },
+            "dk-review-status": {
+              "value": "待材料",
+              "label": "复议状态",
+              "unit": null,
+              "domain": "维修协商",
+              "provenance": {
+                "kind": "material",
+                "source_ids": [
+                  "luwan_brief"
+                ],
+                "quotes": [
+                  {
+                    "source_id": "luwan_brief",
+                    "quote": "运营社的另一公开字段“复议状态”初始为“待材料”，可取“待材料”或“已列入复议”。"
+                  }
+                ]
+              },
+              "constraints": {
+                "choices": [
+                  "待材料",
+                  "已列入复议"
+                ],
+                "allow_unknown": false
+              }
+            }
+          }
+        }
+      ],
+      "mode": "recorded_api",
+      "status": {
+        "status": "completed",
+        "window": 2,
+        "round": 0,
+        "windows": 2,
+        "window_duration": "1 个模拟日"
+      },
+      "events": [
+        {
+          "id": "e000045",
+          "kind": "expression",
+          "window": 2,
+          "data": {
+            "actor_id": "lw-repair",
+            "round": 1,
+            "text": "首窗回复运营社：确认收到材料清单，说明我方可按清单准备盖章复核函与担保正本/扫描件，但担保仍以第2窗结束前收到有效签字复核函为触发条件；支付通道关闭、到账为0，不以此作为受理前提。询问送达方式与签署人要求，便于尽快补齐。",
+            "message_count": 1
+          },
+          "commit_status": "committed"
+        },
+        {
+          "id": "e000046",
+          "kind": "message_delivered",
+          "window": 2,
+          "data": {
+            "from": "lw-repair",
+            "to": "dk-operation",
+            "action_id": "e000045",
+            "text": "渡口运营社：材料清单已收到。我方将按清单准备加盖维修社印章的书面复核函（载明复议事由、请求范围与签署人）及有条件书面担保正本或清晰扫描件，担保注明金额200万元、触发条件（贵社在第2窗结束前收到有效签字复核函）、生效时点与期限。支付通道两窗内关闭、实际到账固定0万元，我方不以到账作为受理前提，也不在复核前占用现金。请明示送达方式（递交地址或扫描件接收渠道）及对签署人身份的具体要求，我方据此尽快补齐；受理决定仍由贵社自主作出。",
+            "message_count": 0
+          },
+          "commit_status": "committed"
+        },
+        {
+          "id": "e000047",
+          "kind": "expression",
+          "window": 2,
+          "data": {
+            "actor_id": "dk-operation",
+            "round": 1,
+            "text": "本轮先回复维修社：明确材料清单与格式已在上轮给出，重申受理以有效签字复核函送达为前提；告知收到担保函后可先作形式核对，但正式受理决定仍由运营社自主作出，且不以到账金额为条件。同时更新旧事项，等待对方书面回复。",
+            "message_count": 1
+          },
+          "commit_status": "committed"
+        },
+        {
+          "id": "e000048",
+          "kind": "message_delivered",
+          "window": 2,
+          "data": {
+            "from": "dk-operation",
+            "to": "lw-repair",
+            "action_id": "e000047",
+            "text": "渡口运营社答复：我方受理所需材料与格式维持上轮清单——加盖贵社印章的书面复核函（载明复议事由、请求范围、签署人）及有条件书面担保的正本或清晰扫描件（注明金额、担保条件、生效时点与期限）。200万元书面担保意向已收悉；两窗内实际到账固定为0万元，故我方明确不以到账为受理前提，但担保条款须写清金额与触发条件。材料送达后我先作形式核对，是否列入复议仍由我方自主决定。请以书面形式回传签署函及担保文件；我方无权代签或代划款。",
+            "message_count": 0
+          },
+          "commit_status": "committed"
+        },
+        {
+          "id": "e000052",
+          "kind": "window_committed",
+          "window": 2,
+          "data": {
+            "changes": [],
+            "consequences": [
+              {
+                "text": "维修社确认材料清单，承诺按清单准备盖章复核函与200万元有条件担保，并询问送达方式与签署人要求；未改变运营社的复议状态。",
+                "action_ids": [
+                  "e000045"
+                ]
+              },
+              {
+                "text": "运营社重申受理以有效签字复核函送达为前提，收到担保函后仅作形式核对，正式受理仍自主决定且不以到账为条件；复议状态维持待材料。",
+                "action_ids": [
+                  "e000047"
+                ]
+              }
+            ],
+            "suggested_fields": [],
+            "reviewed_actors": [
+              "dk-operation"
+            ]
+          },
+          "commit_status": null
+        }
+      ],
+      "total": 5,
+      "next": 5
+    }
+  ],
+  "report": {
+    "title": "芦湾维修押保协商两窗模拟报告（公开节选）",
+    "markdown": "# 芦湾维修押保协商两窗模拟报告（公开节选）\n\n## 场景与问题\n\n虚构文稿设定两家机构和两个模拟日。渡口运营社负责决定是否受理复议。支付通道在两窗内关闭，实际到账固定为 0 万元。观察的问题是，一份有条件的书面担保会怎样影响复议。[e000001](#event-e000001)\n\n## 第一个窗口\n\n芦湾维修社提出 200 万元书面担保，条件是运营社在第二窗结束前收到有效签字复核函。运营社列出盖章复核函、签署人及担保文件的要求，并保留独立受理权。两封定向消息均已送达。[e000014](#event-e000014) [e000016](#event-e000016)\n\n世界提案曾因引用与行动不一致而被拒绝。最终提交保留了支付限制和“待材料”状态。[e000020](#event-e000020) [e000036](#event-e000036)\n\n## 第二个窗口及结果\n\n维修社确认材料清单，又询问送达方式与签署要求。运营社说明收到材料后会先做形式核对。到窗口结束时，有效签字复核函仍未送达，复议状态为“待材料”，实际到账仍为 0 万元。[e000045](#event-e000045) [e000047](#event-e000047) [e000052](#event-e000052)\n\n## 讨论与局限\n\n在本场推演中，承诺使双方说清了下一步所需的文件。状态记录能证明清单已传达，无法证明签署件已交付。本节选覆盖两个窗口，结论仅适用于文稿设定与这次实际发生的互动。\n\n## 证据索引\n\n<a id=\"event-e000001\"></a>\n\n- e000001 · 开局资料、约束与归属\n\n<a id=\"event-e000014\"></a>\n\n- e000014 · 维修社发送担保条件\n\n<a id=\"event-e000016\"></a>\n\n- e000016 · 运营社回应材料要求\n\n<a id=\"event-e000020\"></a>\n\n- e000020 · 未通过的结算提案\n\n<a id=\"event-e000036\"></a>\n\n- e000036 · 第一窗提交\n\n<a id=\"event-e000045\"></a>\n\n- e000045 · 维修社第二窗行动\n\n<a id=\"event-e000047\"></a>\n\n- e000047 · 运营社第二窗行动\n\n<a id=\"event-e000052\"></a>\n\n- e000052 · 第二窗提交\n",
+    "record_id": "luwan-public-report"
+  },
+  "evidence": {
+    "e000001": {
+      "id": "e000001",
+      "kind": "run_created",
+      "window": 0,
+      "data": {
+        "scenario": {
+          "title": "芦湾维修押保协商",
+          "background": "芦湾维修社希望尽快恢复通航，但不愿在复核前占用现金。渡口运营社独立受理复议，偏好明示所需材料。双方就一份有条件书面担保能否推进复议展开两窗协商。支付通道在两窗内关闭，实际到账固定为0万元；开局没有已签署的复核函。",
+          "domains": [
+            "维修协商"
+          ],
+          "entities": [
+            {
+              "id": "lw-repair",
+              "name": "芦湾维修社",
+              "identity": "提出有条件书面担保的一方，偏好尽快恢复通航但不愿在复核前占用现金。",
+              "preferences": "倾向首窗说明担保条件；若运营社在第2窗结束前收到有效签字复核函，愿提供200万元书面担保，否则意向到期。",
+              "subsystem_id": null,
+              "parent_id": null,
+              "fields": [],
+              "materials": [
+                {
+                  "domain": "维修协商",
+                  "text": "内部核对代号：薄荷-48。仅维修社知道，与担保效力无关，不向运营社发送。",
+                  "visibility": {
+                    "public": false,
+                    "readers": [
+                      "lw-repair"
+                    ]
+                  },
+                  "provenance": {
+                    "kind": "material",
+                    "source_ids": [
+                      "luwan_brief"
+                    ],
+                    "explanation": "用户显式配置",
+                    "quotes": [
+                      {
+                        "source_id": "luwan_brief",
+                        "quote": "维修社的内部核对代号为“薄荷-48”，仅维修社知道。",
+                        "page": null
+                      }
+                    ]
+                  },
+                  "protected_terms": [
+                    "薄荷-48"
+                  ]
+                },
+                {
+                  "domain": "维修协商",
+                  "text": "书面担保意向为待提出（首窗说明条件）",
+                  "visibility": {
+                    "public": false,
+                    "readers": []
+                  },
+                  "provenance": {
+                    "kind": "material",
+                    "source_ids": [
+                      "luwan_brief"
+                    ],
+                    "explanation": "用户显式配置",
+                    "quotes": [
+                      {
+                        "source_id": "luwan_brief",
+                        "quote": "维修社偏好尽快恢复通航，但不愿在复核前占用现金。它可以向运营社提议担保，倾向于在首窗说明条件。",
+                        "page": null
+                      }
+                    ]
+                  },
+                  "protected_terms": []
+                }
+              ],
+              "provenance": {
+                "kind": "material",
+                "source_ids": [
+                  "luwan_brief"
+                ],
+                "explanation": "用户显式配置",
+                "quotes": [
+                  {
+                    "source_id": "luwan_brief",
+                    "quote": "只展开两个独立主体，芦湾维修社和渡口运营社。",
+                    "page": null
+                  }
+                ]
+              }
+            },
+            {
+              "id": "dk-operation",
+              "name": "渡口运营社",
+              "identity": "独立受理复议的一方，偏好明示所需材料，可在知道报价后答复、提出条件或拒绝；无权替对方签字或划款。",
+              "preferences": "偏好明示受理所需材料；根据报价自主答复、提出条件或拒绝。",
+              "subsystem_id": null,
+              "parent_id": null,
+              "fields": [
+                {
+                  "id": "dk-actual-receipt",
+                  "label": "实际到账",
+                  "domain": "维修协商",
+                  "kind": "number",
+                  "value": 0,
+                  "unit": "万元",
+                  "visibility": {
+                    "public": true,
+                    "readers": []
+                  },
+                  "provenance": {
+                    "kind": "material",
+                    "source_ids": [
+                      "luwan_brief"
+                    ],
+                    "explanation": "用户显式配置",
+                    "quotes": [
+                      {
+                        "source_id": "luwan_brief",
+                        "quote": "运营社的公开字段“实际到账”为 0 万元。",
+                        "page": null
+                      }
+                    ]
+                  },
+                  "constraints": {
+                    "minimum": 0,
+                    "maximum": 0,
+                    "choices": [],
+                    "allow_unknown": false,
+                    "fixed": true
+                  }
+                },
+                {
+                  "id": "dk-review-status",
+                  "label": "复议状态",
+                  "domain": "维修协商",
+                  "kind": "string",
+                  "value": "待材料",
+                  "unit": null,
+                  "visibility": {
+                    "public": true,
+                    "readers": []
+                  },
+                  "provenance": {
+                    "kind": "material",
+                    "source_ids": [
+                      "luwan_brief"
+                    ],
+                    "explanation": "用户显式配置",
+                    "quotes": [
+                      {
+                        "source_id": "luwan_brief",
+                        "quote": "运营社的另一公开字段“复议状态”初始为“待材料”，可取“待材料”或“已列入复议”。",
+                        "page": null
+                      }
+                    ]
+                  },
+                  "constraints": {
+                    "minimum": null,
+                    "maximum": null,
+                    "choices": [
+                      "待材料",
+                      "已列入复议"
+                    ],
+                    "allow_unknown": false,
+                    "fixed": false
+                  }
+                }
+              ],
+              "materials": [],
+              "provenance": {
+                "kind": "material",
+                "source_ids": [
+                  "luwan_brief"
+                ],
+                "explanation": "用户显式配置",
+                "quotes": [
+                  {
+                    "source_id": "luwan_brief",
+                    "quote": "运营社有独立的受理权。它偏好明示所需材料，可以在知道报价后答复、提出条件或拒绝。",
+                    "page": null
+                  }
+                ]
+              }
+            }
+          ],
+          "subsystems": [],
+          "influences": [
+            {
+              "source": "lw-repair",
+              "target": "dk-operation",
+              "description": "维修社可通过提出有条件书面担保影响运营社的受理考量；该影响限于提议本身，不能命令运营社受理，也不能替运营社签字或划款。",
+              "provenance": {
+                "kind": "material",
+                "source_ids": [
+                  "luwan_brief"
+                ],
+                "explanation": "用户显式配置",
+                "quotes": [
+                  {
+                    "source_id": "luwan_brief",
+                    "quote": "维修社对运营社的影响来自担保提议，不能命令运营社受理。",
+                    "page": null
+                  }
+                ]
+              }
+            },
+            {
+              "source": "dk-operation",
+              "target": "lw-repair",
+              "description": "运营社可向维修社告知受理条件，无权替对方签字或划款。",
+              "provenance": {
+                "kind": "material",
+                "source_ids": [
+                  "luwan_brief"
+                ],
+                "explanation": "沿用原文中明示方向的关系描述",
+                "quotes": [
+                  {
+                    "source_id": "luwan_brief",
+                    "quote": "运营社可向维修社告知受理条件，无权替对方签字或划款。",
+                    "page": null
+                  }
+                ]
+              }
+            }
+          ],
+          "rules": [
+            {
+              "text": "只有有效的签字复核函确实送达后，运营社才可以自主决定将复议状态列入复议。",
+              "provenance": {
+                "kind": "material",
+                "source_ids": [
+                  "luwan_brief"
+                ],
+                "explanation": "用户显式配置",
+                "quotes": [
+                  {
+                    "source_id": "luwan_brief",
+                    "quote": "只有有效的签字复核函确实送达后，运营社才可以自主决定列入复议。",
+                    "page": null
+                  }
+                ]
+              },
+              "visibility": {
+                "public": true,
+                "readers": []
+              }
+            },
+            {
+              "text": "两窗内支付通道关闭，“实际到账”固定为0万元。",
+              "provenance": {
+                "kind": "material",
+                "source_ids": [
+                  "luwan_brief"
+                ],
+                "explanation": "用户显式配置",
+                "quotes": [
+                  {
+                    "source_id": "luwan_brief",
+                    "quote": "两窗内支付通道关闭，此值固定。",
+                    "page": null
+                  }
+                ]
+              },
+              "visibility": {
+                "public": true,
+                "readers": []
+              }
+            },
+            {
+              "text": "运营社无权替维修社签字或划款；运营社的受理决定由其自主作出。",
+              "provenance": {
+                "kind": "material",
+                "source_ids": [
+                  "luwan_brief"
+                ],
+                "explanation": "用户显式配置",
+                "quotes": [
+                  {
+                    "source_id": "luwan_brief",
+                    "quote": "运营社可向维修社告知受理条件，无权替对方签字或划款。",
+                    "page": null
+                  }
+                ]
+              },
+              "visibility": {
+                "public": true,
+                "readers": []
+              }
+            },
+            {
+              "text": "维修社的意向：若运营社在第2窗结束前收到有效签字复核函，维修社愿提供200万元书面担保；未收到则意向到期。",
+              "provenance": {
+                "kind": "material",
+                "source_ids": [
+                  "luwan_brief"
+                ],
+                "explanation": "用户显式配置",
+                "quotes": [
+                  {
+                    "source_id": "luwan_brief",
+                    "quote": "如果运营社在第 2 窗结束前收到有效的签字复核函，维修社愿提供 200 万元书面担保；如果未收到，意向到期。",
+                    "page": null
+                  }
+                ]
+              },
+              "visibility": {
+                "public": false,
+                "readers": [
+                  "lw-repair"
+                ]
+              }
+            }
+          ],
+          "sources": [
+            {
+              "id": "luwan_brief",
+              "name": "conditional-review.md",
+              "text": "# 芦湾维修押保协商\n\n这是一份虚构的验收文稿。只展开两个独立主体，芦湾维修社和渡口运营社。观察一份有条件的书面担保能否推进复议，以及复议是否会被误记为到账。运行 2 个窗口，每窗口为 1 个模拟日，每窗口互动 1 轮。全部材料已给足，无需引用现实资料。\n\n维修社偏好尽快恢复通航，但不愿在复核前占用现金。它可以向运营社提议担保，倾向于在首窗说明条件。如果运营社在第 2 窗结束前收到有效的签字复核函，维修社愿提供 200 万元书面担保；如果未收到，意向到期。维修社的内部核对代号为“薄荷-48”，仅维修社知道。该代号与担保的效力无关，不向运营社发送。\n\n运营社有独立的受理权。它偏好明示所需材料，可以在知道报价后答复、提出条件或拒绝。运营社可向维修社告知受理条件，无权替对方签字或划款。维修社对运营社的影响来自担保提议，不能命令运营社受理。两家没有归属关系，也不需要分类子系统。\n\n只定义“维修协商”一个领域。运营社的公开字段“实际到账”为 0 万元。两窗内支付通道关闭，此值固定。运营社的另一公开字段“复议状态”初始为“待材料”，可取“待材料”或“已列入复议”。只有有效的签字复核函确实送达后，运营社才可以自主决定列入复议。本次开局没有已签署的复核函。未受影响的字段保持原值。请在报告中分别说明提议、收到的答复和已提交的客观状态，并引用各自记录。\n",
+              "mime_type": "text/markdown"
+            }
+          ],
+          "assumptions": [],
+          "missing_information": [],
+          "format_version": "1.1"
+        },
+        "config": {
+          "window_duration": "1 个模拟日",
+          "windows": 2,
+          "rounds_per_window": 1
+        }
+      }
+    },
+    "e000003": {
+      "id": "e000003",
+      "kind": "scene_parse",
+      "window": 0,
+      "data": {
+        "purpose": "preparation_v11",
+        "summary": "虚构验收沙盘：芦湾维修社与渡口运营社就书面担保推进复议进行两窗协商。维修社可在首窗提出有条件担保；运营社独立受理，在两窗内支付通道关闭、实际到账固定为0万元，复议状态仅在有有效签字复核函送达后可自主列入。内部代号“薄荷-48”仅归维修社，开局无已签复核函。",
+        "checklist": {
+          "setting": "grounded",
+          "actors_and_preferences": "grounded",
+          "domains_and_state": "grounded",
+          "containment": "grounded",
+          "directed_relations": "grounded",
+          "rules_and_visibility": "grounded",
+          "time_and_objective": "grounded"
+        },
+        "gaps": [],
+        "blocking_questions": [],
+        "explicit_settings": {
+          "windows": 2,
+          "rounds_per_window": 1,
+          "window_duration": "1 个模拟日"
+        }
+      }
+    },
+    "e000005": {
+      "id": "e000005",
+      "kind": "observation",
+      "window": 1,
+      "data": {
+        "actor_id": "lw-repair",
+        "visible": {
+          "window": 1,
+          "round": 1,
+          "window_duration": "1 个模拟日",
+          "background": "芦湾维修社希望尽快恢复通航，但不愿在复核前占用现金。渡口运营社独立受理复议，偏好明示所需材料。双方就一份有条件书面担保能否推进复议展开两窗协商。支付通道在两窗内关闭，实际到账固定为0万元；开局没有已签署的复核函。",
+          "rules": [
+            {
+              "text": "只有有效的签字复核函确实送达后，运营社才可以自主决定将复议状态列入复议。",
+              "provenance": {
+                "kind": "material"
+              }
+            },
+            {
+              "text": "两窗内支付通道关闭，“实际到账”固定为0万元。",
+              "provenance": {
+                "kind": "material"
+              }
+            },
+            {
+              "text": "运营社无权替维修社签字或划款；运营社的受理决定由其自主作出。",
+              "provenance": {
+                "kind": "material"
+              }
+            },
+            {
+              "text": "维修社的意向：若运营社在第2窗结束前收到有效签字复核函，维修社愿提供200万元书面担保；未收到则意向到期。",
+              "provenance": {
+                "kind": "material"
+              }
+            }
+          ],
+          "self": {
+            "id": "lw-repair",
+            "name": "芦湾维修社",
+            "identity": "提出有条件书面担保的一方，偏好尽快恢复通航但不愿在复核前占用现金。",
+            "preferences": "倾向首窗说明担保条件；若运营社在第2窗结束前收到有效签字复核函，愿提供200万元书面担保，否则意向到期。",
+            "depth": 0
+          },
+          "roster": [
+            {
+              "id": "lw-repair",
+              "name": "芦湾维修社",
+              "subsystem_id": null
+            },
+            {
+              "id": "dk-operation",
+              "name": "渡口运营社",
+              "subsystem_id": null
+            }
+          ],
+          "subsystems": [],
+          "visible_state": {
+            "dk-operation": {
+              "dk-actual-receipt": {
+                "value": 0,
+                "domain": "维修协商",
+                "kind": "number",
+                "unit": "万元",
+                "provenance": {
+                  "kind": "material"
+                },
+                "constraints": {
+                  "minimum": 0,
+                  "maximum": 0,
+                  "allow_unknown": false,
+                  "fixed": true
+                },
+                "label": "实际到账"
+              },
+              "dk-review-status": {
+                "value": "待材料",
+                "domain": "维修协商",
+                "kind": "string",
+                "unit": null,
+                "provenance": {
+                  "kind": "material"
+                },
+                "constraints": {
+                  "choices": [
+                    "待材料",
+                    "已列入复议"
+                  ],
+                  "allow_unknown": false
+                },
+                "label": "复议状态"
+              }
+            }
+          },
+          "visible_materials": [
+            {
+              "owner_id": "lw-repair",
+              "domain": "维修协商",
+              "text": "内部核对代号：薄荷-48。仅维修社知道，与担保效力无关，不向运营社发送。",
+              "provenance": {
+                "kind": "material"
+              }
+            },
+            {
+              "owner_id": "lw-repair",
+              "domain": "维修协商",
+              "text": "书面担保意向为待提出（首窗说明条件）",
+              "provenance": {
+                "kind": "material"
+              }
+            }
+          ],
+          "influences": [
+            {
+              "source": "lw-repair",
+              "target": "dk-operation",
+              "description": "维修社可通过提出有条件书面担保影响运营社的受理考量；该影响限于提议本身，不能命令运营社受理，也不能替运营社签字或划款。",
+              "origin": "material"
+            },
+            {
+              "source": "dk-operation",
+              "target": "lw-repair",
+              "description": "运营社可向维修社告知受理条件，无权替对方签字或划款。",
+              "origin": "material"
+            }
+          ],
+          "messages": []
+        }
+      }
+    },
+    "e000006": {
+      "id": "e000006",
+      "kind": "observation",
+      "window": 1,
+      "data": {
+        "actor_id": "dk-operation",
+        "visible": {
+          "window": 1,
+          "round": 1,
+          "window_duration": "1 个模拟日",
+          "background": "芦湾维修社希望尽快恢复通航，但不愿在复核前占用现金。渡口运营社独立受理复议，偏好明示所需材料。双方就一份有条件书面担保能否推进复议展开两窗协商。支付通道在两窗内关闭，实际到账固定为0万元；开局没有已签署的复核函。",
+          "rules": [
+            {
+              "text": "只有有效的签字复核函确实送达后，运营社才可以自主决定将复议状态列入复议。",
+              "provenance": {
+                "kind": "material"
+              }
+            },
+            {
+              "text": "两窗内支付通道关闭，“实际到账”固定为0万元。",
+              "provenance": {
+                "kind": "material"
+              }
+            },
+            {
+              "text": "运营社无权替维修社签字或划款；运营社的受理决定由其自主作出。",
+              "provenance": {
+                "kind": "material"
+              }
+            }
+          ],
+          "self": {
+            "id": "dk-operation",
+            "name": "渡口运营社",
+            "identity": "独立受理复议的一方，偏好明示所需材料，可在知道报价后答复、提出条件或拒绝；无权替对方签字或划款。",
+            "preferences": "偏好明示受理所需材料；根据报价自主答复、提出条件或拒绝。",
+            "depth": 0
+          },
+          "roster": [
+            {
+              "id": "lw-repair",
+              "name": "芦湾维修社",
+              "subsystem_id": null
+            },
+            {
+              "id": "dk-operation",
+              "name": "渡口运营社",
+              "subsystem_id": null
+            }
+          ],
+          "subsystems": [],
+          "visible_state": {
+            "dk-operation": {
+              "dk-actual-receipt": {
+                "value": 0,
+                "domain": "维修协商",
+                "kind": "number",
+                "unit": "万元",
+                "provenance": {
+                  "kind": "material"
+                },
+                "constraints": {
+                  "minimum": 0,
+                  "maximum": 0,
+                  "allow_unknown": false,
+                  "fixed": true
+                },
+                "label": "实际到账"
+              },
+              "dk-review-status": {
+                "value": "待材料",
+                "domain": "维修协商",
+                "kind": "string",
+                "unit": null,
+                "provenance": {
+                  "kind": "material"
+                },
+                "constraints": {
+                  "choices": [
+                    "待材料",
+                    "已列入复议"
+                  ],
+                  "allow_unknown": false
+                },
+                "label": "复议状态"
+              }
+            }
+          },
+          "visible_materials": [],
+          "influences": [
+            {
+              "source": "lw-repair",
+              "target": "dk-operation",
+              "description": "维修社可通过提出有条件书面担保影响运营社的受理考量；该影响限于提议本身，不能命令运营社受理，也不能替运营社签字或划款。",
+              "origin": "material"
+            },
+            {
+              "source": "dk-operation",
+              "target": "lw-repair",
+              "description": "运营社可向维修社告知受理条件，无权替对方签字或划款。",
+              "origin": "material"
+            }
+          ],
+          "messages": []
+        }
+      }
+    },
+    "e000013": {
+      "id": "e000013",
+      "kind": "expression",
+      "window": 1,
+      "data": {
+        "actor_id": "lw-repair",
+        "round": 1,
+        "text": "首窗向运营社提出有条件书面担保：若其在第2窗结束前收到有效签字复核函，我方愿提供200万元书面担保；并请其明示复议所需材料。同时说明该意向在未收到复核函时到期，且我方不在复核前占用现金。",
+        "messages": [
+          {
+            "recipients": [
+              "dk-operation"
+            ],
+            "text": "关于复议推进：我方意向为——若贵社在第2窗结束前收到有效签字复核函，芦湾维修社愿提供200万元书面担保；若届时未收到，该担保意向自动到期。我方不愿在复核前占用现金，支付通道本两窗内实际到账为0万元。请贵社明示复议受理所需的具体材料清单与格式要求。我社无权替贵社作出受理决定，也不代贵社签字或划款。"
+          }
+        ]
+      }
+    },
+    "e000014": {
+      "id": "e000014",
+      "kind": "message_delivered",
+      "window": 1,
+      "data": {
+        "from": "lw-repair",
+        "to": "dk-operation",
+        "text": "关于复议推进：我方意向为——若贵社在第2窗结束前收到有效签字复核函，芦湾维修社愿提供200万元书面担保；若届时未收到，该担保意向自动到期。我方不愿在复核前占用现金，支付通道本两窗内实际到账为0万元。请贵社明示复议受理所需的具体材料清单与格式要求。我社无权替贵社作出受理决定，也不代贵社签字或划款。",
+        "action_id": "e000013"
+      }
+    },
+    "e000015": {
+      "id": "e000015",
+      "kind": "expression",
+      "window": 1,
+      "data": {
+        "actor_id": "dk-operation",
+        "round": 1,
+        "text": "向维修社明示复议受理所需材料与担保函形式，并要求书面回传签署函；本轮不作受理决定。",
+        "messages": [
+          {
+            "recipients": [
+              "lw-repair"
+            ],
+            "text": "渡口运营社说明：复议受理以收到有效签字的书面复核函为前提，受理决定由我方自主作出。请提交：1）加盖维修社印章的书面复核函，载明复议事由、请求范围与签署人；2）有条件书面担保的正本或清晰扫描件，注明担保条件、生效时点与期限。两窗内支付通道关闭、实际到账固定为0万元，故我方不会以到账金额为受理前提，但担保条款需明确金额与触发条件。材料齐全并送达后，我方再决定是否列入复议。我方无权代签或代划款。"
+          }
+        ]
+      }
+    },
+    "e000016": {
+      "id": "e000016",
+      "kind": "message_delivered",
+      "window": 1,
+      "data": {
+        "from": "dk-operation",
+        "to": "lw-repair",
+        "text": "渡口运营社说明：复议受理以收到有效签字的书面复核函为前提，受理决定由我方自主作出。请提交：1）加盖维修社印章的书面复核函，载明复议事由、请求范围与签署人；2）有条件书面担保的正本或清晰扫描件，注明担保条件、生效时点与期限。两窗内支付通道关闭、实际到账固定为0万元，故我方不会以到账金额为受理前提，但担保条款需明确金额与触发条件。材料齐全并送达后，我方再决定是否列入复议。我方无权代签或代划款。",
+        "action_id": "e000015"
+      }
+    },
+    "e000020": {
+      "id": "e000020",
+      "kind": "settlement_rejected",
+      "window": 1,
+      "data": {
+        "reason": "直接影响引用必须匹配开局的有向边、受影响字段所属主体及源主体在本窗口的行动"
+      }
+    },
+    "e000024": {
+      "id": "e000024",
+      "kind": "settlement_rejected",
+      "window": 1,
+      "data": {
+        "reason": "直接影响引用必须匹配开局的有向边、受影响字段所属主体及源主体在本窗口的行动"
+      }
+    },
+    "e000032": {
+      "id": "e000032",
+      "kind": "settlement_rejected",
+      "window": 1,
+      "data": {
+        "reason": "直接影响引用 dk-operation.dk-review-status（lw-repair → dk-operation） 的 e000013 未列入同一字段的 action_ids。若确有影响，同时在该字段列出这些行动；无直接作用则移除这条 influence_refs"
+      }
+    },
+    "e000036": {
+      "id": "e000036",
+      "kind": "window_committed",
+      "window": 1,
+      "data": {
+        "reviews": [
+          {
+            "entity_id": "dk-operation",
+            "field_id": "dk-actual-receipt",
+            "before": 0,
+            "after": 0,
+            "reason": "两窗内支付通道关闭，实际到账固定为0万元；维修社说明与运营社告知均只确认该固定值，未改变数值。",
+            "action_ids": [
+              "e000013",
+              "e000015"
+            ],
+            "influence_refs": []
+          },
+          {
+            "entity_id": "dk-operation",
+            "field_id": "dk-review-status",
+            "before": "待材料",
+            "after": "待材料",
+            "reason": "运营社明示所需材料并要求材料齐全送达后再自主决定，本轮未收到有效签字复核函，未作受理决定，维持待材料。",
+            "action_ids": [
+              "e000015"
+            ],
+            "influence_refs": []
+          }
+        ],
+        "changes": [],
+        "consequences": [
+          {
+            "text": "维修社首窗提出有条件书面担保意向：若运营社在第2窗结束前收到有效签字复核函，愿提供200万元书面担保，否则意向到期；并请求明示复议材料。",
+            "action_ids": [
+              "e000013"
+            ]
+          },
+          {
+            "text": "运营社向维修社明示复议受理所需材料与担保函格式，要求书面回传签署函，声明材料齐全送达后再自主决定；复议状态仍为待材料。",
+            "action_ids": [
+              "e000015"
+            ]
+          }
+        ],
+        "suggested_fields": [
+          "lw-repair 的公开担保意向状态字段（如“担保意向：已提出/到期”）",
+          "dk-operation 的“所需材料清单”公开字段"
+        ],
+        "state": {
+          "lw-repair": {},
+          "dk-operation": {
+            "dk-actual-receipt": 0,
+            "dk-review-status": "待材料"
+          }
+        },
+        "logical_time": {
+          "elapsed_windows": 1,
+          "duration_per_window": "1 个模拟日"
+        }
+      }
+    },
+    "e000045": {
+      "id": "e000045",
+      "kind": "expression",
+      "window": 2,
+      "data": {
+        "actor_id": "lw-repair",
+        "round": 1,
+        "text": "首窗回复运营社：确认收到材料清单，说明我方可按清单准备盖章复核函与担保正本/扫描件，但担保仍以第2窗结束前收到有效签字复核函为触发条件；支付通道关闭、到账为0，不以此作为受理前提。询问送达方式与签署人要求，便于尽快补齐。",
+        "messages": [
+          {
+            "recipients": [
+              "dk-operation"
+            ],
+            "text": "渡口运营社：材料清单已收到。我方将按清单准备加盖维修社印章的书面复核函（载明复议事由、请求范围与签署人）及有条件书面担保正本或清晰扫描件，担保注明金额200万元、触发条件（贵社在第2窗结束前收到有效签字复核函）、生效时点与期限。支付通道两窗内关闭、实际到账固定0万元，我方不以到账作为受理前提，也不在复核前占用现金。请明示送达方式（递交地址或扫描件接收渠道）及对签署人身份的具体要求，我方据此尽快补齐；受理决定仍由贵社自主作出。"
+          }
+        ]
+      }
+    },
+    "e000046": {
+      "id": "e000046",
+      "kind": "message_delivered",
+      "window": 2,
+      "data": {
+        "from": "lw-repair",
+        "to": "dk-operation",
+        "text": "渡口运营社：材料清单已收到。我方将按清单准备加盖维修社印章的书面复核函（载明复议事由、请求范围与签署人）及有条件书面担保正本或清晰扫描件，担保注明金额200万元、触发条件（贵社在第2窗结束前收到有效签字复核函）、生效时点与期限。支付通道两窗内关闭、实际到账固定0万元，我方不以到账作为受理前提，也不在复核前占用现金。请明示送达方式（递交地址或扫描件接收渠道）及对签署人身份的具体要求，我方据此尽快补齐；受理决定仍由贵社自主作出。",
+        "action_id": "e000045"
+      }
+    },
+    "e000047": {
+      "id": "e000047",
+      "kind": "expression",
+      "window": 2,
+      "data": {
+        "actor_id": "dk-operation",
+        "round": 1,
+        "text": "本轮先回复维修社：明确材料清单与格式已在上轮给出，重申受理以有效签字复核函送达为前提；告知收到担保函后可先作形式核对，但正式受理决定仍由运营社自主作出，且不以到账金额为条件。同时更新旧事项，等待对方书面回复。",
+        "messages": [
+          {
+            "recipients": [
+              "lw-repair"
+            ],
+            "text": "渡口运营社答复：我方受理所需材料与格式维持上轮清单——加盖贵社印章的书面复核函（载明复议事由、请求范围、签署人）及有条件书面担保的正本或清晰扫描件（注明金额、担保条件、生效时点与期限）。200万元书面担保意向已收悉；两窗内实际到账固定为0万元，故我方明确不以到账为受理前提，但担保条款须写清金额与触发条件。材料送达后我先作形式核对，是否列入复议仍由我方自主决定。请以书面形式回传签署函及担保文件；我方无权代签或代划款。"
+          }
+        ]
+      }
+    },
+    "e000048": {
+      "id": "e000048",
+      "kind": "message_delivered",
+      "window": 2,
+      "data": {
+        "from": "dk-operation",
+        "to": "lw-repair",
+        "text": "渡口运营社答复：我方受理所需材料与格式维持上轮清单——加盖贵社印章的书面复核函（载明复议事由、请求范围、签署人）及有条件书面担保的正本或清晰扫描件（注明金额、担保条件、生效时点与期限）。200万元书面担保意向已收悉；两窗内实际到账固定为0万元，故我方明确不以到账为受理前提，但担保条款须写清金额与触发条件。材料送达后我先作形式核对，是否列入复议仍由我方自主决定。请以书面形式回传签署函及担保文件；我方无权代签或代划款。",
+        "action_id": "e000047"
+      }
+    },
+    "e000052": {
+      "id": "e000052",
+      "kind": "window_committed",
+      "window": 2,
+      "data": {
+        "reviews": [
+          {
+            "entity_id": "dk-operation",
+            "field_id": "dk-actual-receipt",
+            "before": 0,
+            "after": 0,
+            "reason": "支付通道关闭，规则固定为0万元，本窗无到账。",
+            "action_ids": [],
+            "influence_refs": []
+          },
+          {
+            "entity_id": "dk-operation",
+            "field_id": "dk-review-status",
+            "before": "待材料",
+            "after": "待材料",
+            "reason": "有效签字复核函尚未送达；本轮仅确认材料清单并等待书面回传，未满足列入复议的前提。",
+            "action_ids": [
+              "e000045",
+              "e000047"
+            ],
+            "influence_refs": []
+          }
+        ],
+        "changes": [],
+        "consequences": [
+          {
+            "text": "维修社确认材料清单，承诺按清单准备盖章复核函与200万元有条件担保，并询问送达方式与签署人要求；未改变运营社的复议状态。",
+            "action_ids": [
+              "e000045"
+            ]
+          },
+          {
+            "text": "运营社重申受理以有效签字复核函送达为前提，收到担保函后仅作形式核对，正式受理仍自主决定且不以到账为条件；复议状态维持待材料。",
+            "action_ids": [
+              "e000047"
+            ]
+          }
+        ],
+        "suggested_fields": [],
+        "state": {
+          "lw-repair": {},
+          "dk-operation": {
+            "dk-actual-receipt": 0,
+            "dk-review-status": "待材料"
+          }
+        },
+        "logical_time": {
+          "elapsed_windows": 2,
+          "duration_per_window": "1 个模拟日"
+        }
+      }
+    }
+  }
+}

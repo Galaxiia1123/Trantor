@@ -1,0 +1,156 @@
+{
+  "title": "开源协作：辅助阅读插件发布",
+  "background": "虚构的文字工具社区正在讨论是否发布辅助阅读插件。观察现场测试意见如何直接传到项目理事会和外部使用者。",
+  "domains": [
+    "无障碍测试",
+    "版本维护"
+  ],
+  "sources": [
+    {
+      "id": "release_brief",
+      "name": "虚构发布说明",
+      "text": "理事会负责发布决定，维护组可以提出建议。测试员可直接向理事会和读者协会通报问题。测试时段尚未确定。读者协会确认是否参与试用。"
+    }
+  ],
+  "entities": [
+    {
+      "id": "council",
+      "name": "项目理事会",
+      "identity": "决定是否形成发布计划。",
+      "preferences": "听取维护者和试用者意见。",
+      "fields": [
+        {
+          "id": "phase",
+          "domain": "版本维护",
+          "kind": "string",
+          "value": "征集意见",
+          "visibility": {
+            "public": true
+          }
+        }
+      ],
+      "provenance": {
+        "kind": "material",
+        "source_ids": [
+          "release_brief"
+        ],
+        "explanation": "项目归属与决定权来自发布说明。",
+        "quotes": [
+          {
+            "source_id": "release_brief",
+            "quote": "理事会负责发布决定"
+          }
+        ]
+      }
+    },
+    {
+      "id": "maintainers",
+      "name": "维护组",
+      "subsystem_id": "development",
+      "identity": "维护插件，可向理事会建议发布时间。",
+      "materials": [
+        {
+          "domain": "版本维护",
+          "text": "尚有一项内部回归检查，仅维护组可见。"
+        }
+      ],
+      "fields": [
+        {
+          "id": "reviewed",
+          "domain": "版本维护",
+          "kind": "boolean",
+          "value": false
+        }
+      ]
+    },
+    {
+      "id": "tester",
+      "name": "键盘测试员",
+      "subsystem_id": "testing",
+      "identity": "在兼容性测试中代表个人观察，可以越级联系项目决策者。",
+      "fields": [
+        {
+          "id": "available_sessions",
+          "domain": "无障碍测试",
+          "kind": "number",
+          "value": null,
+          "unit": "次",
+          "provenance": {
+            "kind": "missing",
+            "source_ids": [
+              "release_brief"
+            ],
+            "explanation": "材料没有给出数量。",
+            "quotes": [
+              {
+                "source_id": "release_brief",
+                "quote": "测试时段尚未确定"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "readers",
+      "name": "读者协会",
+      "identity": "独立决定是否安排试用，不属于项目理事会。",
+      "fields": [
+        {
+          "id": "pilot",
+          "domain": "无障碍测试",
+          "kind": "boolean",
+          "value": null,
+          "visibility": {
+            "public": true
+          }
+        }
+      ]
+    }
+  ],
+  "subsystems": [
+    {
+      "id": "development",
+      "name": "开发协作组",
+      "owner_id": "council"
+    },
+    {
+      "id": "testing",
+      "name": "测试小组",
+      "owner_id": "maintainers"
+    }
+  ],
+  "influences": [
+    {
+      "source": "tester",
+      "target": "council",
+      "weight": 0.7
+    },
+    {
+      "source": "tester",
+      "target": "readers",
+      "weight": 0.65
+    },
+    {
+      "source": "readers",
+      "target": "council",
+      "weight": 0.5
+    },
+    {
+      "source": "council",
+      "target": "tester",
+      "weight": 0.3
+    }
+  ],
+  "rules": [
+    {
+      "text": "提议发布日期或试用安排后，由相应主体独立答复。尚待核对的情况可保持未知。"
+    }
+  ],
+  "assumptions": [
+    "此案例的组织与参与者均为虚构，开局权重是编写样例时的设定。"
+  ],
+  "missing_information": [
+    "测试时段数量和协会的试用意向待确认。"
+  ]
+}
