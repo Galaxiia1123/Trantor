@@ -3,10 +3,15 @@
 function fieldContrastCard(focus,comparison,labels){
   const card=h("article",null,"contrast-focus");card.append(h("small","关注字段 · "+focus.actor,"eyebrow"),h("h3",focus.field));
   const {equal,different,unknown}=focus.counts;
+  if(focus.opening)card.append(h("p","开局时，"+labels[0]+"为“"+focus.opening.values[0]+"”，"+labels[1]+"为“"+focus.opening.values[1]+"”。"));
+  if(focus.opening && !focus.through){
+    for(const [i,side] of [[0,"left"],[1,"right"]])card.append(button(labels[i]+" · 开局记录",()=>evidence(focus.opening.records[i],comparison[side].run_id),"link"));
+    return card;
+  }
   if(!focus.end){card.append(h("p","到这个时点，两条路线仍共享同一段历史。"));return card;}
   const n=focus.through-focus.after;
   card.append(h("p","分岔之后的 "+n+" 个窗口中，"+equal+" 窗的值相同，"+different+" 窗不同"+(unknown ? "，另有 "+unknown+" 窗至少一侧未知" : "")+"。"));
-  if(focus.first)card.append(h("p","第 "+focus.first.window+" 窗首次不同　"+labels[0]+"为"+focus.first.values[0]+"，"+labels[1]+"为"+focus.first.values[1]+"。"));
+  if(focus.first)card.append(h("p","第 "+focus.first.window+(focus.opening?.kind==="different"?" 窗末仍不同　":" 窗首次不同　")+labels[0]+"为"+focus.first.values[0]+"，"+labels[1]+"为"+focus.first.values[1]+"。"));
   if(focus.first && focus.end.kind==="equal")card.append(h("p","到第 "+focus.end.window+" 窗，两侧重新同为"+focus.end.values[0]+"。"));
   else if(!focus.first)card.append(h("p","第 "+focus.end.window+" 窗末　"+labels[0]+"为"+focus.end.values[0]+"，"+labels[1]+"为"+focus.end.values[1]+"。"));
   const at=focus.first || focus.end;

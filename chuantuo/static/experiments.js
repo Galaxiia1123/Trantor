@@ -42,6 +42,7 @@ function experimentForm(view,idea=null,priorWindow=null) {
   const form = h("form", null, "experiment-form"), warning = h("p", null, "form-error");
   const select = (label, choices) => {
     const field = h("select");
+    field.setAttribute("aria-label",label);
     for (const [value, name] of choices) field.append(new Option(name, value));
     const wrap = h("label",label); wrap.append(field); form.append(wrap);
     return field;
@@ -49,6 +50,7 @@ function experimentForm(view,idea=null,priorWindow=null) {
   const picker=scheduledValuePicker(view.actors,false);
   const modes=[["condition","改变一个条件"]];
   if(picker.count)modes.push(["field","设定一个字段的新值"]);
+  if(!earliest && picker.openingCount)modes.push(["opening","改变开局初值"]);
   const timing=routeTimingPicker(view.actors);
   if(view.actors.length>=2)modes.push(["transit","改变一条线路的送达时间"]);
   const shift=eventShiftPicker(run,preset?.event_move);
@@ -65,6 +67,7 @@ function experimentForm(view,idea=null,priorWindow=null) {
   const label = h("label","改变的条件"); label.append(prompt); form.append(label,picker.node,levels.node,timing.node,shift.node);
   const endInput=h("input"),endLabel=h("label","条件最后有效的窗口（可选）");endInput.type="number";endInput.step="1";endInput.placeholder="持续有效";endLabel.append(endInput);
   const duration=disclosure("设置临时条件的有效期",endLabel,h("p","含最后一窗。到期后继续观察，已有的行动和已结算结果仍保留。","hint"));form.append(duration);
+  const openingHint=h("p","首轮开始前就采用新值。只有原本能读这个字段的主体会看到它，运行中的固定约束继续生效。","hint");form.append(openingHint);
   const audience = select("开始时谁知道这个条件",[["world","仅世界系统"],["public","所有主体"],["readers","指定主体和世界系统"]]);
   const group = h("fieldset"); group.append(h("legend","知情主体"));
   for (const actor of view.actors) {
@@ -84,7 +87,10 @@ function experimentForm(view,idea=null,priorWindow=null) {
     through.value=String(prior>from && prior<=committed ? prior : committed);
   }
   function update() {
-    const changed=["condition","field"].includes(kind.value), fieldMode=kind.value==="field";
+    const opening=kind.value==="opening", changed=["condition","field"].includes(kind.value), fieldMode=kind.value==="field" || opening;
+    picker.setOpening(opening);openingHint.hidden=!opening;
+    if(opening && split.value!=="0"){split.value="0";limits();}
+    split.disabled=opening;
     duration.hidden=endInput.disabled=kind.value!=="condition";endInput.min=String(Number(split.value)+1);
     levels.show(fieldMode);const extra=levels.tokens().length;
     label.hidden=kind.value!=="condition";audience.parentElement.hidden=!changed;prompt.required=kind.value==="condition";
@@ -98,6 +104,7 @@ function experimentForm(view,idea=null,priorWindow=null) {
     pairLabel.hidden=pair.disabled=kind.value==="repeat";
     const contrast=!pair.disabled && pair.checked, conditions=1+extra+(contrast ? 1 : 0),total=count*conditions;
     repeats.parentElement.firstChild.textContent=extra ? "每个取值运行几次" : "新路线数量";
+    repeats.setAttribute("aria-label",repeats.parentElement.firstChild.textContent);
     pairLabel.lastChild.textContent=extra ? "也按原条件运行相同次数，单独列出结果" : "也按原条件运行相同次数，分别比较两组结果";
     study.update(total,calls);
     submit.textContent=extra ? "启动多档对照" : contrast ? "启动双条件对照" : count===1 ? "启动新路线" : "启动这组实验";
@@ -115,7 +122,7 @@ function experimentForm(view,idea=null,priorWindow=null) {
     prompt.value=preset.condition || "";audience.value=preset.audience || "world";
     if(preset.ends_window){endInput.value=String(preset.ends_window);duration.open=true;}
     for(const box of group.querySelectorAll("input"))box.checked=(preset.readers || []).includes(box.value);
-    picker.set(preset.assignment);timing.set(preset.route);
+    picker.setOpening(preset.kind==="opening");picker.set(preset.assignment);timing.set(preset.route);
     if(idea.additional_values?.length){levels.show(true);levels.field.value=idea.additional_values.join("、");levels.node.open=true;}
   }else limits();
   update();
@@ -128,7 +135,7 @@ function experimentForm(view,idea=null,priorWindow=null) {
     submit.disabled=true; warning.textContent="";
     try {
       const spec={window:Number(split.value),through:Number(through.value),kind:kind.value,condition:kind.value==="condition" ? prompt.value.trim() : "",
-                  assignment:kind.value==="field" ? picker.read() : null,route:kind.value==="transit" ? timing.read() : null,
+                  assignment:["field","opening"].includes(kind.value) ? picker.read() : null,route:kind.value==="transit" ? timing.read() : null,
                   event_move:kind.value==="event_time" ? shift.read() : null,audience:scope,readers};
       if(kind.value==="condition" && endInput.value!=="")spec.ends_window=Number(endInput.value);
       const contrast=!pair.disabled && pair.checked;
@@ -153,7 +160,7 @@ function experimentForm(view,idea=null,priorWindow=null) {
     "两条路线在分岔前拥有相同的状态、私人记忆和已送达消息。新的条件从下一窗开始生效。","hint"),form);
 }
 
-const experimentKind = meta => ({extend:"延长观察",repeat:"原样重跑",field:"字段实验",transit:"线路实验",event_time:"日历实验"}[meta.kind] || "条件实验");
+const experimentKind = meta => ({extend:"延长观察",repeat:"原样重跑",field:"字段实验",opening:"开局初值实验",transit:"线路实验",event_time:"日历实验"}[meta.kind] || "条件实验");
 
 function extendRun(view){
   const run=activeRun,from=view.status.window,form=h("form",null,"experiment-form"),extra=h("input"),cap=h("input");
@@ -273,7 +280,8 @@ function showExperimentTools(view) {
   if(meta.kind==="event_time"){
     origin.append("　事件内容与通知对象沿用原日历。");
     if(meta.original_event?.record)origin.append(button("查阅原日期的事件凭据",()=>evidence(meta.original_event.record,meta.parent_id),"link"));
-  }else if(meta.kind==="transit")origin.append("　新时效只用于分岔后的新发件。通信双方能看到这个时效。");
+  }else if(meta.kind==="opening")origin.append("　原初值“"+(meta.opening_change.before??"未知")+"”，新初值“"+(meta.opening_change.after??"未知")+"”。第一轮按该字段原有的可见范围呈现。");
+  else if(meta.kind==="transit")origin.append("　新时效只用于分岔后的新发件。通信双方能看到这个时效。");
   else if (meta.kind!=="repeat") {
     const allowed=view.actors.filter(a=>meta.readers.includes(a.id)).map(a=>a.name);
     origin.append("　最初知情范围为"+(meta.audience==="public" ? "所有主体" : meta.audience==="world" ? "仅世界系统" : allowed.join("、")+"与世界系统")+"。");
@@ -281,7 +289,7 @@ function showExperimentTools(view) {
   root.append(origin);
   if (view.selected<meta.window) {root.append(h("p","此时两条路线仍在共享同一段历史。","hint"));return;}
   const summary=h("div",null,"experiment-diff"); root.append(summary);
-  if (view.settled_through<=meta.window) {summary.textContent="分岔后的首个窗口结算后，这里会显示对照结果。"; return;}
+  if (view.settled_through<=meta.window && meta.kind!=="opening") {summary.textContent="分岔后的首个窗口结算后，这里会显示对照结果。"; return;}
   const run=activeRun, w=view.settled_through;
   api("/api/runs/"+run+"/experiment?window="+w).then(result=>{
     if (activeRun===run && summary.isConnected) drawExperimentComparison(summary,result,view.actors,letter||post);
@@ -293,13 +301,13 @@ function drawExperimentComparison(root, result, actors, isLetter, options={}) {
   const w=result.right.window, changed=result.rows.filter(r=>r.status==="different");
   const names=Object.fromEntries(actors.map(a=>[a.id,a.name]));
   const intro=h("div",null,"comparison-heading");
-  intro.append(h("strong","第 "+w+" 窗 · "+changed.length+" 项状态不同"));
+  intro.append(h("strong",(w?"第 "+w+" 窗":"开局")+" · "+changed.length+" 项状态不同"));
   const first=result.first_state_difference;
-  if (first && first!==w) {
-    const caption="首次状态分化 · 第 "+first+" 窗";
+  if (first!=null && first!==w) {
+    const caption=first===0?"开局已有差异":"首次状态分化 · 第 "+first+" 窗";
     if(options.selectWindow)intro.append(button(caption,()=>options.selectWindow(first),"link"));
     else{const link=h("a",caption);link.href="#run/"+result.right.run_id+"/"+first;intro.append(link);}
-  } else intro.append(h("small",first ? "首次状态分化" : "截至共同终点，字段值一致","quiet"));
+  } else intro.append(h("small",first===0?"开局初值不同":first!=null?"首次状态分化":"截至共同终点，未观察到字段差异","quiet"));
   root.append(intro);
   if(result.focus)root.append(fieldContrastCard(result.focus,result,[leftLabel,rightLabel]));
   else root.append(fieldContrastPicker(result,names,[leftLabel,rightLabel]));
@@ -321,7 +329,7 @@ function drawExperimentComparison(root, result, actors, isLetter, options={}) {
     }
     for (const c of proof.consequences.slice(0,2)) card.append(h("p",c.text));
     if (!proof.consequences.length) card.append(h("p","此窗没有登记客观后果。","hint"));
-    card.append(button("查阅本窗结算",()=>evidence(head.event_id,head.run_id),"link")); grid.append(card);
+    card.append(button(w?"查阅本窗结算":"查阅这条路线的开局",()=>evidence(head.event_id,head.run_id),"link")); grid.append(card);
   }
   root.append(grid);
   const details=h("div"), select=h("select"); select.setAttribute("aria-label","选择要比较决定的主体");

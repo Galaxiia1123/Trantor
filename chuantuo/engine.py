@@ -580,7 +580,7 @@ class Simulation:
             proposal = Settlement.model_validate_json(raw)
             issue = rejected["data"]["reason"]
             try:
-                proposal=complete_scheduled_reviews(self._state,proposal,self._current_events)
+                proposal=complete_scheduled_reviews(self._state,proposal,self._current_events,self._scenario)
                 settled_state(self._scenario, self._state, proposal, set(owners), owners,self._objective_receipts(),window=self.window+1)
             except ValueError as error:
                 issue = str(error)
@@ -773,6 +773,8 @@ class Simulation:
             if self._waiting_steps:
                 payload["continued_waits"] = self._waiting_steps
         instruction=world_instruction(payload["allowed_direct_actions"]) if self.notebooks else WORLD_SYSTEM
+        if "review_fields" in payload:
+            instruction+="\nreview_fields 按所有者列出本窗请你审查的确切字段。名单外不写 reviews。固定字段由引擎保持，即使主体表态想改也不能记为已经改变。"
         if payload.get("mail_routes"):
             instruction+="\nmail_routes 是本窗口权威的通信时效，优先于旧材料里的预计送达时间。核对实际到件记录，再区分信中内容与收件人自己的决定。"
         if self._waiting_steps:
@@ -921,7 +923,7 @@ class Simulation:
                 raise ValueError("窗口已经结算或顺序不正确")
             try:
                 owners = {action["id"]:action["actor_id"] for action in self._actions}
-                proposal=complete_scheduled_reviews(self._state,proposal,self._current_events)
+                proposal=complete_scheduled_reviews(self._state,proposal,self._current_events,self._scenario)
                 next_state, changes = settled_state(self._scenario,self._state,proposal,action_ids,owners,self._objective_receipts(),window=window)
             except ValueError as error:
                 raise InvalidSettlement(str(error)) from error

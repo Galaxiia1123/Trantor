@@ -166,7 +166,7 @@ class EventMove(Record):
 class ExperimentRequest(Record):
     window: int = Field(ge=0)
     through: int = Field(ge=1)
-    kind: Literal["condition","field","transit","event_time","repeat","extend"] = "condition"
+    kind: Literal["condition","field","opening","transit","event_time","repeat","extend"] = "condition"
     extension_limit: int | None = Field(default=None,ge=1,le=1_000_000,strict=True)
     ends_window: int | None = Field(default=None,ge=1,strict=True)
     condition: str = Field(default="", max_length=1600)
@@ -188,8 +188,10 @@ class ExperimentRequest(Record):
             raise ValueError("每次可继续 1 至 100 窗，沿用原条件和知情范围")
         if (self.kind=="condition" and not self.condition.strip()) or (self.kind=="repeat" and self.condition.strip()):
             raise ValueError("改变条件时请填写具体情境，原样重跑时请留空")
-        if (self.kind=="field")!=(self.assignment is not None):
+        if (self.kind in {"field","opening"})!=(self.assignment is not None):
             raise ValueError("字段实验只能选择一个已定义的字段和目标值")
+        if self.kind=="opening" and (self.window!=0 or self.audience!="world" or self.condition.strip()):
+            raise ValueError("改变开局初值须从开局分岔，并沿用该字段原有的可见范围")
         if (self.kind=="transit")!=(self.route is not None):
             raise ValueError("线路实验需要一个发送方、一个收件方和送达时间")
         if self.kind=="transit" and (self.audience!="world" or self.condition.strip()):
@@ -229,25 +231,34 @@ def apply_intervention(baseline,spec,source_id,state=None,configs=(),*,allow_sam
         raise ValueError("延长观察沿用已结束路线的原条件")
     scene = baseline.model_dump(mode="json")
     condition = spec.condition.strip()
-    if spec.kind=="field":
+    if spec.kind in {"field","opening"}:
         change=spec.assignment
         actor=next((a for a in baseline.entities if a.id==change.entity_id),None)
         f=next((f for f in actor.fields if f.id==change.field_id),None) if actor else None
-        if not f or not f.permits(change.value) or f.constraints and f.constraints.fixed:
+        if not f or not f.permits(change.value):
             raise ValueError("请选择可以调整的已定义字段，并符合它的类型、范围和约束")
+        if spec.kind=="field" and f.constraints and f.constraints.fixed:
+            raise ValueError("该字段在运行中固定。若要从第一轮就采用另一种取值，请选择“改变开局初值”")
         period=f.entry_period(change.value)
-        if period and not period.allows(spec.window+1):
+        if spec.kind=="opening" and period and change.value!=f.value:
+            raise ValueError("该取值需要在运行中的指定窗口转入，不能作为新的开局初值")
+        if spec.kind=="field" and period and not period.allows(spec.window+1):
             raise ValueError("分岔后的首个窗口不在该目标值允许转入的期限内")
         if not allow_same_field and state is not None and state[actor.id][f.id]==change.value:
             raise ValueError("目标值与分岔时相同，可选择原样重跑")
-        event_key=hashlib.sha256(encode([source_id,spec.model_dump(mode="json",exclude_none=True)]).encode()).hexdigest()[:12]
-        scene["scheduled_events"].append({"id":"variation_"+event_key,"window":spec.window+1,
-            "text":condition or "本窗有一项外部调整，将在结算时生效。",
-            "visibility":{"public":spec.audience=="public","readers":spec.readers},
-            "assignments":[change.model_dump(mode="json")],"provenance":{"kind":"user","explanation":"操作者在字段对照中指定。"}})
-        if not condition:
-            value="未知" if change.value is None else ("是" if change.value else "否") if isinstance(change.value,bool) else str(change.value)+(f.unit or "")
-            condition=f"{actor.name}的{f.label or f.id}在第 {spec.window+1} 窗末设为{value}"
+        value="未知" if change.value is None else ("是" if change.value else "否") if isinstance(change.value,bool) else str(change.value)+(f.unit or "")
+        if spec.kind=="opening":
+            target=next(item for a in scene["entities"] if a["id"]==actor.id for item in a["fields"] if item["id"]==f.id)
+            target["value"]=change.value
+            target["provenance"]={"kind":"user","explanation":"操作者在对照路线设定的开局初值，沿用原定义、约束和可见范围。"}
+            condition=f"{actor.name}的{f.label or f.id}从开局设为{value}"
+        else:
+            event_key=hashlib.sha256(encode([source_id,spec.model_dump(mode="json",exclude_none=True)]).encode()).hexdigest()[:12]
+            scene["scheduled_events"].append({"id":"variation_"+event_key,"window":spec.window+1,
+                "text":condition or "本窗有一项外部调整，将在结算时生效。",
+                "visibility":{"public":spec.audience=="public","readers":spec.readers},
+                "assignments":[change.model_dump(mode="json")],"provenance":{"kind":"user","explanation":"操作者在字段对照中指定。"}})
+            condition=condition or f"{actor.name}的{f.label or f.id}在第 {spec.window+1} 窗末设为{value}"
     elif spec.kind=="transit":
         r=spec.route
         names={a.id:a.name for a in baseline.entities}
@@ -297,6 +308,13 @@ def fork_experiment(parent, spec, run_id, job_id, directory: Path, *, study=None
               "state_sha256":hashlib.sha256(encode(selected["state"]).encode()).hexdigest()}
     if study:
         marker["study"]=study
+    expected=selected["state"]
+    if spec.kind=="opening":
+        change=spec.assignment
+        marker["opening_change"]={"before":expected[change.entity_id][change.field_id],"after":change.value}
+        expected=deepcopy(expected)
+        expected[change.entity_id][change.field_id]=change.value
+        marker["opening_state_sha256"]=hashlib.sha256(encode(expected).encode()).hexdigest()
     if spec.kind=="event_time":
         source_event=next(e for e in parent._scenario.scheduled_events if e.id==spec.event_move.event_id)
         marker["original_event"]={"id":source_event.id,"window":source_event.window,"provenance":source_event.provenance.model_dump(mode="json")}
@@ -326,7 +344,7 @@ def fork_experiment(parent, spec, run_id, job_id, directory: Path, *, study=None
                 continue
             dest.write((encode(event) + "\n").encode())
     alternate = Simulation.restore(directory, gateway=parent.gateway)
-    if alternate.window != spec.window or alternate.state != selected["state"]:
+    if alternate.window != spec.window or alternate.state != expected:
         raise ValueError("分岔状态与原路线提交不一致")
     alternate.journal.append("experiment_forked",marker,spec.window)
     alternate.status, alternate.error = "paused", None
@@ -362,7 +380,7 @@ def trajectory_comparison(parent,alternate,split,window=None):
     if not split <= selected <= latest:
         raise ValueError("只能对照两条路线都已提交的窗口")
     result = compare(parent, alternate, selected, selected)
-    first_difference = None
+    first_difference = 0 if split==0 and parent._scenario.initial_state()!=alternate._scenario.initial_state() else None
     first_event_difference=None
     has_calendar=bool(getattr(parent._scenario,"scheduled_events",()) or getattr(alternate._scenario,"scheduled_events",()))
     def actual_events(sim,w):

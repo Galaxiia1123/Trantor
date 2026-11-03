@@ -25,6 +25,7 @@ class PlanReply(Record):
 
 PLANNER = """你协助观察者把一个新的“如果”问题变成可编辑对照。只使用目录中的主体、字段、线路和事件。
 一次改变一个条件。数值实验用 field 和 assignment；同一数值字段的其他档位用 additional_values。具体事件改期用 event_time；
+若明确要从第一轮判断前采用另一个初值，用 opening、window=0、assignment，不另发通知。固定字段只可在新的开局设定。字段的原有读者和运行约束照常生效。
 通信时效用 transit。自由条件用 condition 并明确起初的知情范围。不要替主体预先决定同意、拒绝或结果。
 window 是保留到的最后一个已结算窗口，through 是观察终点，必须在给出的范围内。没有明确时点时用 default_split。
 若文本条件只持续到某一窗，写 experiment.ends_window；through 是继续观察到哪一窗，两者可以不同。
@@ -50,12 +51,13 @@ def _single_value(sim,q,split,end):
     if tail and not (unit and tail.startswith(unit)) and not re.match(r"[，。？?、,；;！!]|(?:会|能|时|后|呢|来|并|是否|再|比较|看看)",tail):
         return [],"请确认目标值的单位"+("，这个字段使用“"+unit+"”" if unit else "")+"。"
     mark=re.search(r"第\s*(\d+)\s*窗(?:口)?(?:末|结束时)",q[:match.start()])
-    at=int(mark[1])-1 if mark else split
+    opening=not mark and re.search(r"开局(?:就|时|前|初值)?|初始值|一开始|第一轮(?:行动|判断|决策)前",q[:match.start()]) is not None
+    at=0 if opening else int(mark[1])-1 if mark else split
     stop=re.search(r"(?:比较|观察|到|至)[^。！？]{0,12}?第\s*(\d+)\s*窗",tail)
     num=float(match[1]) if "." in match[1] else int(match[1])
     watch=[(a,f) for a in sim._scenario.entities for f in a.fields if (a.id,f.id)!=(actor.id,field.id) and (f.label or f.id) in tail]
     return [{"question":q[:160],"reason":"问题中明确给出了字段和目标值，可在启动前调整。",
-             "experiment":{"window":at,"through":int(stop[1]) if stop else end,"kind":"field",
+             "experiment":{"window":at,"through":int(stop[1]) if stop else end,"kind":"opening" if opening else "field",
                            "assignment":{"entity_id":actor.id,"field_id":field.id,"value":num}},
              "watch":{"actor_id":watch[0][0].id,"field_id":watch[0][1].id} if len(watch)==1 else None}],""
 
@@ -95,7 +97,7 @@ def _catalog(sim,question,budget,split):
         for f in a.fields:
             rules=f.constraints
             rows.append({"actor":a.id,"name":a.name,"field":f.id,"label":f.label or f.id,"type":f.kind,"unit":f.unit,
-                         "value_at_default_split":state[a.id][f.id],"editable":not (rules and rules.fixed),
+                         "value_at_default_split":state[a.id][f.id],"editable":not (rules and rules.fixed),"editable_at_opening":True,
                          **({"minimum":rules.minimum,"maximum":rules.maximum} if rules and f.kind=="number" else {}),
                          **({"choices":rules.choices[:40],"total_choices":len(rules.choices)} if rules and rules.choices else {})})
     for edge in sim._scenario.influences:

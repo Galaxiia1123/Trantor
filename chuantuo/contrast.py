@@ -25,6 +25,13 @@ def field_contrast(left,right,actor,field,through=None):
     if not f:raise ValueError("这两条路线没有这个共同字段")
     counts={"equal":0,"different":0,"unknown":0}
     first=None;at_end=None
+    opening=None
+    if split==0 and any((sim.experiment or {}).get("kind")=="opening" for sim in (left,right)):
+        initial=[sim._scenario.initial_state()[actor][field] for sim in (left,right)]
+        kind="unknown" if None in initial else "equal" if initial[0]==initial[1] else "different"
+        opening={"window":0,"kind":kind,"values":[_line(v)+((f.unit or "") if v is not None else "") for v in initial],
+                 "records":["e000001","e000001"]}
+        at_end=opening
     for w in range(split+1,end+1):
         records=[sim.journal.settlement(w) for sim in (left,right)]
         pair=[c["data"]["state"][actor][field] for c in records]
@@ -34,7 +41,7 @@ def field_contrast(left,right,actor,field,through=None):
                 "records":[c["id"] for c in records]}
         if kind=="different" and first is None:first=at_end
     return {"actor":a.name,"actor_id":actor,"field":f.label or f.id,"field_id":field,
-            "after":split,"through":end,"counts":counts,"first":first,"end":at_end}
+            "after":split,"through":end,"counts":counts,"first":first,"end":at_end,**({"opening":opening} if opening else {})}
 
 
 def _samples(rows):

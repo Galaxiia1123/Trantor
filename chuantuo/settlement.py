@@ -22,7 +22,14 @@ def scheduled_reviews(state, receipts):
     return rows
 
 
-def complete_scheduled_reviews(state, proposal, receipts):
+def complete_scheduled_reviews(state, proposal, receipts, scenario=None):
+    if isinstance(scenario, Scenario11):
+        supplied={(r.entity_id,r.field_id) for r in proposal.reviews}
+        fixed=[FieldReview(entity_id=a.id,field_id=f.id,before=state[a.id][f.id],after=state[a.id][f.id],
+                           reason="该字段在本次运行中固定，沿用当前值。")
+               for a in scenario.entities for f in a.fields if f.constraints and f.constraints.fixed and (a.id,f.id) not in supplied]
+        if fixed:
+            proposal=proposal.model_copy(update={"reviews":[*proposal.reviews,*fixed]})
     forced=scheduled_reviews(state,receipts)
     if not forced:
         return proposal
@@ -45,7 +52,10 @@ def settled_state(scenario, state, proposal, action_ids, action_owners=None, rec
     definitions = {(a.id, f.id): f for a in scenario.entities for f in a.fields}
     reviews = {(r.entity_id, r.field_id): r for r in proposal.reviews}
     if len(reviews) != len(proposal.reviews) or reviews.keys() != definitions.keys():
-        raise ValueError("世界必须审查全部且仅已定义字段，每字段一次")
+        groups=(("缺少",definitions.keys()-reviews.keys()),("未定义",reviews.keys()-definitions.keys()),
+                ("重复",[k for k,n in Counter((r.entity_id,r.field_id) for r in proposal.reviews).items() if n>1]))
+        detail="。".join(label+" "+"、".join(f"{a}.{f}" for a,f in sorted(keys)[:12]) for label,keys in groups if keys)
+        raise ValueError("世界必须审查全部且仅已定义字段，每字段一次。"+detail)
     next_state = deepcopy(state)
     edges = {(e.source,e.target) for e in scenario.influences}
     limits = scenario.delivery_limits() if isinstance(scenario,Scenario11) else {}
@@ -61,7 +71,9 @@ def settled_state(scenario, state, proposal, action_ids, action_owners=None, rec
         if review.before != before or not valid_value(definitions[key].kind, review.after):
             raise ValueError("结算前值或目标类型不匹配")
         field = definitions[key]
-        if not field.permits(review.after) or (field.constraints and field.constraints.fixed and review.after != before):
+        if field.constraints and field.constraints.fixed and review.after != before:
+            raise ValueError(f"字段 {actor_id}.{field_id} 在本次运行中固定，请保持当前值。主体提出其他用途或意向不能更改委托条件")
+        if not field.permits(review.after):
             raise ValueError(f"字段 {actor_id}.{field_id} 的提案超出用户定义的取值范围或修改权限")
         if before!=review.after and (period:=field.entry_period(review.after)):
             if window is None or not period.allows(window):

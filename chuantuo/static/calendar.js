@@ -52,12 +52,19 @@ function editRuleTerm(scene){
 
 function scheduledValuePicker(actors, optional) {
   const node=h("fieldset",null,"value-picker"), fields=[], field=h("select"), targetWrap=h("div");
+  let opening=false;
   const label=(name,control)=>{const tag=h("label",name);control.setAttribute("aria-label",name);tag.append(control);return tag;};
-  if(optional)field.append(new Option("只通知，由主体和世界自行回应",""));
+  const all=[];
   for(const actor of actors) {
     const entries=Array.isArray(actor.fields) ? actor.fields : Object.entries(actor.fields).map(([id,f])=>({id,...f}));
-    for(const f of entries.filter(f=>!f.constraints?.fixed)) {
-      field.append(new Option(actor.name+" · "+(f.label||f.id),fields.length));fields.push({actor:actor.id,...f});
+    for(const f of entries)all.push({actor:actor.id,actorName:actor.name,...f});
+  }
+  function options() {
+    const prior=fields[Number(field.value)];
+    fields.length=0;field.replaceChildren();if(optional)field.append(new Option("只通知，由主体和世界自行回应",""));
+    for(const f of all.filter(f=>opening || !f.constraints?.fixed)) {
+      field.append(new Option(f.actorName+" · "+(f.label||f.id),fields.length));fields.push(f);
+      if(prior===f)field.value=String(fields.length-1);
     }
   }
   let target, unknown;
@@ -69,15 +76,17 @@ function scheduledValuePicker(actors, optional) {
       target=h("input");target.required=true;target.type=f.kind==="number" ? "number" : "text";
       if(f.kind==="number"){target.step="any";if(f.constraints?.minimum!=null)target.min=f.constraints.minimum;if(f.constraints?.maximum!=null)target.max=f.constraints.maximum;}
     }
-    targetWrap.append(label("窗末目标值"+(f.unit ? "（"+f.unit+"）" : ""),target));
+    targetWrap.append(label((opening?"开局初值":"窗末目标值")+(f.unit ? "（"+f.unit+"）" : ""),target));
     if(f.constraints?.allow_unknown!==false){
       unknown=h("input");unknown.type="checkbox";const line=h("label",null,"check");
       line.append(unknown,document.createTextNode("明确设为未知"));unknown.onchange=()=>{target.disabled=unknown.checked;};targetWrap.append(line);
     }
   }
-  field.onchange=redraw;redraw();
+  field.onchange=redraw;options();redraw();
   node.append(label(optional ? "预定字段值（可选）" : "要改变的字段",field),targetWrap);
-  return {node,count:fields.length, selected:()=>field.value==="" || unknown?.checked ? null : fields[Number(field.value)],set(value){
+  return {node,count:fields.length,openingCount:all.length,setOpening(value){
+    if(value!==opening){opening=value;options();redraw();}
+  },selected:()=>field.value==="" || unknown?.checked ? null : fields[Number(field.value)],set(value){
     if(!value)return;
     const index=fields.findIndex(f=>f.actor===value.entity_id && f.id===value.field_id);
     if(index<0)return;field.value=String(index);redraw();

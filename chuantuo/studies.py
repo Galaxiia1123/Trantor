@@ -32,7 +32,7 @@ class StudyRequest(Record):
             raise ValueError("延长观察请从已结束的单条路线启动")
         if self.additional_values:
             first=self.experiment.assignment
-            if self.experiment.kind!="field" or first is None or type(first.value) not in (int,float):
+            if self.experiment.kind not in {"field","opening"} or first is None or type(first.value) not in (int,float):
                 raise ValueError("多档实验需要选择同一个数值字段和第一个目标值")
             if self.experiment.condition.strip():
                 raise ValueError("多档实验沿用相同的通知方式，请在字段中设定值并留空自定义条件说明")
