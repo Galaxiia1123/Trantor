@@ -1,5 +1,7 @@
 # Trantor
 
+> **本项目仍处于初步开发阶段。**
+
 Trantor（川陀）是一个在本机运行的 AI 沙盘。输入背景或导入 Markdown 文稿，审阅参与者、关系和假设，即可推演。主体可以跨层级沟通，各自决定如何回应。每个时间窗口结束时，世界系统统一审查后果。回看一次变化，可以查到对应的行动原文、当时的可见信息和产生结果的提交记录。
 
 ![川陀场景准备页](docs/workbench-v1.1.png)
@@ -65,36 +67,3 @@ python3.12 -m venv .venv
 - 仅为需要的公开事实发起检索，可在“准备选项”里关闭。网页检索使用公开索引发现候选，读取公共 HTTPS 原页正文。文献使用 Crossref，已知 DOI 可直接核对登记信息。公开服务的可用性、覆盖和时间信息会影响能采用的资料。可通过环境变量 `CHUANTUO_SEARCH_ENDPOINT` 指向自己的 SearXNG JSON 搜索端点。检索过程和未采用的候选保存在准备记录中。[Crossref REST API](https://www.crossref.org/documentation/retrieve-metadata/rest-api/)
 - 采用外部事实需要查询、来源、适用时间的判断、实际引文以及对应的场景定义。未能核对的内容保留为缺失或模拟假设。每次最多发出四条公开查询。外部检索会发送模型提取的检索词，处理敏感或纯虚构场景时可以关闭。
 - 入口支持 Markdown、文本、DOCX、PDF；V1.1 整理使用导入后提取的文字。PDF 可逐页提取或 OCR，复杂图表的视觉语义需要用户补充。长文在上下文允许的范围内分批选取逐字引文，原件及页码保存在本机。
-
-## 引擎与记录
-
-一个显式主体对应一个 Concordia Agent。主体可以直接归属上级，内部互动容器需要至少两个主体及明确的互动用途。归属关系与有向影响关系分别保存。每条关系用文字说明影响渠道和适用条件，修改后可在项目版本中核对前后描述及依据。
-
-引擎先冻结本轮观察，等所有主体作出决定后再投递消息，每窗统一结算一次。世界只可审查已定义的字段，变更须通过类型、约束、窗口行动和直接关系检查。状态文字与展开的数值来自同一份提交。未知值和未定义字段分别处理。
-
-世界提案被拒时，错误会指出具体受影响字段和不一致的行动编号。若该窗全部行动、观察与投递均已通过重放检查，显式重试复用这批行动，只重新请求世界结算。未完成的主体批次从此前的提交重新开始。
-
-长期记忆保留近期原文、较早记录的短摘、持续事项及少量相关记录。未完成事项包括条件和期限。主体在正常决定中更新事项，检索和摘录在本机完成。世界保留当前状态和按方案选定的近期后果。运行日志独立保留，可从提交边界恢复。模型输入达到限额会明确失败，公开服务未提供的 token 用量显示为未回报。
-
-默认资料目录 `runs/` 包含项目版本、导入原件、运行记录、任务凭据和模型设置。全局观察者可读取各方私有记录，导出完整记录前应核对分享范围。旧项目和旧运行保留原始语义，旧版工具可从“项目与记录”打开。
-
-## 核验
-
-```powershell
-.\.venv\Scripts\python -m pip install -e ".[test,browser,benchmark]"
-.\.venv\Scripts\python -m pytest -q
-node --test tests/test_definition.js
-.\.venv\Scripts\python scripts/browser_v11.py
-.\.venv\Scripts\python scripts/measure_v11_memory.py
-.\.venv\Scripts\python scripts/verify_install.py --browser
-```
-
-浏览器验收默认使用 Windows 的 Microsoft Edge。其他平台可安装 Playwright Chromium 并传入 `--channel chromium`。浏览器测试启动隔离的工作台和预设响应的本地 HTTP 接口。记忆测量用同一份输入输出记录和明确的参考分词器。实际提供商用量以其回执为准。
-
-仓库附带 Windows 的 GitHub Actions 检查配置，覆盖核心测试和两个工作台的浏览器验收。手动触发时会额外构建 wheel 并在独立安装环境中验证。工作流不需要真实模型密钥。
-
-可执行 `python -m chuantuo verify <运行目录>` 只读核验日志。命令行 `run` 支持两代 JSON 配置，`demo` 和 `example` 复现早期脚本案例。v1.1 的潮汐港文稿可直接导入。[案例文稿](chuantuo/templates/tidal-port.md)
-
-`python scripts/audit_v11.py <运行目录>` 会核对 v1.1 的保密原文何时进入各主体输入、实际投递是否符合收件权限，以及接口回报的调用数和 token。审计使用完整日志，无需再发模型请求。
-
-产品边界与验收要求见 [v1.1 需求](docs/PRD-v1.1.md)，原始设定见 [v1.0 原文](docs/PRD-v1.0.md)。已验证的范围、测量口径与限制见 [v1.1 验收记录](docs/v1.1-validation.md)。
