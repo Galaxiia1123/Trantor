@@ -53,8 +53,8 @@ def branch_payload(simulation, window, title):
     assumptions = [*scene.assumptions, f"初始状态取自运行 {simulation.run_id} 的窗口 {window}。新主体从空白记忆开始，历史收件和承诺可由用户另行定义。"]
     revised = scene.model_copy(update={"title":label,"entities":entities,"sources":[*scene.sources,material],"assumptions":assumptions})
     if isinstance(revised,Scenario11):
-        revised = revised.model_copy(update={"rules":[rule.model_copy(update={"active_from":max(1,rule.active_from-window)})
-                                                     for rule in revised.rules]})
+        revised = revised.model_copy(update={"rules":[rule.model_copy(update={"active_from":max(1,rule.active_from-window)}) for rule in revised.rules],
+            "scheduled_events":[event.model_copy(update={"window":event.window-window}) for event in revised.scheduled_events if event.window>window]})
     return {"scenario":revised.model_dump(mode="json"), "config":simulation.config.model_dump(mode="json"),
             "preparation_records":[], "assistant":{}}
 

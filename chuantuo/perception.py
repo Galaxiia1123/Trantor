@@ -58,6 +58,9 @@ class Perception:
         self.config = config
         self.delivery_limits = scenario.delivery_limits() if isinstance(scenario,Scenario11) else {}
         self.actors = {actor.id: actor for actor in scenario.entities}
+        self.calendar=defaultdict(list)
+        for event in getattr(scenario,"scheduled_events",()):
+            self.calendar[event.window].append(event)
         self.order = {actor_id: index for index, actor_id in enumerate(self.actors)}
         self.systems = {system.id: system for system in scenario.subsystems}
         self.contacts = {key: {key} for key in self.actors}
@@ -94,7 +97,7 @@ class Perception:
                         granted[viewer].append(entry)
         return public, granted
 
-    def observe(self, actor_id, state, inbox, window, turn, feedback):
+    def observe(self, actor_id, state, inbox, window, turn, feedback, external=()):
         actor = self.actors[actor_id]
         fields, materials = {}, []
         for _, owner, field in merge(self.public_fields, self.granted_fields[actor_id]):
@@ -135,6 +138,17 @@ class Perception:
         if self.config.roster_policy == "neighbors":
             result["roster_scope"] = {"mode":"neighbors","total":len(self.actors),"included":len(roster),
                 "note":"此表仅列与本主体有关的层级、直接关系、可见资料和收件来源。其他已知主体仍可作为定向收件人。"}
+        if turn==1:
+            notices=[]
+            for event in external:
+                data=event["data"]
+                scope=data["visibility"]
+                if scope["public"] or actor_id in scope["readers"]:
+                    notice={"record":event["id"],"text":data["text"]}
+                    visible_assignments=[effect for effect in data["assignments"] if effect["field_id"] in fields.get(effect["entity_id"],{})]
+                    if visible_assignments: notice["at_settlement"]=deepcopy(visible_assignments)
+                    notices.append(notice)
+            if notices: result["external_events"]=notices
         if feedback:
             changes = [{k:change[k] for k in ("entity_id","field_id","before","after")}
                        for change in feedback["changes"] if change["field_id"] in fields.get(change["entity_id"],{})]

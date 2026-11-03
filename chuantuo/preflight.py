@@ -13,13 +13,14 @@ def preflight(scene, config, depths):
     world_id = config.model_id("world")
     state = scene.initial_state()
     perception = Perception(scene, depths, config)
+    opening_events=[{"id":f"e{i:06d}","data":event.model_dump(mode="json")} for i,event in enumerate(perception.calendar.get(1,()),2)]
     calls = Counter({world_id:config.windows})
     blockers = []
     largest = {"actor_id":None,"chars":0}
     for actor in scene.entities:
         key = config.model_id("actor", depths[actor.id])
         calls[key] += config.rounds_per_window * config.windows
-        observation = perception.observe(actor.id,state,[],1,1,None)
+        observation = perception.observe(actor.id,state,[],1,1,None,opening_events)
         payload = {"task":"agent","actor_id":actor.id,"window":1,"round":1,"observation":observation,
                    "memory":[{"kind":"observation","text":encode(observation)}]}
         limit = catalog[key].context_limit_chars
@@ -43,7 +44,7 @@ def preflight(scene, config, depths):
              "history":[],"response_schema":Settlement.model_json_schema()}
     world_floor = len(WORLD_SYSTEM) + len(encode(world))
     if isinstance(config, RunConfig11):
-        world = objective_input(scene, config, state, [], [], 1, Settlement.model_json_schema())
+        world = objective_input(scene,config,state,[],[],1,Settlement.model_json_schema(),opening_events)
         world_floor = len(WORLD_INSTRUCTION) + len(encode(world))
     world_limit = catalog[world_id].context_limit_chars
     if world_floor > world_limit:

@@ -51,7 +51,10 @@ class Notebook:
         self.sharing = {}
         self.older = deque(maxlen=4)
 
-    def record(self, action, record_id, window, inbox, recent_count):
+    def record(self, action, record_id, window, inbox, recent_count, notices=()):
+        for notice in notices:
+            self._add({"id":notice["record"],"window":window,"kind":"external_event","text":notice["text"],
+                       **({"at_settlement":notice["at_settlement"]} if notice.get("at_settlement") else {})},recent_count)
         for message in inbox:
             self.sharing.update(message.get("sharing", {}))
             self._add({"id": message["action_id"], "window": window, "from": message["from"], "text": message["text"]}, recent_count)
@@ -122,8 +125,8 @@ class Notebook:
         return payload
 
 
-def objective_input(scene, config, state, actions, history, window, schema):
-    definitions = scene.model_dump(mode="json", exclude={"sources"}, exclude_defaults=True)
+def objective_input(scene, config, state, actions, history, window, schema, receipts=()):
+    definitions = scene.model_dump(mode="json", exclude={"sources","scheduled_events"}, exclude_defaults=True)
     if "rules" in definitions:
         definitions["rules"] = [rule for rule in definitions["rules"] if rule.get("active_from", 1) <= window]
     for actor in definitions["entities"]:
@@ -136,7 +139,10 @@ def objective_input(scene, config, state, actions, history, window, schema):
     for edge in scene.influences:
         if edge.source in owned:
             allowed.setdefault(edge.target,{})[edge.source] = owned[edge.source]
-    return {"task": "world", "window": window, "window_duration": config.window_duration, "scenario": definitions,
+    result={"task": "world", "window": window, "window_duration": config.window_duration, "scenario": definitions,
             "allowed_direct_actions":allowed,
             "state": state, "actions": [{k: a[k] for k in ("id","actor_id","round","text","messages")} for a in actions],
             "history": history[-config.history_windows:], "response_schema": schema}
+    if receipts:
+        result["external_events"]=[{"record":e["id"],"text":e["data"]["text"],"assignments":e["data"]["assignments"]} for e in receipts]
+    return result

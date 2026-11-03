@@ -85,7 +85,7 @@ function experimentForm(view) {
 }
 
 const experimentKind = meta => meta.kind==="repeat" ? "原样重跑" : "条件实验";
-const wakeText = reason => ({message:"收到定向消息，重新判断。",visible_change:"可见处境发生变化，重新判断。",due:"到达复看窗口或事项期限，重新判断。"}[reason] || "主体重新判断。");
+const wakeText = reason => ({message:"收到定向消息，重新判断。",external_event:"收到外部事件通知，重新判断。",visible_change:"可见处境发生变化，重新判断。",due:"到达复看窗口或事项期限，重新判断。"}[reason] || "主体重新判断。");
 
 async function experimentShelf(parent) {
   const body=h("div"), select=h("select"), content=h("div"), description=h("p","按同一分岔点、终点、条件和知情范围分组。次数只计入已走到终点的路线。","hint");

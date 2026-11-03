@@ -44,6 +44,8 @@ class ReviewPlan:
     def wake_reason(self, observation):
         if observation.get("messages"):
             return "message"
+        if observation.get("external_events"):
+            return "external_event"
         if situation(observation)!=self.fingerprint:
             return "visible_change"
         if observation["window"]>=self.review_at:

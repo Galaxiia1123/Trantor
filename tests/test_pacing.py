@@ -66,3 +66,41 @@ def test_wait_wakes_only_for_visible_change_delivery_deadline_or_review_and_surv
     fork=fork_experiment(restored,ExperimentRequest(window=1,through=3,kind="repeat"),"c"*12,None,tmp_path/"fork")
     assert fork.run()["status"]=="completed" and fork.state==strict.state
     assert Simulation.restore(tmp_path/"fork",gateway).snapshot()["deferred_reviews"]==5
+
+
+def test_hidden_scheduled_value_settles_without_an_action_and_survives_frozen_retry(tmp_path):
+    scene=Scenario11.model_validate({"title":"时段","background":"双方独立决定。","domains":["场地"],
+        "entities":[{"id":"a","name":"管理员","identity":"管理场地","fields":[{"id":"quota","domain":"场地","kind":"number","value":90}]},
+                    {"id":"b","name":"访客","identity":"预约"}],
+        "scheduled_events":[{"id":"limit","window":2,"text":"内部风阀计划已切换。","assignments":[{"entity_id":"a","field_id":"quota","value":30}]},
+                            {"id":"invite","window":4,"text":"私下会面通知给访客。","visibility":{"readers":["b"]}}]})
+    cfg=RunConfig11.model_validate({"windows":4,"rounds_per_window":1,"max_review_interval":4,"model":{"provider":"demo","model":"explicit-test"}})
+    class Gateway:
+        fail=True
+        def complete(self,config,messages):
+            d=json.loads(messages[-1]["content"])
+            if d["task"]=="agent":
+                assert "内部风阀计划" not in str(d)
+                if d["actor_id"]=="a" or d["window"]<4: assert "私下会面通知" not in str(d)
+                return '{"text":"等候进展。","review_at":8}'
+            if self.fail and d["window"]==2:
+                self.fail=False
+                raise ModelError("结算暂不可用")
+            effects=[s for e in d.get("external_events",[]) for s in e["assignments"]]
+            review={"entity_id":"a","field_id":"quota","before":d["state"]["a"]["quota"],"after":d["state"]["a"]["quota"],"reason":"保持原值。"}
+            return json.dumps({"reviews":[] if effects else [review],"consequences":[]})
+    g=Gateway()
+    sim=Simulation(scene,cfg,g,tmp_path/"external")
+    assert sim.run()["status"]=="failed"
+    sim=Simulation.restore(tmp_path/"external",g);sim.recover()
+    assert sim.run()["status"]=="completed"
+    notices=sim.journal.snapshot({"external_event"})
+    change=sim.journal.settlement(2)["data"]["changes"][0]
+    assert len(notices)==2 and change["event_ids"]==[notices[0]["id"]] and not change["action_ids"] and change["after"]==30
+    assert not sim.journal.decision_context("b",2,1,sim._discarded)["observation"].get("external_events")
+    wake=sim.journal.decision_context("b",4,1,sim._discarded)
+    assert wake["resumed_plan"]["reason"]=="external_event" and wake["observation"]["external_events"][0]["record"]==notices[1]["id"]
+    assert Simulation.restore(tmp_path/"external",g).state==sim.state
+    altered=sim.journal.selected(transport_details=False)
+    next(e for e in altered if e["kind"]=="external_event")["data"]["assignments"][0]["value"]=99
+    with pytest.raises(ValueError,match="外部事件"):verify_commits(scene,cfg,altered)

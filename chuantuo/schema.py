@@ -216,6 +216,21 @@ class ScopedRule(Rule):
     active_from: int = Field(default=1, ge=1)
 
 
+class ScheduledValue(Record):
+    entity_id: Identifier
+    field_id: Identifier
+    value: Value
+
+
+class ScheduledEvent(Record):
+    id: Identifier
+    window: int = Field(ge=1,strict=True)
+    text: str = Field(min_length=1,max_length=1600,pattern=r"\S")
+    visibility: Visibility = Field(default_factory=Visibility)
+    assignments: list[ScheduledValue] = Field(default_factory=list,max_length=64)
+    provenance: Provenance = Field(default_factory=Provenance)
+
+
 class Scenario(Record):
     title: str
     background: str
@@ -262,7 +277,7 @@ class Scenario(Record):
                 raise ValueError("AI 估计的权重必须包含理由")
         if len({(e.source, e.target) for e in self.influences}) != len(self.influences):
             raise ValueError("同一有向边重复；反向边可以独立配置")
-        for obj in [*self.entities, *self.influences, *self.rules, *[f for a in self.entities for f in [*a.fields, *a.materials]],
+        for obj in [*self.entities, *self.influences, *self.rules, *getattr(self,"scheduled_events",[]), *[f for a in self.entities for f in [*a.fields, *a.materials]],
                     *(m.sharing for a in self.entities for m in a.materials if m.sharing)]:
             if not set(obj.provenance.source_ids) <= source_ids:
                 raise ValueError("来源引用不存在")
@@ -324,6 +339,31 @@ class Scenario11(Scenario):
     format_version: Literal["1.1"] = "1.1"
     influences: list[Relation] = Field(default_factory=list)
     rules: list[ScopedRule] = Field(default_factory=list)
+    scheduled_events: list[ScheduledEvent] = Field(default_factory=list,max_length=256)
+
+    @model_validator(mode="after")
+    def validate_calendar(self):
+        actors={a.id for a in self.entities}
+        fields={(a.id,f.id):f for a in self.entities for f in a.fields}
+        seen=set()
+        if len({s.id for s in self.scheduled_events})!=len(self.scheduled_events):
+            raise ValueError("每个预定外部事件需要独立编号")
+        for event in self.scheduled_events:
+            if not set(event.visibility.readers)<=actors:
+                raise ValueError("外部事件的知情范围包含不存在的主体")
+            if event.assignments and event.provenance.kind not in {"user","material"}:
+                raise ValueError("预定字段值必须来自用户设定或可核对的材料")
+            if event.assignments and event.provenance.kind=="material" and not event.provenance.quotes:
+                raise ValueError("文稿预定的字段变更需引用原文")
+            for effect in event.assignments:
+                field=fields.get((effect.entity_id,effect.field_id))
+                if not field or not field.permits(effect.value) or (field.constraints and field.constraints.fixed and effect.value!=field.value):
+                    raise ValueError(f"外部事件 {event.id} 的字段不存在、越界或与固定值冲突")
+                key=(event.window,effect.entity_id,effect.field_id)
+                if key in seen:
+                    raise ValueError("同一窗口的同一字段不能接受两次预定赋值")
+                seen.add(key)
+        return self
 
     def public_amounts(self):
         return {v for a in self.entities for f in a.fields if f.kind=="number" and f.value is not None and f.visibility.public
@@ -371,6 +411,9 @@ class Scenario11(Scenario):
         public_amounts = self.public_amounts()
         self.delivery_limits()
         private = {}
+        for event in self.scheduled_events:
+            if not event.visibility.public and len(event.text.strip())>=8:
+                private.setdefault(event.text.strip(),set()).update(event.visibility.readers)
         for actor in self.entities:
             for field in actor.fields:
                 if not field.visibility.public and isinstance(field.value,str):
@@ -400,6 +443,13 @@ class Scenario11(Scenario):
             if not set(rule.visibility.readers) <= actor_ids:
                 raise ValueError("规则的知情名单包含不存在的主体")
             check(rule.text, actor_ids if rule.visibility.public else set(rule.visibility.readers), f"第{index}条规则")
+        fields={(a.id,f.id):f for a in self.entities for f in a.fields}
+        for event in self.scheduled_events:
+            check(event.text,actor_ids if event.visibility.public else set(event.visibility.readers),"外部事件通知")
+            for effect in event.assignments:
+                field=fields.get((effect.entity_id,effect.field_id))
+                if field and isinstance(effect.value,str):
+                    check(effect.value,actor_ids if field.visibility.public else {effect.entity_id,*field.visibility.readers},"外部事件的字段变更")
         for edge in self.influences:
             check(edge.description, {edge.source,edge.target}, "有向关系描述")
         for actor in self.entities:
@@ -546,12 +596,14 @@ class FieldReview(Record):
     after: Value
     reason: str = Field(min_length=1)
     action_ids: list[str] = Field(default_factory=list)
+    event_ids: list[str] = Field(default_factory=list)
     influence_refs: list[InfluenceReference] = Field(default_factory=list)
 
 
 class Consequence(Record):
     text: str
     action_ids: list[str] = Field(default_factory=list)
+    event_ids: list[str] = Field(default_factory=list)
 
 
 class Settlement(Record):

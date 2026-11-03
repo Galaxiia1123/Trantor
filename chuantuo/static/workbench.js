@@ -52,6 +52,8 @@ let profile, sources = [], draft, project, activeRun, example, timer, routeGener
 let selectedWindow = null, eventLimit = 100, lastView = "", reportsSignature = "";
 let actorLimit = 8, watchRequest = 0;
 const playbacks = new Map();
+let sampleCatalog=[{id:"tidal",title:"潮汐港 · 跨层协商 · 9 窗",replay:"case"}];
+const loadedSamples=new Map();
 const playback = () => ["case","recording"].includes(activeRun);
 let extraAnswers = "", overrides = {}, currentStateWindow = 0;
 let requestedWindows = 40, historyThrough = -1;
@@ -61,7 +63,7 @@ let libraryLimits = {projects:20,runs:20};
 const readingTrail = [];
 let readingRequest = 0;
 function persistSeed() {
-  const refs = sources.map(s => s.asset_id ? {asset_id:s.asset_id} : s.id === "tidal_brief" ? {case:true} : s);
+  const refs = sources.map(s => s.asset_id ? {asset_id:s.asset_id} : loadedSamples.get(s.id)?.text===s.text ? {sample:loadedSamples.get(s.id).key} : s);
   try { keep("seed", {background:$("brief").value, sources:refs, allow_search:$("allow-search").checked}); }
   catch { notice("本次输入超过浏览器暂存空间，整理并保存项目后即可重新打开。"); }
 }
@@ -136,13 +138,17 @@ $("material").onchange = safe(async () => {
   } finally { $("prepare").disabled = busy; }
 });
 $("use-case").onclick = safe(async () => {
-  const rehearsal=$("sample-material").value==="rehearsal",item=await api(rehearsal ? "/api/case/rehearsal" : "/api/case");
-  const source={id:rehearsal ? "rehearsal_brief" : "tidal_brief",name:item.name,text:item.text};
-  sources=sources.filter(s=>!["rehearsal_brief","tidal_brief"].includes(s.id));sources.push(source);
-  showFiles(); persistSeed(); notice("已加入"+(rehearsal ? "排练室" : "潮汐港")+"文稿，可直接整理。");
+  const key=$("sample-material").value, source=await api("/api/case/materials/"+encodeURIComponent(key));
+  sources=sources.filter(s=>!(loadedSamples.get(s.id)?.text===s.text || s.id===source.id));sources.push(source);
+  loadedSamples.set(source.id,{key,text:source.text});showFiles();persistSeed();notice("已加入案例文稿，可直接整理。");
 });
-$("sample-material").onchange=()=>{$("read-case").hidden=$("sample-material").value!=="tidal";};
-$("read-case").onclick = () => { location.hash = "case"; };
+$("sample-material").onchange=()=>{const sample=sampleCatalog.find(s=>s.id===$("sample-material").value);$("read-case").textContent=sample?.replay ? "看案例回放" : "预览文稿";};
+$("read-case").onclick = safe(async()=>{
+  const sample=sampleCatalog.find(s=>s.id===$("sample-material").value);
+  if(sample?.replay){location.hash=sample.replay;return;}
+  const material=await api("/api/case/materials/"+encodeURIComponent($("sample-material").value));
+  reading("案例文稿",h("pre",material.text));
+});
 $("try-letter").onclick = openLetterLab;
 $("import-bundle").onchange = safe(async () => {
   const file = $("import-bundle").files[0]; if (!file) return;
@@ -393,6 +399,7 @@ function renderDraft() {
     root.append(disclosure("准备追踪的问题（"+selected.length+"）",panel));
   }
   root.append(disclosure("参与者与有向关系", relationExplorer(scene)));
+  root.append(disclosure("外部事件（"+(scene.scheduled_events || []).length+"）",draftCalendar(scene)));
   if (scene.assumptions.length || scene.missing_information.length) root.append(disclosure("假设与缺项（" + (scene.assumptions.length + scene.missing_information.length) + "）", bullets([...scene.assumptions,...scene.missing_information])));
   const check = record.source_reconciliation || {};
   const suggestions = (check.suggested_fields || []).filter(s => !s.adopted);
@@ -519,15 +526,15 @@ async function evidence(id, sourceRun = activeRun) {
   if (ticket !== readingRequest || run !== activeRun) return;
   if (!item) throw new Error("这份回放未收录该记录。");
   const body = h("div");
-  const data=item.data || {}, labels={expression:"主体决定",message_delivered:"定向消息",window_committed:"窗口结算",observation:"当时的观察",run_created:"开局材料"};
+  const data=item.data || {}, labels={expression:"主体决定",message_delivered:"定向消息",window_committed:"窗口结算",observation:"当时的观察",run_created:"开局材料",external_event:"预定外部事件",decision_deferred:"延续等待"};
   body.append(h("small",(item.window ? "第 "+item.window+" 窗" : "开局")+" · "+(labels[item.kind] || item.kind),"quiet"));
   if (data.text) body.append(h("p",data.text));
   if (item.kind==="message_delivered") body.append(h("p",data.from+" → "+data.to),h("small","对应行动","quiet"),evidenceLinks([data.action_id],sourceRun));
   if (item.kind==="expression" && !playback() && item.commit_status==="committed")
     body.append(button("查看作出决定时的可见信息",()=>openActorContext({id:data.actor_id,name:data.actor_id},item.window,data.round,false,sourceRun),"link"));
   if (item.kind==="window_committed") {
-    for (const c of data.consequences || []) body.append(h("p",c.text),evidenceLinks(c.action_ids,sourceRun));
-    for (const r of data.reviews || []) body.append(h("p",r.entity_id+" · "+r.field_id+"　"+(r.before??"未知")+" → "+(r.after??"未知")),h("small",r.reason,"quiet"),evidenceLinks(r.action_ids,sourceRun));
+    for (const c of data.consequences || []) body.append(h("p",c.text),evidenceLinks([...(c.event_ids||[]),...(c.action_ids||[])],sourceRun));
+    for (const r of data.reviews || []) body.append(h("p",r.entity_id+" · "+r.field_id+"　"+(r.before??"未知")+" → "+(r.after??"未知")),h("small",r.reason,"quiet"),evidenceLinks([...(r.event_ids||[]),...(r.action_ids||[])],sourceRun));
   }
   if (item.kind==="run_created" && data.scenario) body.append(h("h3",data.scenario.title),h("p",data.scenario.background));
   body.append(disclosure("完整记录数据",h("pre",json(item.data || item))));
@@ -579,6 +586,10 @@ async function openActorContext(actor, window, turn, replace = false, run = acti
   if(view.messages?.length) {
     body.append(h("h3","本轮收到的消息"));
     view.messages.forEach(m=>body.append(h("p",m.from+" → "+m.to+"　"+m.text),evidenceLinks([m.action_id],run)));
+  }
+  if(view.external_events?.length) {
+    body.append(h("h3","本轮收到的外部通知"));
+    for(const event of view.external_events)body.append(h("p",event.text),...(event.at_settlement||[]).map(s=>h("small","窗末预定值："+s.entity_id+" · "+s.field_id+" → "+(s.value??"未知"),"quiet")));
   }
   if(memory?.open_matters) {
     body.append(h("h3","持续事项")); const items=Object.values(memory.open_matters);
@@ -688,14 +699,16 @@ function renderWindow(view) {
       row.append(h("span",(names[data.actor_id]||data.actor_id)+" · 延续等待"+phase,"type"),
         h("p","沿用此前决定，本轮没有新发言或投递。"),evidenceLinks([data.plan_record]));
     }
-    else if (e.kind === "window_committed") {
+    else if(e.kind==="external_event") {
+      row.append(h("span","外部事件"+phase,"type"),h("p",data.text),h("small",eventAudience(data,view.actors),"quiet"));
+    } else if (e.kind === "window_committed") {
       row.append(h("strong","世界结算"));
-      for (const c of data.consequences || []) row.append(h("p", c.text), evidenceLinks(c.action_ids));
+      for (const c of data.consequences || []) row.append(h("p", c.text), evidenceLinks([...(c.event_ids||[]),...c.action_ids]));
       for (const c of data.changes || []) {
         const field = view.actors.find(a => a.id === c.entity_id)?.fields[c.field_id];
         const value = v => v === null ? "未知" : String(v) + (field?.unit || "");
         row.append(h("p", (names[c.entity_id] || c.entity_id) + "的" + (field?.label || c.field_id) + "从“" + value(c.before) + "”变为“" + value(c.after) + "”。"));
-        if (!(data.consequences || []).some(item => item.text === c.reason)) row.append(h("p",c.reason), evidenceLinks(c.action_ids));
+        if (!(data.consequences || []).some(item => item.text === c.reason)) row.append(h("p",c.reason), evidenceLinks([...(c.event_ids||[]),...c.action_ids]));
       }
       if (!data.consequences?.length && !data.changes?.length) row.append(h("p","本窗口已结算，已定义字段保持原值。"));
       if (data.suggested_fields?.length) {
@@ -910,6 +923,7 @@ async function route() {
     $("brief").value = seed.background || ""; $("allow-search").checked = seed.allow_search !== false;
     const loaded = await Promise.allSettled((seed.sources || []).map(async s => {
       if (s.asset_id) return (await api("/api/materials/" + encodeURIComponent(s.asset_id))).source;
+      if (s.sample) {const item=await api("/api/case/materials/"+encodeURIComponent(s.sample));loadedSamples.set(item.id,{key:s.sample,text:item.text});return item;}
       if (s.case) { const v = await api("/api/case"); return {id:"tidal_brief",name:v.name,text:v.text}; }
       return s;
     }));
@@ -921,6 +935,8 @@ async function route() {
 }
 window.addEventListener("hashchange", safe(route));
 safe(async () => {
+  const catalog=await api("/api/case/materials");sampleCatalog=catalog;
+  $("sample-material").replaceChildren(...catalog.map(s=>new Option(s.title,s.id)));
   profile = await api("/api/model"); showProfile(); await route();
   $("retry-panel").hidden = !local("failed-prepare");
   const pending = local("job");

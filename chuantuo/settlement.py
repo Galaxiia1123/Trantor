@@ -10,7 +10,36 @@ from .perception import Perception
 from .pacing import ReviewPlan, revised_deadlines
 
 
-def settled_state(scenario, state, proposal, action_ids, action_owners=None):
+def scheduled_reviews(state, receipts):
+    rows={}
+    for event in receipts:
+        for effect in event["data"]["assignments"]:
+            owner,field=effect["entity_id"],effect["field_id"]
+            rows[owner,field]=FieldReview(entity_id=owner,field_id=field,before=state[owner][field],after=effect["value"],
+                reason="按本窗外部事件的预定值结算："+event["data"]["text"],event_ids=[event["id"]])
+    return rows
+
+
+def complete_scheduled_reviews(state, proposal, receipts):
+    forced=scheduled_reviews(state,receipts)
+    if not forced:
+        return proposal
+    ordinary=[]
+    included=set()
+    for review in proposal.reviews:
+        key=review.entity_id,review.field_id
+        required=forced.get(key)
+        if required is None:
+            ordinary.append(review)
+        else:
+            if (key in included or not _same(review.before,required.before) or not _same(review.after,required.after) or
+                review.action_ids or review.influence_refs or review.event_ids not in ([],required.event_ids)):
+                raise ValueError(f"字段 {key[0]}.{key[1]} 已有明确的外部事件设定，请省略该条审查并由引擎按预定值结算")
+            included.add(key)
+    return proposal.model_copy(update={"reviews":[*ordinary,*forced.values()]})
+
+
+def settled_state(scenario, state, proposal, action_ids, action_owners=None, receipts=()):
     definitions = {(a.id, f.id): f for a in scenario.entities for f in a.fields}
     reviews = {(r.entity_id, r.field_id): r for r in proposal.reviews}
     if len(reviews) != len(proposal.reviews) or reviews.keys() != definitions.keys():
@@ -18,6 +47,8 @@ def settled_state(scenario, state, proposal, action_ids, action_owners=None):
     next_state = deepcopy(state)
     edges = {(e.source,e.target) for e in scenario.influences}
     limits = scenario.delivery_limits() if isinstance(scenario,Scenario11) else {}
+    forced=scheduled_reviews(state,receipts)
+    event_ids={event["id"] for event in receipts}
     changes = []
     for key, review in reviews.items():
         actor_id, field_id = key
@@ -35,6 +66,10 @@ def settled_state(scenario, state, proposal, action_ids, action_owners=None):
                 raise ValueError(f"字段 {actor_id}.{field_id} 的新值含有超出该字段读者范围的保密短语")
         if not set(review.action_ids) <= action_ids:
             raise ValueError("结算引用了本窗口之外的行动")
+        if not set(review.event_ids)<=event_ids:
+            raise ValueError("结算引用了未在本窗口发生的外部事件")
+        if key in forced and review!=forced[key]:
+            raise ValueError(f"字段 {actor_id}.{field_id} 与本窗明确的外部设定不符")
         for ref in review.influence_refs:
             location = f"直接影响引用 {actor_id}.{field_id}（{ref.source} → {ref.target}）"
             if (ref.source,ref.target) not in edges or ref.target != actor_id:
@@ -47,12 +82,14 @@ def settled_state(scenario, state, proposal, action_ids, action_owners=None):
             if not action_owners or any(action_owners.get(eid) != ref.source for eid in ref.action_ids):
                 raise ValueError(f"{location} 只可引用源主体 {ref.source} 在本窗口亲自发出的行动")
         if before != review.after:
-            if not review.action_ids:
+            if not review.action_ids and key not in forced:
                 raise ValueError("状态变更必须关联窗口行动")
             next_state[actor_id][field_id] = review.after
             changes.append(review.model_dump(mode="json"))
     if any(not set(item.action_ids) <= action_ids for item in proposal.consequences):
         raise ValueError("客观后果引用不存在的行动")
+    if any(not set(item.event_ids)<=event_ids for item in proposal.consequences):
+        raise ValueError("客观后果引用了未在本窗口发生的外部事件")
     return next_state, changes
 
 
@@ -76,7 +113,7 @@ def verify_commits(scenario, config, events):
             last_commit_index = index
         elif e["kind"] == "run_recovered":
             candidates = {prior["id"] for prior in events[last_commit_index + 1:index]
-                          if prior["kind"] in {"observation","expression","decision_deferred","message_delivered","model_input","model_output","model_validation_error","model_failure"}}
+                          if prior["kind"] in {"observation","expression","decision_deferred","external_event","message_delivered","model_input","model_output","model_validation_error","model_failure"}}
             dropped = set(e["data"]["discarded_event_ids"])
             if not dropped <= candidates or discarded & dropped:
                 raise ValueError(f"恢复记录 {e['id']} 引用了当前未提交尝试之外的事件")
@@ -92,15 +129,24 @@ def verify_commits(scenario, config, events):
     acted_per_round = Counter()
     total_actions = total_messages = total_deferred = 0
     plans, visible_at_round, deadlines = {}, {}, {}
+    receipts=[]
     expected_actions = len(actors) * config.rounds_per_window
     for event in events:
         if event["id"] in discarded:
             continue
         kind, data = event["kind"], event["data"]
-        if kind not in {"expression","decision_deferred","observation","message_delivered","window_committed"}:
+        if kind not in {"expression","decision_deferred","external_event","observation","message_delivered","window_committed"}:
             continue
         if event["window"] != last_window + 1:
             raise ValueError(f"事件 {event['id']} 的窗口与提交边界不一致")
+        scheduled=perception.calendar.get(event["window"],()) if perception else ()
+        if kind=="external_event":
+            if observations or len(receipts)>=len(scheduled) or not _same(data,scheduled[len(receipts)].model_dump(mode="json")):
+                raise ValueError("外部事件与场景设定、顺序或生效窗口不一致")
+            receipts.append(event)
+            continue
+        if len(receipts)!=len(scheduled):
+            raise ValueError("主体观察或窗口提交之前缺少预定的外部事件")
         if kind in {"expression","decision_deferred"}:
             owner = data["actor_id"]
             if owner not in actors or not 1 <= data["round"] <= config.rounds_per_window:
@@ -154,7 +200,7 @@ def verify_commits(scenario, config, events):
             turn = visible["round"]
             visible_at_round[viewer]=visible
             if perception:
-                expected = perception.observe(viewer, state, inboxes[viewer], event["window"], turn, last_feedback)
+                expected = perception.observe(viewer,state,inboxes[viewer],event["window"],turn,last_feedback,receipts)
                 if not _same(visible, expected):
                     raise ValueError(f"观察 {event['id']} 与该主体当时的完整可见范围不符")
             if (visible["window"] != event["window"] or not 1 <= turn <= config.rounds_per_window
@@ -181,7 +227,7 @@ def verify_commits(scenario, config, events):
                     or data.get("deferred_reviews",0)!=sum(schedule.values())-len(action_ids)):
                 raise ValueError(f"窗口 {event['window']} 的主体轮次或投递不完整")
             proposal = Settlement.model_validate({k: data[k] for k in ("reviews","consequences","suggested_fields")})
-            next_state, changes = settled_state(scenario, state, proposal, action_ids,action_owners)
+            next_state, changes = settled_state(scenario,state,proposal,action_ids,action_owners,receipts)
             recorded = [FieldReview.model_validate(c).model_dump(mode="json") for c in data["changes"]]
             if not _same(next_state, data["state"]) or not _same(changes, recorded):
                 raise ValueError(f"提交 {event['id']} 与字段审查重放结果不符")
@@ -199,6 +245,7 @@ def verify_commits(scenario, config, events):
             deliveries.clear()
             action_ids.clear()
             action_owners.clear()
+            receipts=[]
     outputs = verify_references(events)
     complete_pending = (len(schedule) == expected_actions and all(n == 1 for n in schedule.values())
                         and observations == schedule and deliveries == expected_messages)

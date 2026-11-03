@@ -221,6 +221,17 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
     def rehearsal_material():
         return {"name":"rehearsal-room.md","text":case_assets["rehearsal-room.md"].decode("utf-8")}
 
+    @app.get("/api/case/materials")
+    def sample_materials():
+        return [{"id":key,"title":v[1],"replay":v[2]} for key,v in material_templates.items()]
+
+    @app.get("/api/case/materials/{key}")
+    def sample_material(key:str):
+        if key not in material_templates:
+            raise FileNotFoundError("没有这份案例文稿")
+        filename,title,_=material_templates[key]
+        return {"id":key+"_brief","name":title+".md","text":case_assets[filename].decode("utf-8")}
+
     @app.post("/api/case/letter/{choice}")
     def letter_experiment(choice: Literal["notified","unseen","repeat"]):
         from .letter_case import run_example
@@ -558,8 +569,17 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
     @app.get("/api/runs/{run_id}/watch")
     def observe_window(run_id: str, window: int | None = Query(default=None,ge=0),
                        offset: int = Query(default=0,ge=0), limit: int = Query(default=100,ge=1,le=300),
-                       actor: str | None = None, kind: Literal["expression","decision_deferred","message_delivered","window_committed","settlement_rejected","model_failure"] | None = None):
+                       actor: str | None = None, kind: Literal["expression","decision_deferred","external_event","message_delivered","window_committed","settlement_rejected","model_failure"] | None = None):
         return watch_window(get_run(run_id), window, offset, limit, actor, kind)
+
+    @app.get("/api/runs/{run_id}/calendar")
+    def event_calendar(run_id:str):
+        sim=get_run(run_id)
+        with sim._lock:
+            recorded={e["data"]["id"]:e for e in sim.journal.snapshot({"external_event"}) if e["id"] not in sim._discarded}
+            return [{"event":event.model_dump(mode="json"),"record":recorded[event.id]["id"] if event.id in recorded else None,
+                     "status":"committed" if event.window<=sim.window else "pending" if event.id in recorded else "scheduled"}
+                    for event in sorted(getattr(sim._scenario,"scheduled_events",[]),key=lambda e:e.window)]
 
     @app.get("/api/runs/{run_id}/windows")
     def committed_history(run_id: str, offset: int = Query(default=0,ge=0), limit: int = Query(default=40,ge=1,le=100),
@@ -768,7 +788,11 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
     # A running service serves a matched UI/API release even when the source is edited.
     static = Path(__file__).parent / "static"
     assets = {p.name:p.read_bytes() for p in sorted(static.iterdir()) if p.is_file()}
-    case_assets = {name:(static.parent/"templates"/name).read_bytes() for name in ("tidal-port.md","rehearsal-room.md","tidal-replay.json","verified-replay.json")}
+    material_templates={"tidal":("tidal-port.md","潮汐港 · 跨层协商 · 9 窗","case"),
+                        "rehearsal":("rehearsal-room.md","北廊排练室 · 排期交换 · 3 窗",None),
+                        "roof":("roof-calendar.md","钟楼天台 · 外部事件 · 3 窗",None)}
+    asset_names=[row[0] for row in material_templates.values()]+["tidal-replay.json","verified-replay.json"]
+    case_assets = {name:(static.parent/"templates"/name).read_bytes() for name in asset_names}
     revision = hashlib.sha256(b"".join(assets.values())).hexdigest()[:12]
     build_digest = hashlib.sha256(revision.encode())
     for file in sorted(static.parent.glob("*.py")):

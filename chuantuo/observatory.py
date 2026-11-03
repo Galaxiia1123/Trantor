@@ -86,7 +86,8 @@ def observe_field(simulation, question, through=None, *, details=True):
                 if window==0 or value!=previous:
                     review=next((r for r in commit["data"]["changes"] if r["entity_id"]==actor.id and r["field_id"]==field.id),None) if commit else None
                     segments.append({"start":window,"end":window,"value":value,"numeric_text":str(value) if field.kind=="number" and value is not None else None,"record":record,"matches":hit,
-                                     "reason":review["reason"] if review else "", "actions":review["action_ids"] if review else []})
+                                     "reason":review["reason"] if review else "", "actions":review["action_ids"] if review else [],
+                                     "events":review.get("event_ids",[]) if review else []})
                 else:
                     segments[-1]["end"]=window
         terminal=simulation.status in {"completed","stopped"} and selected==latest

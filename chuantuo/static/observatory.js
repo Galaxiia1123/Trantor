@@ -34,6 +34,7 @@ function showFieldWatches(view) {
   const menu=h("div",null,"actions");head.append(h("h2","观察问题"),menu);
   if(hasFields) menu.append(button("添加关注",()=>openFieldWatch(view),"link"));
   if(view.format_version==="1.1") menu.append(button("主体持续事项",()=>openMatters(view),"link"));
+  if(view.scheduled_count)menu.append(button("外部事件日历",()=>openRunCalendar(view),"link"));
   const list=h("div",null,"watch-cards"); root.replaceChildren(head,list);
   api("/api/runs/"+run+"/watches?through="+view.settled_through).then(rows=>{
     if (!list.isConnected) return;
@@ -127,6 +128,7 @@ function showWatchTrace(root,row,run) {
       info.append(h("small",windowName(segment.start)+(segment.end===segment.start ? "" : " 至 "+windowName(segment.end)),"quiet"),
         h("strong",watchValue(segment,row.unit)));
       if (segment.reason) info.append(h("p",segment.reason));
+      if (segment.events?.length)info.append(h("small","外部事件依据","quiet"),evidenceLinks(segment.events,run));
       card.append(info,button("查看依据",()=>evidence(segment.record,run),"link"));trace.append(card);
     }
     if (row.segments.length>visible) trace.append(button("显示更早的变化",()=>{visible+=16;draw();},"link"));

@@ -24,6 +24,8 @@ def event_preview(event):
     kind = event["kind"]
     if kind == "run_created":
         row["scenario"] = {"title": data["scenario"]["title"]}
+    elif kind=="external_event":
+        row.update(text=data["text"],assignments=data["assignments"],visibility=data["visibility"],origin=data["provenance"]["kind"])
     elif kind in {"expression", "message_delivered"}:
         row.update(text=data["text"][:1400], message_count=len(data.get("messages", [])))
     elif kind == "observation":
@@ -46,7 +48,7 @@ def event_preview(event):
 
 def timeline(simulation):
     scene = simulation.scenario
-    events = simulation.journal.snapshot({"run_created","window_committed","expression","decision_deferred","message_delivered","run_recovered","provider_attempt"})
+    events = simulation.journal.snapshot({"run_created","window_committed","expression","decision_deferred","external_event","message_delivered","run_recovered","provider_attempt"})
     discarded = discarded_ids(events)
     effective = [event for event in events if event["id"] not in discarded]
     commits = [event for event in effective if event["kind"] == "window_committed"]
@@ -108,6 +110,7 @@ def watch_window(simulation, selected=None, offset=0, limit=100, actor_id=None, 
         rows, total = simulation.journal.window_rows(window,offset,limit,actor=actor_id,kind=kind)
         events = [dict(event_preview(e), commit_status=simulation.event_status(e)) for e in rows]
         return {"title":scene.title, "format_version":getattr(scene,"format_version","1.0"),
+                "scheduled_count":len(getattr(scene,"scheduled_events",[])),
                 "rounds_per_window":simulation.config.rounds_per_window,
                 "domains":scene.domains, "status":status, "selected":window, "latest":current, "settled_through":committed,
                 "state_record":state_id, "actors":actors, "events":events, "total":total, "next":offset+len(rows),
@@ -155,7 +158,7 @@ def compact(event):
         data = {key: value for key, value in data.items() if key != "raw"}
     elif event["kind"] == "observation":
         visible = data["visible"]
-        data = {"actor_id":data["actor_id"],"self":visible["self"],"round":visible["round"],
+        data = {"actor_id":data["actor_id"],"self":visible["self"],"round":visible["round"],"external_events":visible.get("external_events",[]),
                 "messages":visible.get("messages",[]),"world_feedback":visible.get("world_feedback"),
                 "visible_state":visible["visible_state"],"related_edges":visible["influences"]}
     elif event["kind"] == "window_committed":
@@ -211,7 +214,7 @@ def search_evidence(simulation, query, limit=30, actor_id=None, cutoff=None, *, 
     if actor_id is not None and actor_id not in simulation.depths:
         raise ValueError("主体不存在")
     kinds = {"observation","expression","decision_deferred","message_delivered","run_recovered"} if actor_id else {
-        "run_created","window_committed","observation","expression","decision_deferred","message_delivered","runtime_verification","run_error","run_recovered"}
+        "run_created","window_committed","observation","expression","decision_deferred","external_event","message_delivered","runtime_verification","run_error","run_recovered"}
     events = simulation.journal.private_history(actor_id,cutoff) if actor_id else simulation.journal.snapshot(kinds)
     discarded = discarded_ids(events)
     terms = set(re.findall(r"[a-z0-9_.-]+", query.lower()))
