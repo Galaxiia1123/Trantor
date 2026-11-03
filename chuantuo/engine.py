@@ -14,7 +14,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from .bridge import Memory, act_together, make_agent, resolve
-from .continuity import actor_instruction, world_instruction, Notebook, objective_input
+from .continuity import DECISION_EVIDENCE_INSTRUCTION, Notebook, actor_instruction, add_decision_inbox, objective_input, world_instruction
 from .locking import writer_lock, writer_active
 from .perception import Perception, decision_view
 from .pacing import ReviewPlan, revised_deadlines
@@ -724,9 +724,14 @@ class Simulation:
         if self._current_events:
             instruction+="\nexternal_events 是本窗实际发生的预定外部事件。assignments 指定的字段由引擎直接审查，请省略这些字段的 reviews。外部事实可用 event_ids 引用其 record，主体行动仍用 action_ids。"
         elif payload.get("calendar_window"):
-            instruction+="\n本窗没有任何日历事件生效。原材料的预计日期、历史通知或主体提及的日程不能触发本窗的预定字段变更。没有独立的本窗行动依据时保留原值。"
+            instruction+="\n本窗没有新的日历赋值。预计日期或历史通知不能触发预定赋值。其他字段仍依据原规则和本窗主体实际完成的行动独立审查。"
         if self._current_mail:
             instruction+="\nmail 中 in_transit 表示刚寄出，不能按送达结算。arrived 才是本窗实际送达。用其 record 作 event_ids 引用，用收件人本窗的决定作 action_ids 引用。每处引用都必须在 this_window_refs 的对应列表内，勿复制信里提及的旧行动编号。"
+        if self.notebooks:
+            room=self.config.model.context_limit_chars-len(instruction)-len(DECISION_EVIDENCE_INSTRUCTION)-len(encode(payload))-120
+            if room>=250:
+                add_decision_inbox(payload,self.journal,self._discarded,min(14000,room))
+                if payload.get("decision_inbox"):instruction+=DECISION_EVIDENCE_INSTRUCTION
         return self._call(self.config.model_id("world"), "world", payload,instruction,schema=Settlement)
 
     def observation(self, actor_id: str) -> dict:

@@ -23,7 +23,11 @@ WORLD_INSTRUCTION = """你负责统一窗口的客观结算。主体表达和有
 关系描述限定渠道、条件和范围，允许跨层直接影响。仅结算本窗口一次。history 是最近已提交后果，state 是当前值。
 以给定 schema 返回紧凑 JSON。审查每个已定义字段恰好一次，复制 before，遵守类型、单位和约束。改变时给出简明理由及本窗口 action_ids，
 保持原值的字段只需简述原因。字段缺项只建议新增。consequences 用简短自然语言写有依据的结果，引用对应行动。
-不替主体选择、补造许可或宣告故事结束，不复述整场过程。"""
+区分预告与实际执行。前提满足后，有权主体当场办理本方事务可构成状态依据。只要求场景明确规定的手续，不补造许可、回执或他人的同意，不决定何时结束推演。"""
+
+DECISION_EVIDENCE_INSTRUCTION = """
+decision_inbox 列出本轮行动前实际读到的来信。attest 可节选，this_window_action 的 message_index 从 0 计。
+签收证明收到该段话，内容仍是对方表述。既往来信只说明本次行动的已知前提，不能重复结算。引用当事主体本窗办理的行为使用 action_ids。"""
 
 RELATION_INSTRUCTION="""仅在字段发生变化且存在可核对的直接作用时填写 influence_refs。allowed_direct_actions 按“目标 → 可引用的源主体 → 本窗行动编号”列出合法组合。
 目标必须是该字段所属主体，源必须亲自发出所引行动，并在该条 review.action_ids 同时列出。没有合适组合时省略该项。"""
@@ -181,3 +185,30 @@ def objective_input(scene, config, state, actions, history, window, schema, rece
         result["calendar_window"]={"window":window,"effective_records":[e["id"] for e in receipts],
                                    "scope":"这是本窗实际发生的全部日历事件。未到期的计划不会在本窗结算。"}
     return result
+
+
+def add_decision_inbox(payload, journal, discarded, budget):
+    """Offer each decision a share of the available space. Existing action bodies can be referenced without resending them."""
+    actions={a["id"]:a for a in payload["actions"]}
+    mail={}
+    for a in actions.values():
+        record=journal.observation_before({"window":payload["window"],"id":a["id"],"data":a},discarded)
+        if record and (inbox:=record["data"]["visible"]["messages"]):
+            mail[a["id"]]=(record["id"],inbox)
+    selected=[]
+    for action,(observed,inbox) in mail.items():
+        allowance=budget//len(mail)
+        row={"action":action,"observation":observed,"total_read":len(inbox),"attest":[]}
+        for m in inbox:
+            local=actions.get(m["action_id"])
+            index=next((i for i,out in enumerate(local["messages"]) if m["to"] in out["recipients"] and out["text"]==m["text"]
+                        and out.get("enclosures",[])==[d["id"] for d in m.get("enclosures",())]),None) if local else None
+            item=({"from":m["from"],"this_window_action":local["id"],"message_index":index} if index is not None else
+                  {"from":m["from"],"text":m["text"][:700],**({"excerpt":True} if len(m["text"])>700 else {})})
+            if enclosed:=m.get("enclosures"):
+                item["attached"]=[d["title"] for d in enclosed]
+            row["attest"].append(item)
+            if len(json.dumps(row,ensure_ascii=False))+2>allowance:
+                row["attest"].pop();break
+        if row["attest"]:selected.append(row)
+    if selected:payload["decision_inbox"]=selected

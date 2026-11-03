@@ -377,8 +377,16 @@ def main():
                 page.get_by_role("button",name="并排读两条路线").click()
                 page.get_by_label("右侧条件路线").select_option("3")
                 expect(page.locator(".comparison-side").last).to_contain_text("2000万元")
-            assert len([task for _,task in endpoint.calls if task=="agent"]) == 180
-            assert len(endpoint.calls)==202 and {m for m,_ in endpoint.calls}=={"local-script-http"},endpoint.calls
+                page.keyboard.press("Escape");page.get_by_role("link",name="回看路线 3",exact=True).click()
+                page.get_by_role("button",name="延长观察",exact=True).click()
+                page.get_by_label("再观察几个窗口").fill("1");page.get_by_label("新增窗口的模型调用上限").fill("11")
+                page.get_by_role("button",name="开始延长观察").click()
+                expect(page.locator(".continuation-result")).to_contain_text("新结算 1 窗",timeout=35000)
+                expect(page.locator("#window-status")).to_contain_text("第 10 窗 / 共 10 窗")
+                page.get_by_role("link",name="回到原路线终点").click()
+                expect(page.locator("#window-status")).to_contain_text("第 9 窗 / 共 9 窗")
+            assert len([task for _,task in endpoint.calls if task=="agent"]) == 190
+            assert len(endpoint.calls)==213 and {m for m,_ in endpoint.calls}=={"local-script-http"},endpoint.calls
             assert not errors and not endpoint.errors,(errors,endpoint.errors)
             browser.close(); print(f"Browser acceptance passed: source intake, nine windows, field and calendar experiments, suggested research question, interview, report and repeated comparisons; {len(endpoint.calls)} loopback model calls.")
     finally:

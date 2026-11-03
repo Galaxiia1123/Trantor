@@ -732,6 +732,8 @@ function renderWindow(view) {
     if (s.pause_requested && s.status === "running") controls.append(h("small","将在当前窗口结束后暂停"));
     if (s.stop_requested && s.status === "running") controls.append(h("small","正在结束"));
   }
+  if(!isCase && view.format_version==="1.1" && s.window>0 && ["completed","stopped"].includes(s.status))
+    controls.append(button("延长观察",()=>extendRun(view),"secondary"));
   const feed = $("events"); feed.replaceChildren();
   const actorSelect=$("feed-actor"), focus=actorSelect.value;
   if (actorSelect.options.length!==view.actors.length+1 || view.actors.some((a,i)=>actorSelect.options[i+1]?.value!==a.id)) {

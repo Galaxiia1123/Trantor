@@ -4,7 +4,7 @@ from copy import deepcopy
 import pytest
 
 from chuantuo.engine import Simulation
-from chuantuo.experiments import ExperimentRequest, fork_experiment
+from chuantuo.experiments import ExperimentRequest, experiment_comparison, fork_experiment
 from chuantuo.interactions import conversation, dispatch_ledger
 from chuantuo.models import ModelError
 from chuantuo.schema import RunConfig11, Scenario11
@@ -54,6 +54,16 @@ def test_mail_in_flight_is_inherited_private_and_settled_once(tmp_path):
     last=dispatch_ledger(run,3)
     arrived=next(m for m in last["items"] if m["stage"]=="arrived")
     assert last["pending"]==last["arrived"]==1 and last["ended"] and arrived["seen"]
+    original=run.journal.directory/"events.jsonl"
+    old_bytes=original.read_bytes()
+    follow=fork_experiment(run,ExperimentRequest(kind="extend",window=3,through=4,extension_limit=7),"c"*12,None,tmp_path/"extended")
+    assert follow.snapshot()["model_calls"]==0 and follow.state==run.state
+    assert follow.run()["status"]=="completed" and follow.snapshot()["model_calls"]==7
+    late=dispatch_ledger(follow,4)
+    assert late["pending"]==0 and late["arrived"]==2 and original.read_bytes()==old_bytes
+    comparison=experiment_comparison(run,follow,4)
+    assert comparison["mode"]=="continuation" and comparison["first_change"]==4
+    assert Simulation.restore(tmp_path/"extended",g).state==follow.state
     assert run.journal.settlement(3)["data"]["changes"][0]["event_ids"]==[arrived["receipt"]]
     assert conversation(run,"a","b")["items"][0]["seen"]["window"]==3
     child=fork_experiment(run,ExperimentRequest(window=1,through=3,kind="transit",route={"source":"a","target":"b","transit_windows":0}),

@@ -749,7 +749,7 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
             alternate = fork_run(parent,request,run_id,job_id)
             start(alternate)
             return alternate.snapshot()
-        spec=request.model_dump(mode="json",exclude={name for name in ("route","event_move") if getattr(request,name) is None})
+        spec=request.model_dump(mode="json",exclude={name for name in ("route","event_move","extension_limit") if getattr(request,name) is None})
         return jobs.submit(job_id,"experiment",{"run_id":run_id,"parent_id":parent_id,"spec":spec},launch)
 
     @app.get("/api/runs/{run_id}/ideas")

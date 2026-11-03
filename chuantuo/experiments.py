@@ -142,7 +142,8 @@ class EventMove(Record):
 class ExperimentRequest(Record):
     window: int = Field(ge=0)
     through: int = Field(ge=1)
-    kind: Literal["condition","field","transit","event_time","repeat"] = "condition"
+    kind: Literal["condition","field","transit","event_time","repeat","extend"] = "condition"
+    extension_limit: int | None = Field(default=None,ge=1,le=1_000_000,strict=True)
     condition: str = Field(default="", max_length=1600)
     assignment: ScheduledValue | None = None
     route: RouteTiming | None = None
@@ -154,6 +155,10 @@ class ExperimentRequest(Record):
     def coherent(self):
         if self.through <= self.window:
             raise ValueError("终点须晚于分岔窗口")
+        if (self.kind=="extend")!=(self.extension_limit is not None):
+            raise ValueError("延长观察需要为新增窗口设定单独的调用上限")
+        if self.kind=="extend" and (self.through-self.window>100 or self.condition.strip() or self.audience!="world"):
+            raise ValueError("每次可继续 1 至 100 窗，沿用原条件和知情范围")
         if (self.kind=="condition" and not self.condition.strip()) or (self.kind=="repeat" and self.condition.strip()):
             raise ValueError("改变条件时请填写具体情境，原样重跑时请留空")
         if (self.kind=="field")!=(self.assignment is not None):
@@ -177,6 +182,11 @@ def prepare_experiment(parent, spec, *, allow_same_field=False):
     """Validate the intervention before scheduling any model work."""
     if not isinstance(parent.config, RunConfig11):
         raise ValueError("历史版本的场景可另存开局，条件对照需要 v1.1 场景")
+    if spec.kind=="extend":
+        with parent._lock:
+            if parent.status not in {"completed","stopped"} or spec.window!=parent.window or parent.window<1:
+                raise ValueError("请从已经结束的路线最后一次结算继续观察")
+            return boundary(parent,spec.window),parent.scenario,f"从第 {spec.window} 窗继续观察到第 {spec.through} 窗"
     if spec.through > parent.window:
         raise ValueError("请选择原路线已经提交的终点")
     if parent.experiment and spec.window < parent.experiment["window"]:
@@ -188,6 +198,8 @@ def prepare_experiment(parent, spec, *, allow_same_field=False):
 
 def apply_intervention(baseline,spec,source_id,state=None,configs=(),*,allow_same_field=False):
     """Use the same scenario contract for a proposed question and an actual fork."""
+    if spec.kind=="extend":
+        raise ValueError("延长观察沿用已结束路线的原条件")
     scene = baseline.model_dump(mode="json")
     condition = spec.condition.strip()
     if spec.kind=="field":
@@ -248,7 +260,9 @@ def fork_experiment(parent, spec, run_id, job_id, directory: Path, *, study=None
     """Copy a sealed prefix once. Stable event positions preserve private inboxes and citations."""
     selected, scene, condition = prepare_experiment(parent,spec,allow_same_field=allow_same_field)
     config = parent.config.model_copy(update={"windows":spec.through})
-    if call_limit is not None:
+    if spec.kind=="extend":
+        config=config.model_copy(update={"model_call_limit":spec.extension_limit})
+    elif call_limit is not None:
         limits=[v for v in (config.model_call_limit,call_limit) if v is not None]
         config=config.model_copy(update={"model_call_limit":min(limits)})
     marker = {**spec.model_dump(mode="json"), "condition":condition, "parent_id":parent.run_id,
@@ -301,6 +315,16 @@ def experiment_comparison(parent, alternate, window=None):
     marker = alternate.experiment
     if not marker or marker["parent_id"] != parent.run_id:
         raise ValueError("两条路线没有共同的分岔记录")
+    if marker["kind"]=="extend":
+        start=marker["window"]
+        latest=alternate.window
+        end=latest if window is None else window
+        if not start<=end<=latest:
+            raise ValueError("请选择延长起点至最新已结算窗口")
+        result=compare(parent,alternate,start,end)
+        changed=[w for w in range(start+1,end+1) if alternate.journal.settlement(w)["data"]["changes"]]
+        return {**result,"mode":"continuation","experiment":marker,"latest":latest,"observed":end-start,
+                "changed_windows":len(changed),"first_change":changed[0] if changed else None}
     result=trajectory_comparison(parent,alternate,marker["window"],window)
     return {**result,"experiment":marker}
 
@@ -360,7 +384,7 @@ def outcome_groups(parent, catalog, actor_id=None, field_id=None):
             continue
         key = (spec["parent_event"],spec["state_sha256"],spec["through"],spec["kind"],spec["condition"],spec["audience"],tuple(sorted(spec["readers"])),encode(spec.get("assignment")),encode(spec.get("route")),encode(spec.get("event_move")))
         if key not in groups:
-            original = boundary(parent,spec["through"])
+            original = boundary(parent,spec["window"] if spec["kind"]=="extend" else spec["through"])
             groups[key] = {"spec":spec,"baseline":original["state"][selected["actor"]][selected["field"]] if selected else None,
                            "completed":0,"outcomes":{},"runs":[]}
         group = groups[key]
