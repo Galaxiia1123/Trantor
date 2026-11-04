@@ -28,6 +28,8 @@ class StudyRequest(Record):
 
     @model_validator(mode="after")
     def distinct_conditions(self):
+        if self.experiment.reuse_first_round:
+            raise ValueError("重复实验使用独立判断，请关闭首轮沿用")
         if self.experiment.kind in {"extend","model_continue"}:
             raise ValueError("延长观察请从已结束的单条路线启动")
         if self.additional_values:

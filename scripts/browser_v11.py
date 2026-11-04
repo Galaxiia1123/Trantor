@@ -498,6 +498,32 @@ def main():
                 page.get_by_role("button",name="查看取消依据",exact=True).click()
                 expect(page.locator("#reading-content")).to_contain_text("event_cancel")
                 page.keyboard.press("Escape")
+                page.goto(run_url)
+                page.get_by_role("button",name="试一个条件",exact=True).click()
+                page.get_by_label("从哪里分岔").select_option("0")
+                page.get_by_label("比较到哪个窗口").select_option("1")
+                page.get_by_label("改变的条件",exact=True).fill("仅世界系统知道窗外的仓库关闭一天。")
+                page.get_by_text("首轮判断的对照方式",exact=True).click()
+                reuse=page.get_by_label("首轮信息相同时，沿用原路线判断",exact=True)
+                expect(reuse).not_to_be_checked()
+                reuse.check()
+                page.get_by_label("新路线数量").select_option("2")
+                expect(reuse).to_be_hidden()
+                page.get_by_label("新路线数量").select_option("1")
+                expect(reuse).to_be_checked()
+                before_calls=len(endpoint.calls)
+                page.get_by_role("button",name="启动新路线",exact=True).click()
+                expect(page.locator("#experiment-tools")).to_contain_text("本路线开启了首轮沿用")
+                expect(page.locator("#watch-meta")).to_contain_text("已完成",timeout=25000)
+                assert len(endpoint.calls)-before_calls==6
+                page.locator("details[data-actor='_usage'] summary").click()
+                expect(page.locator("details[data-actor='_usage']")).to_contain_text("沿用 5 份结果")
+                page.locator("#actors .actor").filter(has_text="许澄").get_by_role("button",name="当时可见的信息").click()
+                page.get_by_label("查看主体决策轮次").select_option("1")
+                expect(page.locator("#reading-content")).to_contain_text("本轮沿用了原路线中信息相同的一份判断")
+                page.get_by_role("button",name="查看原判断",exact=True).click()
+                expect(page.locator("#reading-content")).to_contain_text("记录现场条件，核查能否提交复核。")
+                page.keyboard.press("Escape")
                 selected=page.request.get(url+"/api/model").json()["model"]
                 selected["model"]="local-script-continuation"
                 updated=page.request.put(url+"/api/model",data={"model":selected})
@@ -512,8 +538,8 @@ def main():
                 page.locator("#window").select_option("9")
                 expect(page.locator("#watch-meta")).to_contain_text("local-script-http")
                 expect(page.locator("#watch-meta")).not_to_contain_text("local-script-continuation")
-            assert len([task for _,task in endpoint.calls if task=="agent"]) == 210
-            assert len(endpoint.calls)==236 and {m for m,_ in endpoint.calls}=={"local-script-http","local-script-continuation"},endpoint.calls
+            assert len([task for _,task in endpoint.calls if task=="agent"]) == 215
+            assert len(endpoint.calls)==242 and {m for m,_ in endpoint.calls}=={"local-script-http","local-script-continuation"},endpoint.calls
             assert not errors and not endpoint.errors,(errors,endpoint.errors)
             browser.close(); print(f"Browser acceptance passed: source intake, nine windows, field and calendar experiments, suggested research question, interview, report and repeated comparisons; {len(endpoint.calls)} loopback model calls.")
     finally:

@@ -79,6 +79,11 @@ function experimentForm(view,idea=null,priorWindow=null) {
   const repeats=select("新路线数量",[[1,"1 条"],[2,"2 条"],[3,"3 条"],[5,"5 条"],[8,"8 条"],[16,"16 条"]]);
   const pair=h("input"),pairLabel=h("label",null,"check pair-choice");pair.type="checkbox";
   pairLabel.append(pair,document.createTextNode("也按原条件运行相同次数，分别比较两组结果"));form.append(pairLabel);
+  const reuse=h("input"),reuseLabel=h("label",null,"check");reuse.type="checkbox";reuse.checked=Boolean(preset?.reuse_first_round);
+  reuseLabel.append(reuse,document.createTextNode("首轮信息相同时，沿用原路线判断"));
+  const reuseOptions=disclosure("首轮判断的对照方式",reuseLabel,
+    h("p","逐主体核对分岔后首轮的模型配置、完整输入与引用。符合条件时沿用原判断，并记录来源。其余判断照常生成。","hint"));
+  reuseOptions.open=reuse.checked;form.append(reuseOptions);
   const study=studyOptions(view,run,idea?.watch);
   const cost=h("p",null,"experiment-estimate");
   const submit=h("button","启动新路线","primary"); submit.type="submit";
@@ -105,6 +110,7 @@ function experimentForm(view,idea=null,priorWindow=null) {
     const count=Number(repeats.value);
     pairLabel.hidden=pair.disabled=kind.value==="repeat";
     const contrast=!pair.disabled && pair.checked, conditions=1+extra+(contrast ? 1 : 0),total=count*conditions;
+    reuseOptions.hidden=reuse.disabled=kind.value==="repeat" || total!==1;
     repeats.parentElement.firstChild.textContent=extra ? "每个取值运行几次" : "新路线数量";
     repeats.setAttribute("aria-label",repeats.parentElement.firstChild.textContent);
     pairLabel.lastChild.textContent=extra ? "也按原条件运行相同次数，单独列出结果" : "也按原条件运行相同次数，分别比较两组结果";
@@ -116,8 +122,9 @@ function experimentForm(view,idea=null,priorWindow=null) {
       "全部主体逐轮判断约需 "+(calls*total)+" 次基础调用，纠正与重试会增加用量。"+
       (view.status.max_review_interval ? "主体可选择延续等待。" : "")+(contrast ? "存档原路线另作参照。" : "原路线使用已提交记录。");
     if(view.mode==="sample")cost.textContent+=" 这条路线使用本机案例脚本，不产生 API 费用。";
+    if(reuse.checked && !reuse.disabled)cost.textContent+=" 首轮符合条件的原判断会单独列示，用量按实际新调用记录。";
   }
-  split.onchange=()=>{limits();update();}; through.onchange=kind.onchange=audience.onchange=repeats.onchange=pair.onchange=update;
+  split.onchange=()=>{limits();update();}; through.onchange=kind.onchange=audience.onchange=repeats.onchange=pair.onchange=reuse.onchange=update;
   levels.field.oninput=update;picker.node.addEventListener("change",update);
   if(preset){
     kind.value=preset.kind;split.value=String(preset.window);limits();through.value=String(preset.through);
@@ -140,6 +147,7 @@ function experimentForm(view,idea=null,priorWindow=null) {
                   assignment:["field","opening"].includes(kind.value) ? picker.read() : null,route:kind.value==="transit" ? timing.read() : null,
                   event_move:["event_time","event_cancel"].includes(kind.value) ? shift.read() : null,audience:scope,readers};
       if(kind.value==="condition" && endInput.value!=="")spec.ends_window=Number(endInput.value);
+      if(reuse.checked && !reuse.disabled)spec.reuse_first_round=true;
       const contrast=!pair.disabled && pair.checked;
       const extra=levels.read(spec.assignment?.value);
       if(extra.length && (1+extra.length+Number(contrast))*Number(repeats.value)>32)throw new Error("一组多档实验最多安排 32 条路线，请减少取值或重复次数。");
@@ -232,6 +240,7 @@ async function experimentShelf(parent) {
       else if(s.kind==="transit")card.append(h("small","通信双方知道线路时效。分岔前已经寄出的消息仍按原定日期送达。","quiet"));
       else if(s.kind!=="repeat") card.append(h("small","初始知情范围："+(s.audience==="public" ? "所有主体" : s.audience==="world" ? "仅世界系统" : s.readers.map(id=>result.actors[id] || id).join("、")+"与世界系统"),"quiet"));
       if(s.ends_window)card.append(h("small","临时条件有效至第 "+s.ends_window+" 窗末。","quiet"));
+      if(s.reuse_first_round)card.append(h("small","首轮相同输入可沿用原判断。","quiet"));
       if (result.selected) {
         card.append(h("p",(continuationKinds.has(s.kind) ? "继续观察起点的值为" : "原路线终值为")+format(group.baseline)+"。"));
         for (const o of group.outcomes) card.append(h("span",format(o.value)+" · "+o.count+" 次","outcome-count"));
@@ -272,6 +281,7 @@ function showExperimentTools(view) {
     if(view.has_comparisons && view.mode!=="sample")safe(()=>runIdeas(view,root))();return;
   }
   const source=h("a","回看原路线"); source.href="#run/"+meta.parent_id+"/"+meta.window;
+  if(meta.reuse_first_round)root.append(h("p","本路线开启了首轮沿用。完整输入一致且通过当前校验的判断采用原文，记录中可查看来源。","hint"));
   if(continuationKinds.has(meta.kind)){
     source.textContent=meta.kind==="extend" ? "回到原路线终点" : "回到原路线的此处";
     if(meta.model_change)root.append(h("p","第 "+meta.model_change.starts_window+" 窗起，模型由 "+meta.model_change.before.model+" 改为 "+meta.model_change.after.model+"。此前沿用原路线的记录。","hint"));

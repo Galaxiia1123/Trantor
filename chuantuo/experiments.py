@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Literal
 
 from .engine import Simulation, encode
-from pydantic import Field, model_validator
+from pydantic import Field, model_serializer, model_validator
 
 from .models import ModelConfig, protect_credentials
 from .mail_timing import seal
@@ -182,6 +182,15 @@ class ExperimentRequest(Record):
     delivery_move: DeliveryMove | None = None
     audience: Literal["public", "readers", "world"] = "world"
     readers: list[Identifier] = Field(default_factory=list)
+    reuse_first_round: bool = Field(default=False,strict=True)
+
+    @model_serializer(mode="wrap")
+    def serialize(self, handler):
+        # Keep existing job fingerprints stable when the new option is off.
+        result=handler(self)
+        if not self.reuse_first_round:
+            result.pop("reuse_first_round",None)
+        return result
 
     @model_validator(mode="after")
     def coherent(self):
@@ -217,6 +226,8 @@ class ExperimentRequest(Record):
             raise ValueError("请选择实际获知条件的主体")
         if self.kind == "repeat" and self.audience != "world":
             raise ValueError("原样重跑无需指定知情范围")
+        if self.reuse_first_round and self.kind in {"repeat","extend","model_continue"}:
+            raise ValueError("首轮沿用适用于单条条件对照")
         return self
 
 
@@ -411,6 +422,9 @@ def fork_experiment(parent, spec, run_id, job_id, directory: Path, *, study=None
     if cancelled:
         marker["cancelled_events"]=cancelled
     directory.mkdir(parents=True, exist_ok=False)
+    if spec.reuse_first_round:
+        from .first_round import freeze_choices
+        marker["first_round_source"]=freeze_choices(parent,spec.window+1,directory)
     cutoff = int(selected["event_id"][1:])
     with (parent.journal.directory/"events.jsonl").open("rb") as source, (directory/"events.jsonl").open("xb") as dest:
         for index in range(1, cutoff + 1):
@@ -533,7 +547,7 @@ def outcome_groups(parent, catalog, actor_id=None, field_id=None):
         spec = row.get("experiment")
         if not spec or spec["parent_id"] != parent.run_id:
             continue
-        key = (spec["parent_event"],spec["state_sha256"],spec["through"],spec["kind"],spec["condition"],spec["audience"],tuple(sorted(spec["readers"])),encode(spec.get("assignment")),encode(spec.get("route")),encode(spec.get("event_move")),spec.get("ends_window"),encode(spec.get("model_change")))
+        key = (spec["parent_event"],spec["state_sha256"],spec["through"],spec["kind"],spec["condition"],spec["audience"],tuple(sorted(spec["readers"])),encode(spec.get("assignment")),encode(spec.get("route")),encode(spec.get("event_move")),spec.get("ends_window"),encode(spec.get("model_change")),spec.get("reuse_first_round",False))
         if key not in groups:
             original = boundary(parent,spec["window"] if spec["kind"] in {"extend","model_continue"} else spec["through"])
             groups[key] = {"spec":spec,"baseline":original["state"][selected["actor"]][selected["field"]] if selected else None,

@@ -10,7 +10,7 @@ TRANSPORT_KINDS = frozenset({
     "model_input", "model_output", "report_input", "report_output",
     "analysis_input", "analysis_output", "report_batch_input", "report_batch_output",
 })
-HEADER_KEYS = ("purpose", "actor_id", "config_id", "input_id", "level", "batch")
+HEADER_KEYS = ("purpose", "actor_id", "config_id", "input_id", "level", "batch", "reused_from")
 MAX_PACKED_BYTES = 64 * 1024 * 1024
 
 

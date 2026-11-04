@@ -875,7 +875,10 @@ async function openActorContext(actor, window, turn, replace = false, run = acti
   const round=h("select"); round.setAttribute("aria-label","查看主体决策轮次");
   result.rounds.forEach(n=>{const o=h("option","第 "+n+" 轮");o.value=n;round.append(o);}); round.value=result.round;
   round.onchange=safe(()=>openActorContext(actor,window,Number(round.value),true,run));
-  body.append(h("p",actor.name+" · 第 "+window+" 窗 · "+(result.deferred ? "引擎照常形成了这一轮的观察，主体按此前安排等待。" : "这次作决定时实际收到的内容。"),"hint"),round);
+  body.append(h("p",actor.name+" · 第 "+window+" 窗 · "+(result.deferred ? "引擎照常形成了这一轮的观察，主体按此前安排等待。" :
+    result.reused_from ? "本轮核对判断时使用的信息。" : "这次作决定时实际收到的内容。"),"hint"),round);
+  if(result.reused_from)body.append(h("p","本轮沿用了原路线中信息相同的一份判断。","hint"),
+    button("查看原判断",()=>evidence(result.reused_from.action_id,result.reused_from.run_id),"link"));
   if(result.decision) {
     const statement=h("section",null,"decision-statement");
     statement.append(h("small","当时的决定","quiet"),h("p",result.decision));
@@ -1141,9 +1144,9 @@ function renderWindow(view) {
   }
   if (displayActors.length>actorLimit) $("actors").append(button("查看更多主体（共 "+displayActors.length+" 位）",()=>{actorLimit+=12; renderWindow(view);},"link"));
   if (!isCase && view.usage) {
-    const rows = Object.entries(view.usage).filter(([,u]) => u.calls).map(([stage,u]) => {
-      const tokenText = u.with_usage ? "接口回报输入 " + u.input_tokens + "、输出 " + u.output_tokens + " token（" + u.with_usage + "/" + u.attempts + " 次有用量回执）" : "接口未回报 token";
-      return h("p", stage + " · " + u.calls + " 次调用 · " + tokenText);
+    const rows = Object.entries(view.usage).filter(([,u]) => u.calls || u.local_replays).map(([stage,u]) => {
+      const tokenText = u.with_usage ? "接口回报输入 " + u.input_tokens + "、输出 " + u.output_tokens + " token（" + u.with_usage + "/" + u.attempts + " 次有用量回执）" : u.calls ? "接口未回报 token" : "";
+      return h("p", stage + " · " + u.calls + " 次新调用"+(u.local_replays ? " · 沿用 "+u.local_replays+" 份结果" : "")+(tokenText ? " · "+tokenText : ""));
     });
     if(s.max_review_interval)rows.push(h("p","已提交窗口中有 "+s.deferred_reviews+" 个主体轮次沿用原等待安排，没有发起新的主体请求。"));
     const cost = disclosure("模型用量", ...rows, h("p","持续事项随主体决定更新，历史摘录和检索在本机执行。关联场景的准备用量按原任务列示。","hint"));

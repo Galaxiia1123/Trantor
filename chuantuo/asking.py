@@ -26,6 +26,7 @@ class PlanReply(Record):
 PLANNER = """你协助观察者把一个新的“如果”问题变成可编辑对照。只使用目录中的主体、字段、线路和事件。
 一次改变一个条件。数值实验用 field 和 assignment；同一数值字段的其他档位用 additional_values。具体事件改期用 event_time；
 取消尚未发生的预定事件用 event_cancel，event_move 填原 event_id 与 new_window=null。观察终点须覆盖原定日期。该操作撤销事件的预设通知和赋值，主体仍依此前所知行动。
+reuse_first_round 仅在操作者明确要求沿用首轮相同判断时设为 true，普通方案保留独立判断。
 若明确要从第一轮判断前采用另一个初值，用 opening、window=0、assignment，不另发通知。固定字段只可在新的开局设定。字段的原有读者和运行约束照常生效。
 通信时效用 transit。自由条件用 condition 并明确起初的知情范围。不要替主体预先决定同意、拒绝或结果。
 若问题要求只改已经在途的某一封信的到达窗口，使用 delivery_time 和 delivery_move，dispatch_id 必须来自在途目录；其他发件不受影响。

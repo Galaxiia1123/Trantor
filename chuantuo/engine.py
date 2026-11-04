@@ -103,7 +103,11 @@ class Journal:
                      else "世界" if data.get("purpose") == "world" else "访谈" if "analysis" in (data.get("purpose") or kind) else "报告")
             usage = self._usage.setdefault(stage, {"calls":0,"attempts":0,"with_usage":0,"input_chars":0,"output_chars":0,
                                                     "input_tokens":0,"output_tokens":0,"cache_read":0,"cache_write":0})
-            if kind.endswith("_input"):
+            if kind == "model_input" and data.get("reused_from"):
+                usage["local_replays"] = usage.get("local_replays",0) + 1
+            elif kind == "model_output" and data.get("reused_from"):
+                pass
+            elif kind.endswith("_input"):
                 usage["calls"] += 1
                 chars = sum(len(m["content"]) for m in data.get("messages", []) if isinstance(m.get("content"), str))
                 usage["input_chars"] += chars
@@ -432,6 +436,7 @@ class Journal:
                     "input_id":original["id"],"output_id":output["id"],"action_id":action["id"],
                     "decision":action["data"]["text"],"outgoing":deepcopy(action["data"].get("messages",[])),
                     "observation":payload["observation"],"memory":payload["memory"],"coverage":payload.get("memory_coverage"),
+                    **({"reused_from":deepcopy(original["data"]["reused_from"])} if original["data"].get("reused_from") else {}),
                     **({"reply_targets":payload["reply_targets"]} if payload.get("reply_targets") else {}),
                     **({"resumed_plan":payload["resume_plan"]} if payload.get("resume_plan") else {})}
 
@@ -609,7 +614,7 @@ class Simulation:
                                if commits else None)
         self._history = [{"id": e["id"], "window": e["window"], "consequences": deepcopy(e["data"]["consequences"])} for e in commits]
         inherited = int(self.experiment["parent_event"][1:]) if self.experiment else 0
-        self._call_count = sum(e["kind"] == "model_input" for e in events[inherited:])
+        self._call_count = sum(e["kind"] == "model_input" and not e["data"].get("reused_from") for e in events[inherited:])
         self._deferred_count = sum(e["data"].get("deferred_reviews",0) for e in events[inherited:] if e["kind"]=="window_committed")
         if [e["window"] for e in commits] != list(range(1, self.window + 1)) or self.window > self.config.windows:
             raise ValueError("已提交窗口的顺序或数量不合法，无法继续")
@@ -759,6 +764,20 @@ class Simulation:
                 status["round"] = 0  # A closed window has no active round, including after reopening the archive.
             return status, self.journal.selected(kinds) if kinds is not None else self.journal.snapshot()
 
+    def _checked_response(self, raw, schema, actor_id):
+        result = schema.model_validate_json(raw)
+        if schema is Decision:
+            validate_outbox(result,self._perception.delivery_limits)
+            if any(not set(m.recipients)<=self.agents.keys() for m in result.messages):
+                raise ValueError("主体消息的收件人必须在本轮主体名单中")
+            for message in result.messages:
+                validate_requested_time(message.reply_by,self.window+1)
+            self._perception.documents.validate(result,self._observations[actor_id])
+            if any(m.reply_to for m in result.messages):
+                obs=self.journal.round_observation(actor_id,self.window+1,self.round,self._discarded)
+                self.journal.validate_replies(result,actor_id,obs["id"],self._discarded)
+        return result
+
     def _call(self, config_id: str, purpose: str, payload: dict, system: str,
               actor_id: str | None = None, schema=None):
         retries = self.config.output_retries if isinstance(self.config, RunConfig11) else 2
@@ -770,6 +789,26 @@ class Simulation:
             protect_credentials(messages,self.config.catalog.values())
             from .round_recovery import reusable_output
             output=reusable_output(self,actor_id,config_id,messages) if purpose=="agent" and not attempt else None
+            source_reuse=None
+            if not output and purpose=="agent" and not attempt and schema is Decision:
+                from .first_round import matching_choice
+                candidate=matching_choice(self,actor_id,config_id,messages)
+                if candidate:
+                    try:
+                        self._checked_response(candidate["text"],schema,actor_id)
+                    except ValueError:
+                        candidate=None
+                if candidate:
+                    source_reuse=candidate["source"]
+                    with self._lock:
+                        before=self.journal.append("model_input",{
+                            "purpose":purpose,"actor_id":actor_id,"config_id":config_id,"messages":messages,
+                            "reused_from":source_reuse,
+                        },self.window+1)
+                        output=self.journal.append("model_output",{
+                            "purpose":purpose,"actor_id":actor_id,"config_id":config_id,"input_id":before["id"],
+                            "text":candidate["text"],"reused_from":source_reuse,
+                        },self.window+1)
             reused=output is not None
             if output:
                 raw=output["data"]["text"]
@@ -788,17 +827,7 @@ class Simulation:
                 return raw
 
             try:
-                result = schema.model_validate_json(raw)
-                if schema is Decision:
-                    validate_outbox(result,self._perception.delivery_limits)
-                    if any(not set(m.recipients)<=self.agents.keys() for m in result.messages):
-                        raise ValueError("主体消息的收件人必须在本轮主体名单中")
-                    for message in result.messages:
-                        validate_requested_time(message.reply_by,self.window+1)
-                    self._perception.documents.validate(result,self._observations[actor_id])
-                    if any(m.reply_to for m in result.messages):
-                        obs=self.journal.round_observation(actor_id,self.window+1,self.round,self._discarded)
-                        self.journal.validate_replies(result,actor_id,obs["id"],self._discarded)
+                result = self._checked_response(raw,schema,actor_id)
             except ValueError as error:
                 issues = [{key: issue[key] for key in ("type", "loc", "msg")}
                           for issue in error.errors(include_input=False, include_url=False)] if isinstance(error,ValidationError) else [
@@ -817,7 +846,8 @@ class Simulation:
                         self._accepted_outputs[actor_id] = output["id"]
                         if reused:
                             self.journal.append("agent_result_reused",{"actor_id":actor_id,"round":self.round,"output_id":output["id"],
-                                                "input_id":output["data"]["input_id"]},self.window+1)
+                                                "input_id":output["data"]["input_id"],
+                                                **({"source":source_reuse} if source_reuse else {})},self.window+1)
                 return raw
 
     def call_recorded(self, config_id, messages, input_event, gateway=None):
