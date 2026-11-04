@@ -155,6 +155,7 @@ def main():
                 expect(page.locator(".reply-item").last).to_contain_text("签章已核对")
                 page.get_by_role("button",name="返回",exact=False).click()
                 page.keyboard.press("Escape")
+                page.get_by_text("展开完整对照",exact=True).click()
                 page.get_by_text("并排查看主体的决定",exact=True).click()
                 page.get_by_label("选择要比较决定的主体").select_option("desk")
                 page.get_by_role("button",name="查找这个主体从哪一轮开始不同").click()

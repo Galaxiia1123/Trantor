@@ -23,6 +23,19 @@ function button(label, fn, cls) {
 function disclosure(label, ...nodes) {
   const box = h("details", null, "subtle"); box.append(h("summary", label), ...nodes); return box;
 }
+function readablePassage(text,expanded=false) {
+  const body=h("div",null,"readable-passage"),paragraph=h("p",text),long=String(text||"").length>96;
+  body.append(paragraph);
+  if(long && !expanded){
+    paragraph.id="passage-"+uid();
+    paragraph.classList.add("passage-preview");
+    const toggle=button("展开原文",()=>{
+      const open=paragraph.classList.toggle("passage-expanded");
+      toggle.textContent=open?"收起原文":"展开原文";toggle.setAttribute("aria-expanded",String(open));
+    },"link passage-toggle");toggle.setAttribute("aria-expanded","false");toggle.setAttribute("aria-controls",paragraph.id);body.append(toggle);
+  }
+  return body;
+}
 function bullets(items) {
   const ul = h("ul", null, "compact-list"); items.forEach(s => ul.append(h("li", s))); return ul;
 }
@@ -159,6 +172,11 @@ function reading(title, ...content) {
 }
 $("reading").addEventListener("close", () => { if (!$("reading").open) { readingTrail.length = 0; readingRequest++; } });
 window.addEventListener("keydown", event => { if (event.key === "Escape") readingRequest++; });
+$("feed-detail").value=local("feed-detail")||"brief";
+$("feed-detail").onchange=safe(async()=>{keep("feed-detail",$("feed-detail").value);lastView="";await refreshWatch(routeGeneration);});
+document.querySelectorAll("[data-jump]").forEach(b=>b.onclick=()=>{
+  const target=$(b.dataset.jump);target?.scrollIntoView({behavior:"smooth",block:"start"});
+});
 $("brief").addEventListener("input", persistSeed); $("allow-search").onchange = persistSeed;
 $("open-web").onclick=()=>{
   const panel=$("web-intake");panel.hidden=!panel.hidden;$("open-web").setAttribute("aria-expanded",String(!panel.hidden));
@@ -665,7 +683,9 @@ function groupDeliveries(events) {
     const prior = rows.at(-1);
     const action = prior?.kind === "expression" ? prior.id : prior?.data.action_id;
     if (prior && ["expression","message_delivered"].includes(prior.kind) && e.kind === "message_delivered" && action === e.data.action_id &&
-        !e.data.enclosures?.length && !prior.data.enclosures?.length && e.data.text === prior.data.text && prior.commit_status === e.commit_status) {
+        !e.data.enclosures?.length && !prior.data.enclosures?.length && e.data.text === prior.data.text && prior.commit_status === e.commit_status &&
+        e.data.reply_to===prior.data.reply_to && e.data.reply_by===prior.data.reply_by && e.data.dispatch_id===prior.data.dispatch_id &&
+        !prior.to.includes(e.data.to)) {
       prior.to.push(e.data.to); prior.receipts.push(e.id);
     } else rows.push({...e, to:e.kind === "message_delivered" ? [e.data.to] : [], receipts:[]});
   }
@@ -814,7 +834,8 @@ function renderWindow(view) {
   scope.replaceChildren(everyone, ...view.actors.map(a => {const o = h("option",a.name + "当时可见的记录"); o.value = a.id; return o;}));
   if (names[priorScope]) scope.value = priorScope;
   $("watch-title").textContent = view.title;
-  $("watch-meta").textContent = (view.mode === "recorded_api" ? "真实接口实录 · 只读回放" : isCase || view.mode === "sample" ? "脚本案例 · 未调用真实模型" : "模型 " + view.model) + "　·　每窗 " + s.window_duration + "　·　" + (statuses[s.status] || s.status);
+  const mode=view.mode==="recorded_api"?"真实接口实录 · 只读回放":isCase || view.mode==="sample"?"脚本案例 · 未调用真实模型":"模型 "+view.model;
+  $("watch-meta").replaceChildren(...[mode,"每窗 "+s.window_duration,statuses[s.status]||s.status].map(text=>h("span",text)));
   const select = $("window"); select.disabled=false;select.replaceChildren();
   const live = h("option", isCase ? "最后一个窗口" : "跟随最新"); live.value = ""; select.append(live);
   const near=new Set([0,view.latest]);
@@ -856,22 +877,30 @@ function renderWindow(view) {
   const outcome=$("window-outcome"); outcome.hidden=!settlement; outcome.replaceChildren();
   if (settlement) {
     const highlights=settlement.data.consequences || [], changes=settlement.data.changes || [];
-    outcome.append(h("strong","本窗结果 · "+changes.length+" 项字段变化"),h("p",highlights[0]?.text || changes[0]?.reason || "本窗已结算，已定义字段保持原值。"),
+    const captions=changes.slice(0,3).map(change=>{
+      const field=view.actors.find(a=>a.id===change.entity_id)?.fields[change.field_id];
+      const value=v=>v===null?"未知":typeof v==="boolean"?(v?"是":"否"):String(v)+(field?.unit||"");
+      return (names[change.entity_id]||change.entity_id)+"的"+(field?.label||change.field_id)+"由“"+value(change.before)+"”变为“"+value(change.after)+"”。";
+    });
+    const caption=captions.join("") || highlights[0]?.text || "本窗已结算，已定义字段保持原值。";
+    outcome.append(h("strong","本窗结果 · "+changes.length+" 项字段变化"),readablePassage(caption),
       button(changes.length ? "为什么发生变化" : "查看结算依据",()=>openFieldReason(view),"link"));
   }
   let group = null, grouped = 0;
+  const rawMode=$("feed-detail").value==="full" || ["settlement_rejected","window_committed"].includes($("feed-kind").value);
+  let problemGroup=null,problemCount=0;
   for (const e of groupDeliveries(view.events)) {
     const data = e.data, row = h("div",null,e.kind === "window_committed" ? "event settled" : "event");
     const phase = e.commit_status === "discarded" ? " · 已作废" : e.commit_status === "uncommitted" ? " · 尚未结算" : "";
     if (e.to.length) {
       const sender = data.from || data.actor_id;
-      row.append(h("span",(names[sender] || sender) + " → " + e.to.map(id => names[id] || id).join("、") + phase,"type"),h("p",data.text));
+      row.append(h("span",(names[sender] || sender) + " → " + e.to.map(id => names[id] || id).join("、") + phase,"type"),readablePassage(data.text,rawMode));
       if(data.dispatch_id)row.append(h("small","第 "+data.sent_window+" 窗寄出，本窗已送达。","quiet"));
     } else if(e.kind==="message_dispatched") {
-      row.append(h("span",(names[data.from]||data.from)+" → "+(names[data.to]||data.to)+" · 已寄出"+phase,"type"),h("p",data.text),
+      row.append(h("span",(names[data.from]||data.from)+" → "+(names[data.to]||data.to)+" · 已寄出"+phase,"type"),readablePassage(data.text,rawMode),
         h("small","预计第 "+data.due_window+" 窗首送达。","quiet"),evidenceLinks([data.action_id]));
     } else if (e.kind === "expression") {
-      row.append(h("span",(names[data.actor_id] || data.actor_id) + " · 决定" + phase,"type"), h("p",data.text));
+      row.append(h("span",(names[data.actor_id] || data.actor_id) + " · 决定" + phase,"type"), readablePassage(data.text,rawMode));
       if(data.resumed_plan)row.append(h("small",wakeText(data.resumed_plan.reason),"quiet"));
       if(data.next_review_window)row.append(h("small","已安排最迟第 "+data.next_review_window+" 窗重新判断。","quiet"));
     } else if(e.kind==="decision_deferred") {
@@ -879,17 +908,20 @@ function renderWindow(view) {
         h("p","沿用此前决定，本轮没有新发言或投递。"),evidenceLinks([data.plan_record]));
     }
     else if(e.kind==="external_event") {
-      row.append(h("span","外部事件"+phase,"type"),h("p",data.text),h("small",eventAudience(data,view.actors),"quiet"));
+      row.append(h("span","外部事件"+phase,"type"),readablePassage(data.text,rawMode),h("small",eventAudience(data,view.actors),"quiet"));
     } else if (e.kind === "window_committed") {
-      row.append(h("strong","世界结算"));
-      for (const c of data.consequences || []) row.append(h("p", c.text), evidenceLinks([...(c.event_ids||[]),...c.action_ids]));
+      row.append(h("strong","世界结算"),h("small",(data.changes?.length||0)+" 项字段更新，"+(data.consequences?.length||0)+" 条后果记录。","quiet"));
+      const outcomeBody=h("div");
+      const outcomeTarget=rawMode?row:outcomeBody;
+      for (const c of data.consequences || []) outcomeTarget.append(readablePassage(c.text,rawMode), evidenceLinks([...(c.event_ids||[]),...c.action_ids]));
       for (const c of data.changes || []) {
         const field = view.actors.find(a => a.id === c.entity_id)?.fields[c.field_id];
         const value = v => v === null ? "未知" : String(v) + (field?.unit || "");
-        row.append(h("p", (names[c.entity_id] || c.entity_id) + "的" + (field?.label || c.field_id) + "从“" + value(c.before) + "”变为“" + value(c.after) + "”。"));
-        if (!(data.consequences || []).some(item => item.text === c.reason)) row.append(h("p",c.reason), evidenceLinks([...(c.event_ids||[]),...c.action_ids]));
+        outcomeTarget.append(h("p", (names[c.entity_id] || c.entity_id) + "的" + (field?.label || c.field_id) + "从“" + value(c.before) + "”变为“" + value(c.after) + "”。"));
+        if (!(data.consequences || []).some(item => item.text === c.reason)) outcomeTarget.append(readablePassage(c.reason,rawMode), evidenceLinks([...(c.event_ids||[]),...c.action_ids]));
       }
       if (!data.consequences?.length && !data.changes?.length) row.append(h("p","本窗口已结算，已定义字段保持原值。"));
+      if(!rawMode && outcomeBody.childNodes.length)row.append(disclosure("阅读世界后果与逐项变更",outcomeBody));
       if (data.suggested_fields?.length) {
         const offered = h("div");
         data.suggested_fields.forEach((s,i) => {
@@ -908,7 +940,14 @@ function renderWindow(view) {
     if (settlement && e.kind === "expression" && !data.message_count && !cited.has(e.id)) {
       if (!group) { group = disclosure(""); group.classList.add("minor-actions"); feed.append(group); grouped = 0; }
       group.append(row); group.firstChild.textContent = "查看同期主体决定（" + (++grouped) + "）";
-    } else { group = null; feed.append(row); }
+    } else {
+      group = null;
+      const failed=!["expression","decision_deferred","external_event","window_committed","message_dispatched","message_delivered"].includes(e.kind);
+      if(failed && settlement && !rawMode){
+        if(!problemGroup){problemGroup=disclosure("");problemGroup.classList.add("recovered-attempts");feed.append(problemGroup);problemCount=0;}
+        problemGroup.append(row);problemGroup.firstChild.textContent=++problemCount+" 次未提交的尝试 · 本窗最终已结算";
+      }else{problemGroup=null;feed.append(row);}
+    }
   }
   if (!view.events.length) feed.append(h("p", view.selected === 0 ? "这是开局时的状态。" : (focus || $("feed-kind").value) ? "这个窗口没有符合筛选的记录。" : "正在等待本窗口的行动记录。", "empty"));
   if (view.next < view.total) feed.append(button("继续读取本窗口",async () => { eventLimit += 100; await refreshWatch(routeGeneration); }));

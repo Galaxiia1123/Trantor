@@ -1,4 +1,5 @@
 "use strict";
+const comparisonExpanded=new Map();
 
 function openLetterLab() {
   return caseChoices("如果签字函按时送达","第一天，维修社提出申请，运营社要求有效签字函。原路线中函件未到。选择第二天发生什么，两条路线都会走到第三天。","letter",[
@@ -295,11 +296,33 @@ function showExperimentTools(view) {
   if (view.settled_through<=meta.window && meta.kind!=="opening") {summary.textContent="分岔后的首个窗口结算后，这里会显示对照结果。"; return;}
   const run=activeRun, w=view.settled_through;
   api("/api/runs/"+run+"/experiment?window="+w).then(result=>{
-    if (activeRun===run && summary.isConnected) drawExperimentComparison(summary,result,view.actors,letter||post);
+    if (activeRun===run && summary.isConnected) drawExperimentComparison(summary,result,view.actors,letter||post,{compact:true});
   }).catch(error=>{if(summary.isConnected) summary.replaceChildren(h("p",error.message,"error"));});
 }
 
 function drawExperimentComparison(root, result, actors, isLetter, options={}) {
+  if(options.compact){
+    const changed=result.rows.filter(r=>r.status==="different"),w=result.right.window;
+    const bar=h("div",null,"compact-contrast"),title=h("strong",(w?"第 "+w+" 窗":"开局")+" · "+changed.length+" 项状态不同");
+    bar.append(title);
+    const names=Object.fromEntries(actors.map(a=>[a.id,a.name]));
+    const show=v=>v===null?"未知":typeof v==="boolean"?(v?"是":"否"):String(v);
+    for(const row of changed.slice(0,2))bar.append(h("p",(names[row.actor_id]||row.actor_id)+" · "+row.left.label+
+      "　原路线 "+show(row.left.value)+" → 新路线 "+show(row.right.value)+(row.right.unit||"")));
+    if(result.delivery_comparison){
+      const [a,b]=result.delivery_comparison.sides;
+      bar.append(h("p","所选信件　原路线"+(a.receipt?"第 "+a.arrival+" 窗已到":"尚未到件")+"，新路线"+(b.receipt?"第 "+b.arrival+" 窗已到":"尚未到件")));
+    }
+    const assigned=result.experiment?.assignment;
+    const outcomes=result.rows.filter(r=>r.left && r.right && (r.actor_id!==assigned?.entity_id || r.field_id!==assigned?.field_id));
+    const target=outcomes.find(r=>r.status==="different") || outcomes[0] || changed[0] || result.rows.find(r=>r.left && r.right);
+    if(target)bar.append(briefLink(result.left.run_id,result.right.run_id,target.actor_id,target.field_id,w));
+    const body=h("div"),details=disclosure("展开完整对照",body);details.classList.add("full-comparison");
+    details.open=Boolean(comparisonExpanded.get(activeRun));const run=activeRun;
+    details.addEventListener("toggle",()=>comparisonExpanded.set(run,details.open));
+    drawExperimentComparison(body,result,actors,isLetter,{...options,compact:false});
+    root.replaceChildren(bar,details);return;
+  }
   const [leftLabel,rightLabel]=options.labels || ["原路线","新路线"];
   const w=result.right.window, changed=result.rows.filter(r=>r.status==="different");
   const names=Object.fromEntries(actors.map(a=>[a.id,a.name]));
