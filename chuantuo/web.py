@@ -114,6 +114,7 @@ class ReportOptions(Record):
     max_calls: int | None = Field(default=32,gt=0)
     reuse: bool = True
     expected_window: int | None = Field(default=None,ge=0)
+    questions: list[FieldWatch] | None = Field(default=None,max_length=32)
 
 
 def create_app(runs_directory: Path | None = None, gateway=None, *, public_search=None):
@@ -1050,6 +1051,8 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
     def queue_report(run_id: str, job_id: str, options: ReportOptions):
         sim = get_run(run_id)
         args = options.model_dump()
+        if options.questions is None:
+            args.pop("questions")
         return jobs.submit(job_id, "report", {"run_id": run_id, **args}, lambda progress: generate_report(sim, gateway, progress, job_id=job_id, **args))
 
     @app.get("/api/runs/{run_id}/report-plan")

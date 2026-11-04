@@ -244,9 +244,16 @@ def test_long_report_coverage_and_private_memory_fit(tmp_path):
             assert prompt["memory_coverage"]["retained_items"] < prompt["memory_coverage"]["total_items"]
         if prompt["actor_id"] != "port":
             assert "PRIVATE_PORT" not in messages[-1]["content"]
+    watch={"actor_id":"city","field_id":"readiness","operator":"at_least","target":20,"title":"报告关注的准备情况"}
+    Repository(tmp_path).field_watches(tmp_path,"a"*32,watch)
     result = generate_report(sim)
     coverage = result["coverage"]
     assert coverage["method"] == "batched" and coverage["batches"] > 1
+    assert coverage["observation_questions"][0]["first_hit"]["window"]==0
+    assert "报告关注的准备情况" in result["markdown"] and "首次记录达成在第 0 窗" in result["markdown"]
+    final_input=sim.journal.snapshot({"report_input"})[-1]
+    synthesis=json.loads(final_input["data"]["messages"][-1]["content"])
+    assert synthesis["context"]["observation_questions"][0]["record"]==sim.journal.settlement(4)["id"]
     ids = set()
     source_fragments = []
     for event in sim.journal.snapshot({"report_batch_input"}):

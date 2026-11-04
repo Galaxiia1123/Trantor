@@ -169,41 +169,50 @@ def note_text(value):
     return re.sub(r"([\\`*_[\]()#!|~])",r"\\\1",escaped)
 
 
-def observation_notes(simulation, watches, through=None):
-    if not watches:
-        raise ValueError("先固定一个观察问题，再导出观察笔记")
+def observation_lines(row, cite):
+    """Render one frozen result for observation notes and simulation reports."""
     plain=note_text
     def phrase(value,unit):
         if value is None: return "未知"
         if isinstance(value,bool): return "是" if value else "否"
         return plain(value)+plain(unit or "")
+    r=row
+    q=r["question"]; target=q["target"]; unit=r["unit"]
+    lines=[plain(r["actor"])+"的"+plain(r["label"])+"。"]
+    if q["operator"]!="track":
+        goal={"equals":"等于","at_least":"至少达到","at_most":"不超过","known":"出现已知值"}[q["operator"]]
+        lines.append("观察条件为"+goal+(phrase(target,unit) if target is not None else "")+("，期限为第 "+str(q["deadline"])+" 窗" if q["deadline"] is not None else "")+"。")
+    lines.append(f"第 {r['through']} 窗终值为"+phrase(r["value"],unit)+f"，期间有 {r['changes']} 次字段变化。"+cite(r["record"],r["through"]))
+    hit=r["first_hit"]
+    if q["criterion"]=="always" and r["first_miss"]:
+        miss=r["first_miss"]
+        lines.append(f"第 {miss['window']} 窗首次记录到不满足条件。"+cite(miss["record"],miss["window"]))
+    elif hit and q["criterion"]=="ever":
+        lines.append(f"首次记录达成在第 {hit['window']} 窗。"+cite(hit["record"],hit["window"]))
+    elif q["operator"]!="track":
+        phrases={"undetermined":"存在未知时点，无法确定整个观察期的结果。","pending":"观察尚未结束，记录仍不足以得出结论。",
+                 "ended_early":"运行提前结束，记录未覆盖整个期限。","not_observed":"已观察的期限内未出现目标结果。",
+                 "holding":"截至目前每个时点均满足条件，仍在观察。","maintained":"包括开局在内，整个观察期始终满足条件。",
+                 "pending_end":"指定终点尚未到达。","undetermined_end":"观察终点的值未知。","met_at_end":"观察终点满足条件。","missed_at_end":"观察终点不满足条件。"}
+        lines.append(phrases[r["status"]])
+    return lines
+
+
+def observation_notes(simulation, watches, through=None):
+    if not watches:
+        raise ValueError("先固定一个观察问题，再导出观察笔记")
+    plain=note_text
     end=simulation.window if through is None else through
     rows=[observe_field(simulation,FieldWatch.model_validate(spec),end,details=False) for spec in watches.values()]
     lines=["# "+plain(simulation._scenario.title)+" · 观察笔记","",f"运行 `{simulation.run_id}`，选取至第 {end} 窗的提交。","","以下问题均依据本机推演记录计算。"]
     sources={}
     for r in rows:
-        q=r["question"]; target=q["target"]; unit=r["unit"]
-        title=q["title"] or r["actor"]+" · "+r["label"]
-        lines+=["","## "+plain(title),"",plain(r["actor"])+"的"+plain(r["label"])+"。"]
-        if q["operator"]!="track":
-            goal={"equals":"等于","at_least":"至少达到","at_most":"不超过","known":"出现已知值"}[q["operator"]]
-            lines.append("观察条件为"+goal+(phrase(target,unit) if target is not None else "")+("，期限为第 "+str(q["deadline"])+" 窗" if q["deadline"] is not None else "")+"。")
-        hit=r["first_hit"]; latest=r["record"]
+        title=r["question"]["title"] or r["actor"]+" · "+r["label"]
+        lines+=["","## "+plain(title),""]
         def cite(event,window):
             sources.setdefault(event,set()).add((window,r["actor"],r["label"]))
             return f"[{event}](#event-{event})"
-        lines.append(f"第 {r['through']} 窗终值为"+phrase(r["value"],unit)+f"，期间有 {r['changes']} 次字段变化。"+cite(latest,r["through"]))
-        if q["criterion"]=="always" and r["first_miss"]:
-            miss=r["first_miss"]
-            lines.append(f"第 {miss['window']} 窗首次记录到不满足条件。"+cite(miss["record"],miss["window"]))
-        elif hit and q["criterion"]=="ever":
-            lines.append(f"首次记录达成在第 {hit['window']} 窗。"+cite(hit["record"],hit["window"]))
-        elif q["operator"]!="track":
-            phrases={"undetermined":"存在未知时点，无法确定整个观察期的结果。","pending":"观察尚未结束，记录仍不足以得出结论。",
-                     "ended_early":"运行提前结束，记录未覆盖整个期限。","not_observed":"已观察的期限内未出现目标结果。",
-                     "holding":"截至目前每个时点均满足条件，仍在观察。","maintained":"包括开局在内，整个观察期始终满足条件。",
-                     "pending_end":"指定终点尚未到达。","undetermined_end":"观察终点的值未知。","met_at_end":"观察终点满足条件。","missed_at_end":"观察终点不满足条件。"}
-            lines.append(phrases[r["status"]])
+        lines.extend(observation_lines(r,cite))
     lines+=["","## 记录出处"]
     for eid,refs in sorted(sources.items(),key=lambda item:int(item[0][1:])):
         lines+=["",f'<a id="event-{eid}"></a>',"",f"- `{eid}`　"+"、".join(f"第 {w} 窗的{plain(a)} · {plain(f)}" for w,a,f in sorted(refs))]

@@ -12,6 +12,7 @@ from .schema import Influence, Provenance, Record, RunConfig11, Scenario, Source
 from .report_batches import ReportWork
 from .preparation_trace import accepted
 from .perception import state_sentences
+from .observatory import FieldWatch, note_text, observation_lines, observe_field
 
 
 def parse_scenario(text: str, model: ModelConfig, gateway=None, *, sources: list[Source] | None = None) -> dict:
@@ -154,14 +155,23 @@ def compact_observations(evidence):
     return compact
 
 
-def _report_inputs(simulation):
+def _report_inputs(simulation, questions=None):
     kinds = {"run_created", "scene_parse", "weight_estimation", "observation", "expression",
              "message_delivered", "window_committed", "model_validation_error", "runtime_verification", "run_error",
              "run_status", "run_recovered", "provider_attempt"}
     if isinstance(simulation.config, RunConfig11):
         kinds.update({"settlement_rejected","settlement_resume_requested","experiment_forked","decision_deferred","external_event","message_dispatched","round_resume_requested","agent_result_reused"})
     kinds.update({"pause_goal_set","pause_goal_reached","pause_goal_cancelled","pause_goal_expired"})
-    snapshot, events = simulation.report_snapshot(kinds)
+    if questions is None and simulation.journal.directory:
+        from .repository import Repository
+        questions=list(Repository(simulation.journal.directory.parent).field_watches(simulation.journal.directory).values())
+    questions=questions or []
+    if len(questions)>32:
+        raise ValueError("一份报告最多关注 32 个问题")
+    with simulation._lock:
+        snapshot, events = simulation.report_snapshot(kinds)
+        observations=[observe_field(simulation,FieldWatch.model_validate(question),snapshot["window"],details=False,
+                                    close_horizon=snapshot["status"] in {"completed","stopped"}) for question in questions]
     discarded = {eid for event in events if event["kind"] == "run_recovered" for eid in event["data"].get("discarded_event_ids", [])}
     # Remove duplicated transport prompts from report input, not from the audit
     # log. All scenario, observations, original expressions and outcomes remain.
@@ -177,6 +187,8 @@ def _report_inputs(simulation):
     actor_world = {config.model_id("world"), *(config.model_id("actor", d) for d in simulation.depths.values())}
     methods = {key:{"provider":config.catalog[key].provider,"model":config.catalog[key].model} for key in sorted(actor_world)}
     execution = {"actor_world_configs":methods,"report_config":{"provider":model.provider,"model":model.model}}
+    if observations:
+        execution["observation_questions"]=observations
     if simulation.experiment:
         execution["experiment"] = simulation.experiment
     execution["commits"] = {str(e["window"]):e["id"] for e in evidence if e["kind"] == "window_committed"}
@@ -184,26 +196,30 @@ def _report_inputs(simulation):
                                                                                    "pause_goal_set","pause_goal_reached","pause_goal_cancelled","pause_goal_expired"}]
     messages = [
         {"role": "system", "content": """根据全部证据记录生成中文论文式报告，按 schema 输出 JSON。
+开头用一个简短摘要回答本场要探索的问题、实际结果和最关键的转折。后文只展开理解结果所需的内容。
 涵盖场景与目标、初始条件及假设、主体及关系、方法、关键事件与状态演化、结果、讨论和局限。
+小场景合并相近章节。正文概括与 claims 各有分工，同一事实只完整写一次。关键条件和引用保留，删除泛泛复述。
+若提供 observation_questions，它们是操作者关注的问题及引擎按提交记录算出的结果，报告会自动展示。正文重点解释哪些行动、收件或约束影响了这些结果。
 每节所有实质结论需有对应 evidence_ids。区分用户材料、AI 估算/假设、模拟事件、你的解释，
 重要结论另列 claims。source 引用材料编号及开局或准备记录；assumption 是模拟假设；simulation 只用于窗口内发生的表达、投递、观察或客观结果。
 描述结算字段时引用 execution.commits 中对应窗口的提交编号。model 调用、错误、重试、完成状态属于 method，以 provider_attempt、run_status 或拒绝记录为据。
 interpretation 用于解释、局限及不能外推的讨论。每条结论按其实际依据填写；同一事实不要在不同章节反复重写。
 操作者设置、取消或触发的 pause_goal 记录属于 method。达成目标的字段值另引用 window_committed，作为 simulation 结论。
 evidence_ids 只填本次 events 的事件 id（形如 e000001）。材料编号只填在结论的 source_ids；引用文稿的章节用收录该文稿的开局事件作 evidence_ids。客观状态变化引用已提交窗口。带 simulation_ref 的来源是先前推演的快照。
-对解释明确标注“报告解释”。模拟结果不能直接作为现实结论。失败或未完成的窗口不得写成已提交。
+解释使用 basis=interpretation，展示时会自动加上“报告解释”标签，正文无需再重复标签。模拟结果不能直接作为现实结论。失败或未完成的窗口不得写成已提交。
 分岔时操作者选择的字段、日期和收件范围属于 method，引用 experiment_forked 或带 experiment 的 run_created。实际到件或状态变化另写 simulation 结论，分别引用相应的 message_delivered 或 window_committed。不要把预定到达日期直接写成已到件。
 event_cancel 撤销一项尚未发生的预定事件及其预设通知和赋值，属于方法变化。后续主体自主行动和实际字段结果应分别引用其记录，不能把取消计划本身写成已经发生的主体行动。
 如果 experiment.model_history 记录了更换模型，应按每次 starts_window 区分前后的模型。换用模型属于方法变化，不能把随后差异全部归因于场景条件。
 experiment.runtime_after 只说明分岔后采用的引擎。分岔前的方法记录以原路线为准。
-agent_result_reused 含 source 时，表示分岔后首轮采用了原路线已存的判断，属于方法记录，须区别于新的模型调用。按 input_id 去重，注明实际沿用数量。重复实验与首轮沿用是不同的观察方式。*** End Patch
+agent_result_reused 含 source 时，表示分岔后首轮采用了原路线已存的判断，属于方法记录，须区别于新的模型调用。按 input_id 去重，注明实际沿用数量。重复实验与首轮沿用是不同的观察方式。
 不包含密钥或内部思维链，不补造情节。不能将离线脚本演示称为真实模型实验。
 场景虚构与调用方式是两件事。sources 中保留的旧示例运行说明只描述原材料；本次实际调用方式
-如有 runtime_verification，依据其网络请求凭证描述。真实 API 调用不等于现实世界实验或有效性验证。"""},
+如有 runtime_verification，依据其网络请求凭证描述。真实 API 调用不等于现实世界实验或有效性验证。
+方法简述实际配置与影响结果的异常即可。codex_cli 的 provider_attempt 记录本机订阅 CLI 的调用结果，其成功调用不以 HTTP 状态码为条件。不要把无关的验收项目或未进行的技术检查逐项写成局限。"""},
         {"role": "user", "content": encode({"task": "report", "events": evidence, "status": snapshot, "execution":execution,
                                             "schema": Report.model_json_schema()})},
     ]
-    return snapshot,evidence,model_id,model,messages,methods
+    return snapshot,evidence,model_id,model,messages,methods,observations
 
 
 def _previous_candidate(simulation, messages, model_id, window):
@@ -223,12 +239,12 @@ def _previous_candidate(simulation, messages, model_id, window):
     return output if old_input == json.loads(messages[1]["content"]) else None
 
 
-def plan_report(simulation, reuse=True):
-    snapshot,evidence,model_id,model,messages,_ = _report_inputs(simulation)
+def plan_report(simulation, reuse=True, questions=None):
+    snapshot,evidence,model_id,model,messages,_,observations = _report_inputs(simulation,questions)
     size = sum(len(m["content"]) for m in messages)
     batches = []
     if size > model.context_limit_chars:
-        work = ReportWork(simulation,model_id,evidence,snapshot,reuse=reuse)
+        work = ReportWork(simulation,model_id,evidence,snapshot,reuse=reuse,questions=observations)
         batches = work.batches(work.initial(),1)
     hits = sum(batch[3] is not None for batch in batches)
     candidate = _previous_candidate(simulation, messages, model_id, snapshot["window"]) if reuse and not batches else None
@@ -236,15 +252,16 @@ def plan_report(simulation, reuse=True):
             "evidence_count":len(evidence),"input_chars":size,"context_chars":model.context_limit_chars,
             "mode":"batched" if batches else "full","first_level_batches":len(batches),
             "reusable_first_level":hits,"candidate_to_recheck":candidate["id"] if candidate else None,
-            "minimum_new_calls":0 if candidate else 1+len(batches)-hits}
+            "minimum_new_calls":0 if candidate else 1+len(batches)-hits,
+            "questions":[row["question"] for row in observations]}
 
 
-def generate_report(simulation: Simulation, gateway=None, progress=None, *, max_calls=None, reuse=True, expected_window=None, job_id=None) -> dict:
-    snapshot,evidence,model_id,model,messages,methods = _report_inputs(simulation)
+def generate_report(simulation: Simulation, gateway=None, progress=None, *, max_calls=None, reuse=True, expected_window=None, job_id=None, questions=None) -> dict:
+    snapshot,evidence,model_id,model,messages,methods,observations = _report_inputs(simulation,questions)
     cutoff_window = snapshot["window"]
     if expected_window is not None and cutoff_window != expected_window:
         raise ValueError("推演窗口已变化，请重新核对报告范围和预算")
-    work = ReportWork(simulation,model_id,evidence,snapshot,max_calls,reuse)
+    work = ReportWork(simulation,model_id,evidence,snapshot,max_calls,reuse,questions=observations)
     gateway = gateway or simulation.gateway
     ids = {e["id"] for e in evidence}
     by_id = {e["id"]:e for e in evidence}
@@ -347,6 +364,17 @@ def generate_report(simulation: Simulation, gateway=None, progress=None, *, max_
     if coverage["method"] == "batched":
         lines.extend([f"> 证据处理使用 {coverage['batches']} 批摘要，覆盖 {len(evidence)} 条原始记录。逐批输入输出保存在运行日志，归纳可能损失细节。", ""])
     cited_ids = {eid for section in report.sections for eid in section.evidence_ids}
+    if observations:
+        lines.extend(["## 关注问题", "", "以下结果按各问题的期限计算，取自本报告范围内的已提交状态。", ""])
+        for row in observations:
+            title=row["question"]["title"] or row["actor"]+" · "+row["label"]
+            lines.extend(["### "+note_text(title), ""])
+            def cite_question(eid, window):
+                cited_ids.add(eid)
+                return f"[{eid}](#event-{eid})"
+            lines.extend(observation_lines(row,cite_question))
+            lines.append("")
+        coverage["observation_questions"]=observations
     method_labels = "、".join(f"{cfg['provider']} / {cfg['model']}" for cfg in methods.values())
     model_history=(simulation.experiment or {}).get("model_history",[])
     if model_history:

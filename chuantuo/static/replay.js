@@ -111,6 +111,18 @@
     const reportRecords=route.events.filter(e=>e.kind==="report_created" && e.window<=windowNumber && !e.discarded);
     for(const event of reportRecords){
       const content=el("div"),r=event.data.report;
+      for(const row of event.data.coverage?.observation_questions || []){
+        const q=row.question;
+        content.append(el("h3","关注问题 · "+(q.title || row.actor+" · "+row.label)));
+        if(q.operator!=="track"){
+          const condition={equals:"等于",at_least:"至少达到",at_most:"不超过",known:"出现已知值"}[q.operator];
+          const period={ever:"观察期内",always:"整个观察期",at_end:"观察终点"}[q.criterion];
+          content.append(el("p",period+" · "+condition+(q.target===null ? "" : display(q.target,row.unit))+
+            (q.deadline===null ? "" : " · 期限为第 "+q.deadline+" 窗")));
+        }
+        content.append(el("p",row.actor+" · "+row.label+" · "+windowName(row.through)+"为"+display(row.value,row.unit)),
+          el("p",watchFinding(row)),refs(route,[...new Set([row.record,row.first_hit?.record,row.first_miss?.record].filter(Boolean))]));
+      }
       for(const section of r.sections){
         content.append(el("h3",section.title),el("p",section.text),refs(route,section.evidence_ids));
         for(const claim of section.claims||[])content.append(el("p",claim.text),refs(route,claim.evidence_ids));

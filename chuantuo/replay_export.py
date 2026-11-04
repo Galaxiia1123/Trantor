@@ -97,7 +97,7 @@ def export_replay(sim, through=None, parent=None):
         raise ValueError("截至这个窗口的回放超过 64 MiB，请选择更早的终点或只导出一条路线")
     assets=Path(__file__).with_name("static")
     style=(assets/"replay.css").read_text("utf-8")
-    script=(assets/"replay.js").read_text("utf-8")
+    script=(assets/"observation-text.js").read_text("utf-8")+"\n"+(assets/"replay.js").read_text("utf-8")
     fingerprint=lambda text:base64.b64encode(hashlib.sha256(text.encode()).digest()).decode()
     policy="default-src 'none'; img-src data:; style-src 'sha256-"+fingerprint(style)+"'; script-src 'sha256-"+fingerprint(script)+"'; base-uri 'none'; form-action 'none'"
     head='<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'

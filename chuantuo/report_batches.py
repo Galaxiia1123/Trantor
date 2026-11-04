@@ -31,7 +31,7 @@ def instruction(items, level):
 
 
 class ReportWork:
-    def __init__(self, simulation, model_id, evidence, snapshot, max_calls=None, reuse=True):
+    def __init__(self, simulation, model_id, evidence, snapshot, max_calls=None, reuse=True, *, questions=()):
         self.simulation = simulation
         self.model_id = model_id
         self.model = simulation.config.catalog[model_id]
@@ -40,6 +40,7 @@ class ReportWork:
         self.calls = self.reused = 0
         self.evidence = evidence
         self.snapshot = snapshot
+        self.questions = questions
         digest = hashlib.sha256()
         for event in evidence:
             digest.update(encode(event).encode())
@@ -117,6 +118,12 @@ class ReportWork:
         status = {key:snapshot[key] for key in ("run_id","status","window","windows","window_duration","error")}
         context = {"title":self.evidence[0]["data"]["scenario"]["title"],"actors":len(self.simulation.depths),
                    "evidence_count":len(self.evidence),"first_id":self.evidence[0]["id"],"last_id":self.evidence[-1]["id"]}
+        question_ids=set()
+        if self.questions:
+            context["observation_questions"]=self.questions
+            for row in self.questions:
+                question_ids.add(row["record"])
+                question_ids.update(row[key]["record"] for key in ("first_hit","first_miss") if row[key])
         system = final_system.replace("根据全部证据记录","根据整场记录的分批证据摘要") + """
 本次收到逐批审阅后的 findings，编号指向原始记录。仅基于给定发现形成结论。说明分批归纳的范围与细节损失。"""
         def final(notes):
@@ -137,7 +144,7 @@ class ReportWork:
                 receipts.append(output_id)
             content = encode(final(notes))
             if len(system) + len(content) <= limit:
-                ids = {eid for f in notes for eid in f["evidence_ids"]}
+                ids = {eid for f in notes for eid in f["evidence_ids"]} | question_ids
                 coverage = {**context,"levels":level,"batches":len(receipts),"reused_batches":self.reused,"batch_output_ids":receipts}
                 return [{"role":"system","content":system},{"role":"user","content":content}],ids,coverage
             if level > 1 and len(encode(notes)) >= len(encode(items)):

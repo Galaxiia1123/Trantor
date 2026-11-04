@@ -1338,14 +1338,18 @@ $("branch").onclick = safe(async () => {
   location.hash = "project/" + p.id;
 });
 $("write-report").onclick = safe(async () => {
-  if (busy) return; const run = activeRun;
+  if (busy) return; const run = activeRun,ticket=++readingRequest;
   const plan = await api("/api/runs/" + run + "/report-plan");
+  if(run!==activeRun || ticket!==readingRequest)return;
   const max = h("input"); max.type = "number"; max.min = "1"; max.value = String(Math.max(4, plan.minimum_new_calls + 3));
   const label = h("label","本次报告调用上限"); label.append(max);
-  reading("生成推演报告", h("p","范围截至第 " + plan.cutoff_window + " 窗，共 " + plan.evidence_count + " 条证据。基础预计至少需要 " + plan.minimum_new_calls + " 次新调用。"), label,
+  const focus=h("div");
+  if(plan.questions?.length)focus.append(h("p","报告将结合这些关注问题解释结果。","hint"),
+    bullets(plan.questions.map(q=>q.title || q.field_id)));
+  reading("生成推演报告", h("p","范围截至第 " + plan.cutoff_window + " 窗，共 " + plan.evidence_count + " 条证据。基础预计至少需要 " + plan.minimum_new_calls + " 次新调用。"),focus,label,
     button("开始生成", async () => {
       const cap = Number(max.value); if (!Number.isInteger(cap) || cap < 1) throw new Error("请输入有效调用上限");
-      $("reading").close(); await job("report", "/api/runs/" + run + "/jobs/{id}/report", {max_calls:cap, expected_window:plan.cutoff_window},
+      $("reading").close(); await job("report", "/api/runs/" + run + "/jobs/{id}/report", {max_calls:cap, expected_window:plan.cutoff_window,questions:plan.questions || []},
         async res => { if (run === activeRun) { await refreshReports(routeGeneration); await showReport(res.record_id); } notice("报告已保存。"); });
     },"primary"));
 });

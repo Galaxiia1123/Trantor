@@ -364,7 +364,7 @@ def test_recheck_original_corrected_draft_without_new_calls(tmp_path,monkeypatch
 def test_material_claim_can_link_exact_frozen_source_without_rebilling(tmp_path):
     from chuantuo.services import _report_inputs, generate_report, plan_report
     sim, _, _ = build(tmp_path/"report-run")
-    snapshot,_,model_id,_,messages,_ = _report_inputs(sim)
+    snapshot,_,model_id,_,messages,_,_ = _report_inputs(sim)
     obs = sim.journal.snapshot({"observation"})[0]["id"]
     src = sim.scenario.sources[0].id
     raw = json.dumps({"title":"核对材料","sections":[{"title":"来源","text":"据原件设置场景","evidence_ids":[obs],"claims":[
