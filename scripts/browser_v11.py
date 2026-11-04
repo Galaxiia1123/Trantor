@@ -61,6 +61,10 @@ def main():
             with server(tmp,0,args.installed_python) as url:
                 page.goto(url); expect(page.get_by_role("heading",name="准备一场推演")).to_be_visible()
                 if args.screenshots: page.screenshot(path=args.screenshots/"home.png")
+                page.locator("#sample-material").select_option("notice")
+                page.locator("#read-case").click()
+                expect(page.locator("#reading-content")).to_contain_text("全员开局都知道后台计划在第 2 窗发布公告")
+                page.keyboard.press("Escape")
                 page.locator("#sample-material").select_option("guide");page.locator("#use-case").click()
                 page.locator("#source-links").get_by_role("button").click()
                 expect(page.locator("#web-url")).to_have_value("https://www.iana.org/help/example-domains")

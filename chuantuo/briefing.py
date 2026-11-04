@@ -5,9 +5,14 @@ import re
 PUBLIC_TITLE=r"(?:公开背景|共同背景|共同简报|全员共知|各方共同知道|public briefing|common knowledge)"
 HEADING=re.compile(r"^\s*#{1,6}\s+("+PUBLIC_TITLE+r")\s*[:：]?\s*$",re.I)
 INLINE=re.compile(r"^\s*"+PUBLIC_TITLE+r"\s*[:：]\s*(.+)$",re.I)
+OPENING_KNOWLEDGE=re.compile(
+    r"(?P<readers>全员|所有主体|每个主体|各主体|所有参与者|各方|双方)"
+    r"(?:在)?(?:开局|初始|最初|起初)(?:时)?(?:均|都|共同)?(?:已经|已|仅|只)?(?:知晓|知道|获知|了解)"
+    r"(?:[:：]\s*)?(?:“[^”]{1,1200}”|「[^」]{1,1200}」|\"[^\"]{1,1200}\"|[^，,。！？!?；;\n]{1,1200})"
+)
 
 
-def separate_brief(scene,sources,*,prior=None):
+def separate_brief(scene,sources,*,prior=None,include_opening_statements=False):
     if prior and prior.provenance.kind=="user":
         scene["public_brief"]=prior.model_dump(mode="json")
         return
@@ -18,6 +23,7 @@ def separate_brief(scene,sources,*,prior=None):
             continue
         active=False
         fence=None
+        example_depth=None
         for line in src.text.splitlines():
             marker=re.match(r"^\s*(`{3,}|~{3,})",line)
             if marker:
@@ -27,12 +33,25 @@ def separate_brief(scene,sources,*,prior=None):
             if fence or line.lstrip().startswith(">"):
                 continue
             if line.lstrip().startswith("#"):
-                active=bool(HEADING.fullmatch(line));continue
+                if include_opening_statements and (heading:=re.match(r"^\s*(#{1,6})\s+(.+)",line)):
+                    depth=len(heading[1])
+                    if example_depth is None or depth<=example_depth:
+                        example_depth=depth if re.search(r"示例|举例|example",heading[2],re.I) else None
+                active=not example_depth and bool(HEADING.fullmatch(line));continue
+            if example_depth:
+                continue
             match=INLINE.fullmatch(line)
             text=match[1].strip() if match else line.strip() if active else ""
-            if text and total<3000:
-                part=text[:min(1200,3000-total)]
-                excerpts.append({"source_id":src.id,"quote":part});total+=len(part)+1
+            statements=[text] if text else []
+            if not statements and include_opening_statements:
+                for sentence in re.split(r"[。！？!?；;]",line):
+                    statement=OPENING_KNOWLEDGE.match(sentence.strip())
+                    if statement and (statement["readers"]!="双方" or len(scene.get("entities",()))==2):
+                        statements.append(statement[0])
+            for text in statements:
+                if text and total<3000:
+                    part=text[:min(1200,3000-total)]
+                    excerpts.append({"source_id":src.id,"quote":part});total+=len(part)+1
     if excerpts:
         scene["public_brief"]={"text":"\n".join(q["quote"] for q in excerpts),"provenance":{"kind":"material",
             "source_ids":list(dict.fromkeys(q["source_id"] for q in excerpts)),"quotes":excerpts,

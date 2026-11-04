@@ -1113,6 +1113,7 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
     material_templates["guide"]=("example-domain-guide.md","栖灯手册 · 引用公开资料 · 2 窗",None)
     material_templates["proof"]=("proof-reply.md","桦湾演出单 · 回信期限 · 4 窗",None)
     material_templates["water"]=("water-allotment.md","林湾蓄水柜 · 共享容量 · 3 窗",None)
+    material_templates["notice"]=("cancelled-notice.md","槐庭公告 · 已知计划与取消 · 3 窗",None)
     asset_names=[row[0] for row in material_templates.values()]+["tidal-replay.json","verified-replay.json"]
     case_assets = {name:(static.parent/"templates"/name).read_bytes() for name in asset_names}
     revision = hashlib.sha256(b"".join(assets.values())).hexdigest()[:12]

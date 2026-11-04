@@ -1,6 +1,6 @@
 import pytest
 
-from chuantuo.briefing import runtime_scene
+from chuantuo.briefing import runtime_scene, separate_brief
 from chuantuo.experiments import ExperimentRequest, apply_intervention
 from chuantuo.ideas import useful_ideas
 from chuantuo.perception import Perception, decision_view
@@ -34,6 +34,34 @@ def test_source_question_moves_a_future_event_without_disclosing_the_private_cal
     assert alternate.scheduled_events[0].visibility==active.scheduled_events[0].visibility
     with pytest.raises(ValueError,match="尚未发生"):
         apply_intervention(active,spec.model_copy(update={"window":2,"through":3}),"sample")
+
+
+def test_opening_knowledge_in_plain_prose_is_scoped_to_new_preparation():
+    source=Source(id="doc",name="公告计划",text=(
+        "这是虚构背景。双方开局都知道第2窗计划发布公告，内部备用口令只由甲掌握。\n"
+        "全员第3窗才获知延期。全员开局不知道备用口令。\n"
+        "> 全员开局知道不应采用的引文。\n"
+        "## 示例\n全员开局知道不应采用的示例。\n"
+        "## 正式材料\n全员开局已知道可以主动询问。"
+    ))
+    scene={"title":"公告","background":"全局设定","domains":["公告"],
+           "entities":[{"id":"a","name":"甲","identity":"甲"},{"id":"b","name":"乙","identity":"乙"}],
+           "sources":[source.model_dump()],"scheduled_events":[{"id":"notice","window":2,"text":"实际发布公告"}]}
+    historical=Scenario11.model_validate(scene)
+    assert runtime_scene(historical).public_brief.text==""
+    prepared=historical.model_dump(mode="json")
+    separate_brief(prepared,[source],include_opening_statements=True)
+    opening=prepared["public_brief"]
+    assert opening["text"]=="双方开局都知道第2窗计划发布公告\n全员开局已知道可以主动询问"
+    assert all(q["quote"] in source.text for q in opening["provenance"]["quotes"])
+    updated=Scenario11.model_validate(prepared)
+    cancelled,_=apply_intervention(updated,ExperimentRequest(kind="event_cancel",window=0,through=2,
+                                   event_move={"event_id":"notice"}),"cancel")
+    assert not cancelled.scheduled_events and cancelled.public_brief==updated.public_brief
+    three=historical.model_dump(mode="json")
+    three["entities"].append({"id":"c","name":"丙","identity":"丙"})
+    separate_brief(three,[source],include_opening_statements=True)
+    assert "第2窗" not in three["public_brief"]["text"]
 
 
 def test_explicit_levels_keep_the_authors_timing_and_check_every_value():
