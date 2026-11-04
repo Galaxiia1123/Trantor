@@ -80,6 +80,27 @@ def test_cancelled_calendar_event_has_no_notification_or_assignment(tmp_path):
                         "d"*12,None,tmp_path/"too-late")
 
 
+def test_conditional_continuation_from_pause_carries_only_pending_goals(tmp_path):
+    gateway=CalendarGateway()
+    original=calendar_run(tmp_path/"base",gateway)
+    arm_goal(original,"a"*32,FieldWatch(actor_id="a",field_id="posted",operator="equals",target=True))
+    assert original.run()["status"]=="paused" and original.window==2
+    arm_goal(original,"b"*32,FieldWatch(actor_id="a",field_id="posted",operator="equals",target=False,deadline=4,
+                                      title="operator-only-target"))
+    before=(original.journal.directory/"events.jsonl").read_bytes()
+    child=fork_experiment(original,ExperimentRequest(kind="extend",window=2,through=3,extension_limit=5,
+                           condition="新增临时接待窗口。",audience="readers",readers=["b"]),
+                          "f"*12,None,tmp_path/"continued")
+    assert [(g["id"],g["armed_after"],g["status"]) for g in pause_goals(child)]==[("b"*32,2,"watching")]
+    assert child.run()["status"]=="completed" and child.window==3
+    assert original.status=="paused" and original.window==2
+    assert (original.journal.directory/"events.jsonl").read_bytes()==before
+    assert pause_goals(original)[1]["status"]=="watching"
+    with pytest.raises(ValueError,match="原条件延长"):
+        fork_experiment(original,ExperimentRequest(kind="extend",window=2,through=3,extension_limit=5),
+                        "d"*12,None,tmp_path/"without-condition")
+
+
 def test_goal_rechecks_after_interrupted_boundary_and_unknown_deadline_expires(tmp_path,monkeypatch):
     gateway = CalendarGateway()
     sim = calendar_run(tmp_path/"interrupted",gateway)

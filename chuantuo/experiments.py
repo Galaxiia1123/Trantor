@@ -246,8 +246,9 @@ def prepare_experiment(parent, spec, *, allow_same_field=False):
             return boundary(parent,spec.window),parent.scenario,f"从第 {spec.window} 窗换用模型，继续到第 {spec.through} 窗"
     if spec.kind=="extend":
         with parent._lock:
-            if parent.status not in {"completed","stopped"} or spec.window!=parent.window or parent.window<1:
-                raise ValueError("请从已经结束的路线最后一次结算继续观察")
+            statuses={"paused","failed","interrupted","completed","stopped"} if spec.condition.strip() else {"completed","stopped"}
+            if parent.status not in statuses or spec.window!=parent.window or parent.window<1:
+                raise ValueError("带条件续演需要从已暂停或已结束路线的最后一次提交开始。按原条件延长需要路线已经结束")
             selected=boundary(parent,spec.window)
             if spec.condition.strip():
                 intervention=spec.model_copy(update={"kind":"condition","extension_limit":None})
@@ -376,7 +377,8 @@ def fork_experiment(parent, spec, run_id, job_id, directory: Path, *, study=None
     """Copy a sealed prefix once. Stable event positions preserve private inboxes and citations."""
     with parent._lock:
         selected, scene, condition = prepare_experiment(parent,spec,allow_same_field=allow_same_field)
-        inherited_goals=parent.snapshot().get("pause_goals",[]) if spec.kind=="model_continue" else []
+        carry_goals=spec.kind=="model_continue" or (spec.kind=="extend" and bool(spec.condition.strip()))
+        inherited_goals=parent.snapshot().get("pause_goals",[]) if carry_goals else []
     if (spec.kind=="model_continue")!=(continuation_model is not None):
         raise ValueError("换用模型继续时需要明确指定后续模型")
     config = parent.config.model_copy(update={"windows":spec.through})

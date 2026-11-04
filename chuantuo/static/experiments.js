@@ -183,9 +183,10 @@ async function changeRunModel(view){
 }
 function extendRun(view,changedModel=null){
   const run=activeRun,from=view.status.window,form=h("form",null,"experiment-form"),extra=h("input"),cap=h("input");
+  const needsCondition=!changedModel && ["paused","failed","interrupted"].includes(view.status.status);
   const label=(text,field)=>{const el=h("label",text);el.append(field);return el;};
   extra.type=cap.type="number";extra.required=cap.required=true;extra.min=cap.min="1";extra.max="100";cap.max="1000000";
-  extra.value=String(changedModel ? Math.min(100,Math.max(1,view.status.windows-from)) : 2);
+  extra.value=String(changedModel || needsCondition ? Math.min(100,Math.max(1,view.status.windows-from)) : 2);
   const hint=h("p",null,"experiment-estimate"),error=h("p",null,"form-error"),go=h("button",changedModel ? "用选定模型开始新路线" : "开始延长观察","primary");
   go.type="submit";let edited=false;
   function update(){
@@ -201,8 +202,9 @@ function extendRun(view,changedModel=null){
     h("p","第 "+(from+1)+" 窗开始采用选定模型。仍在观察的暂停条件也会带入新路线。模型变化会记入方法记录。"+(changedModel.provider==="codex_cli" ? "本次使用 ChatGPT 订阅额度。" : ""),"hint"));
   form.append(h("p","从"+windowName(from)+"的已提交位置继续。主体的记忆、持续事项和仍在途中的信件随新路线保留。原来的报告和实验结果可以照常回看。"),
     label("再观察几个窗口",extra),label("新增窗口的模型调用上限",cap),hint,error,go);
-  const condition=h("textarea"),audience=h("select"),readers=h("fieldset"),until=h("input");
+  const condition=h("textarea",null,"editor"),audience=h("select"),readers=h("fieldset"),until=h("input");
   condition.rows=3;condition.maxLength=1600;
+  condition.required=needsCondition;
   condition.placeholder="例如：从下一窗起，备用场地可供申请。";
   audience.append(new Option("仅世界系统","world"),new Option("所有主体","public"),new Option("指定主体","readers"));
   audience.setAttribute("aria-label","开始时谁知道新增条件");
@@ -214,15 +216,20 @@ function extendRun(view,changedModel=null){
   until.type="number";until.min=String(from+1);until.placeholder="持续有效";
   const conditionOptions=disclosure("继续前补充一个条件",
     h("p","条件从第 "+(from+1)+" 窗开始生效，世界后果仍在窗末结算。","hint"),
-    label("新增条件（可选）",condition),label("开始时谁知道新增条件",audience),readers,
+    label(needsCondition ? "新增条件" : "新增条件（可选）",condition),label("开始时谁知道新增条件",audience),readers,
     label("新增条件最后有效的窗口（可选）",until));
   function conditionFields(){
     audience.disabled=until.disabled=!condition.value.trim();
     readers.hidden=audience.disabled || audience.value!=="readers";
-    if(!changedModel)go.textContent=condition.value.trim() ? "以新条件继续" : "开始延长观察";
+    if(!changedModel){
+      go.textContent=needsCondition || condition.value.trim() ? "以新条件继续" : "开始延长观察";
+      if(!busy)go.disabled=needsCondition && !condition.value.trim();
+    }
   }
   condition.oninput=audience.onchange=conditionFields;conditionFields();
+  conditionOptions.open=needsCondition;
   if(!changedModel)form.insertBefore(conditionOptions,hint);
+  if(needsCondition)form.insertBefore(h("p","仍在观察的暂停目标会带入新路线。","hint"),hint);
   form.onsubmit=async e=>{
     e.preventDefault();if(busy||go.disabled||run!==activeRun)return;
     go.disabled=true;error.textContent="";
@@ -238,9 +245,9 @@ function extendRun(view,changedModel=null){
       }
       await job("experiment",path,payload,
         async result=>{$("reading").close();location.hash="run/"+result.run_id+"/"+(from+1);});
-    }catch(err){error.textContent=err.message;}finally{go.disabled=false;}
+    }catch(err){error.textContent=err.message;}finally{go.disabled=false;conditionFields();}
   };
-  reading(changedModel ? "用当前模型继续推演" : "从原终点继续观察",form);
+  reading(changedModel ? "用当前模型继续推演" : needsCondition ? "从此处带条件继续" : "从原终点继续观察",form);
 }
 const wakeText = reason => ({message:"收到定向消息，重新判断。",external_event:"收到外部事件通知，重新判断。",visible_change:"可见处境发生变化，重新判断。",due:"到达复看窗口或事项期限，重新判断。"}[reason] || "主体重新判断。");
 
@@ -311,7 +318,7 @@ function showExperimentTools(view) {
   const source=h("a","回看原路线"); source.href="#run/"+meta.parent_id+"/"+meta.window;
   if(meta.reuse_first_round)root.append(h("p","本路线开启了首轮沿用。完整输入一致且通过当前校验的判断采用原文，记录中可查看来源。","hint"));
   if(continuationKinds.has(meta.kind)){
-    source.textContent=meta.kind==="extend" ? "回到原路线终点" : "回到原路线的此处";
+    source.textContent=meta.kind==="extend" && !meta.continuation_condition ? "回到原路线终点" : "回到原路线的此处";
     if(meta.continuation_condition){
       const names=Object.fromEntries(view.actors.map(actor=>[actor.id,actor.name]));
       const scope=meta.audience==="public" ? "所有主体" : meta.audience==="readers" ? meta.readers.map(id=>names[id]||id).join("、") : "仅世界系统";

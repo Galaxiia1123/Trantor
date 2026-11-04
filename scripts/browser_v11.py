@@ -497,7 +497,7 @@ def main():
                 expect(page.locator("#experiment-tools")).to_contain_text("带条件续演")
                 expect(page.locator("#experiment-tools")).to_contain_text("至第 10 窗末")
                 expect(page.locator("#window-status")).to_contain_text("第 10 窗 / 共 10 窗")
-                page.get_by_role("link",name="回到原路线终点").click()
+                page.get_by_role("link",name="回到原路线的此处").click()
                 expect(page.locator("#window-status")).to_contain_text("第 9 窗 / 共 9 窗")
                 page.goto(run_url)
                 page.locator("#window").select_option("1")

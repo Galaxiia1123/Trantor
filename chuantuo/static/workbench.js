@@ -1036,6 +1036,8 @@ function renderWindow(view) {
   }
   if(!isCase && !view.can_change_model && view.format_version==="1.1" && s.window>0 && ["completed","stopped"].includes(s.status))
     controls.append(button("延长观察",()=>extendRun(view),"secondary"));
+  if(!isCase && !view.can_change_model && view.format_version==="1.1" && s.window>0 && ["paused","failed","interrupted"].includes(s.status))
+    controls.append(button("带新条件继续",()=>extendRun(view),"secondary"));
   if(!isCase && view.can_change_model && ["paused","failed","interrupted","completed","stopped"].includes(s.status))
     controls.append(button("用当前模型继续",()=>changeRunModel(view),"secondary"));
   const feed = $("events"); feed.replaceChildren();
