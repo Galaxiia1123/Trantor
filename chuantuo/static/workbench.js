@@ -70,8 +70,15 @@ function failureCard(message) {
     invalid_response:["接口没有返回可用的文字回答","请核对模型是否支持当前接口协议。"],
     incomplete_response:["接口返回的回答未完成","请检查接口状态及输出设置，再决定是否重试。"],
     response_not_completed:["接口没有完成本次回答","请检查接口状态及输出设置，再决定是否重试。"],
+    cli_missing:["未找到可用的 Codex CLI","请安装 CLI 并在本机完成 ChatGPT 登录。"],
+    cli_version:["Codex CLI 需要更新","请更新至支持独立临时调用的 CLI 版本。"],
+    cli_timeout:["等待订阅 CLI 回答超时","请检查网络和 CLI 状态，再恢复此任务。"],
+    cli_limit:["ChatGPT 订阅额度暂不可用","请在 Codex 中查看额度与恢复时间，再恢复此任务。"],
+    cli_failed:["订阅 CLI 未完成回答","请检查本机 ChatGPT 登录、模型权限和可用额度。"],
+    cli_tools:["CLI 返回了额外工具调用","本次回答未采用。请检查 CLI 版本与配置。"],
+    cli_io:["订阅 CLI 本机调用未完成","请检查 CLI 是否可启动以及临时目录是否可读写。"],
   };
-  for(const match of text.matchAll(/provider=(openai|anthropic|deepseek|custom|demo)\s+model=\S+\s+status=([a-z0-9_]+):/g)){
+  for(const match of text.matchAll(/provider=(openai|anthropic|deepseek|custom|demo|codex_cli)\s+model=\S+\s+status=([a-z0-9_]+):/g)){
     const [,provider,code]=match;
     const entry=code==="http_402" && provider==="deepseek"
       ? ["DeepSeek 账户余额不足","请先在 DeepSeek 账户补充可用余额，再重试此任务。"]
@@ -163,41 +170,84 @@ function readSeedSource(source, scene) {
 }
 function showProfile() {
   const m = profile?.model;
+  const missing = m?.provider === "codex_cli" ? "检查 CLI 登录" : "补充凭据";
   $("open-model").classList.toggle("ready", Boolean(profile?.ready));
-  $("open-model").querySelector("span").textContent = !m ? "配置模型" : profile.ready ? m.model : "补充凭据";
-  const label=!m ? "配置模型" : (profile.ready ? "模型设置 · " : "补充凭据 · ")+m.model;
+  $("open-model").querySelector("span").textContent = !m ? "配置模型" : profile.ready ? m.model : missing;
+  const label=!m ? "配置模型" : (profile.ready ? (m.provider==="codex_cli" ? "ChatGPT 订阅 · " : "模型设置 · ") : missing+" · ")+m.model;
   $("open-model").title=label;$("open-model").setAttribute("aria-label",label);
+}
+function modelFields() {
+  const provider=$("provider").value, cli=provider==="codex_cli";
+  for(const id of ["base-url-label","model-key-label","protocol-label"]) $(id).hidden=cli;
+  $("thinking-label").hidden=!cli && provider!=="deepseek";
+  const disabled=$("thinking").querySelector('[value="disabled"]');disabled.hidden=cli;disabled.disabled=cli;
+  for(const option of $("thinking").querySelectorAll("[data-cli]")) {option.hidden=!cli;option.disabled=!cli;}
+  if(cli && $("thinking").value==="disabled") $("thinking").value="default";
+  if(!cli && ["medium","xhigh","ultra"].includes($("thinking").value)) $("thinking").value="default";
+  $("output-limit-label").textContent=cli ? "输出长度提示（token）" : "输出 token 上限";
+  $("key-hint").textContent=cli
+    ? "使用本机 Codex CLI 的 ChatGPT 登录，消耗同一账户的订阅额度。每次请求单独启动，输出长度作为提示。"
+    : profile?.key_storage==="session" ? "填写的密钥只在本次服务运行期间有效。可用提供商环境变量跨重启配置。"
+    : "填写的密钥由当前 Windows 账户加密保存。官方接口也可读取对应环境变量。";
+}
+async function inspectCli(suggestModel=false) {
+  const original=$("model-name").value, effort=$("thinking").value;
+  try {
+    const status=await api("/api/model/cli");
+    if(!$("model-dialog").open || $("provider").value!=="codex_cli") return;
+    if(suggestModel && $("model-name").value===original && status.model) {
+      $("model-name").value=status.model;
+      if($("thinking").value===effort)$("thinking").value=status.thinking || "default";
+    }
+    const issue=!status.installed ? "未检测到 CLI。请先安装 Codex CLI，并运行 codex login 使用 ChatGPT 登录。"
+      : !status.supported ? "CLI 需要更新至支持 --ignore-user-config 和 --ephemeral 的版本。"
+      : !status.logged_in ? "请运行 codex login，选择 ChatGPT 账户完成登录。" : "已检测到本机 ChatGPT 登录。";
+    $("key-hint").textContent=issue+" 每次请求单独启动，使用订阅额度。输出长度作为提示。";
+  } catch(err) {
+    if($("model-dialog").open && $("provider").value==="codex_cli") $("model-error").textContent=err.message;
+  }
 }
 function modelDialog() {
   const m = profile?.model || {};
   $("provider").value = m.provider || "custom"; $("model-name").value = m.model || "";
   $("base-url").value = m.base_url || ""; $("protocol").value = m.protocol || "";
-  $("thinking").value = m.thinking || "default"; $("thinking-label").hidden = $("provider").value !== "deepseek";
+  $("thinking").value = m.thinking || "default";
   $("context-limit").value = m.context_limit_chars || 120000; $("output-limit").value = m.max_tokens || 4096;
   $("model-key").value = ""; $("model-error").textContent = "";
-  $("key-hint").textContent = profile?.key_storage === "windows_user" ? "填写的密钥由当前 Windows 账户加密保存。官方接口也可读取对应环境变量。" : "填写的密钥只在本次服务运行期间有效。可用提供商环境变量跨重启配置。";
+  $("restore-model").hidden=!profile?.previous_model;
+  $("restore-model").textContent="切回 "+(profile?.previous_model?.model || "之前的模型");
+  modelFields();
   $("model-dialog").showModal();
+  if(m.provider==="codex_cli") void inspectCli();
 }
 $("open-model").onclick = modelDialog;
 $("provider").onchange = () => {
   const deepseek = $("provider").value === "deepseek";
-  $("thinking-label").hidden = !deepseek;
+  $("model-key").value="";$("model-error").textContent="";
   if (deepseek && profile?.model?.provider !== "deepseek") $("thinking").value = "disabled";
+  modelFields();
+  if($("provider").value==="codex_cli") void inspectCli(profile?.model?.provider!=="codex_cli");
 };
 document.querySelectorAll("dialog .close").forEach(b => b.onclick = () => b.closest("dialog").close());
 $("model-dialog").addEventListener("close", () => { $("model-key").value = ""; });
 $("model-form").onsubmit = async event => {
   event.preventDefault(); const old = profile?.model || {};
-  const provider = $("provider").value, base_url = $("base-url").value.trim() || null;
+  const provider = $("provider").value, cli=provider==="codex_cli", base_url = cli ? null : $("base-url").value.trim() || null;
   const same = old.provider === provider && old.base_url === base_url;
   const model = {...(same ? old : {}), provider, base_url, model:$("model-name").value.trim(),
-    protocol:$("protocol").value || null, thinking:provider === "deepseek" ? $("thinking").value : "default",
+    protocol:cli ? null : $("protocol").value || null, thinking:cli || provider === "deepseek" ? $("thinking").value : "default",
     context_limit_chars:Number($("context-limit").value), max_tokens:Number($("output-limit").value)};
+  if(cli) Object.assign(model,{api_key_env:null,workspace_id_env:null,supports_images:false,json_output:false,max_retries:0,timeout_seconds:same ? old.timeout_seconds : 180});
   try {
-    profile = await api("/api/model", "PUT", {model, key:$("model-key").value || null});
-    $("model-dialog").close(); showProfile(); if (draft) renderDraft(); notice(profile.ready ? "模型配置已保存。" : "模型名称已保存，请补充凭据。");
+    profile = await api("/api/model", "PUT", {model, key:cli ? null : $("model-key").value || null});
+    $("model-dialog").close(); showProfile(); if (draft) renderDraft(); notice(profile.ready ? "模型配置已保存。" : cli ? "模型已保存，请完成本机 CLI 登录。" : "模型名称已保存，请补充凭据。");
   } catch (err) { $("model-error").textContent = err.message; }
 };
+$("restore-model").onclick = safe(async () => {
+  profile=await api("/api/model/restore","POST");
+  $("model-dialog").close();showProfile();if(draft)renderDraft();
+  notice("已切回 "+profile.model.model+"。");
+});
 function reading(title, ...content) {
   readingRequest++;
   if ($("reading").open) {
@@ -654,14 +704,12 @@ function renderDraft() {
       renderDraft(); notice("已保存项目第 " + project.version + " 版。");
     }));
   if (profile?.ready && project && !sameValue(profile.model,config.model)) {
-    const same = ["provider","model","base_url","protocol"].every(k => profile.model[k] === config.model[k]);
-    if (same) adv.append(button("采用此接口的本机配置", async () => {
+    adv.append(button("采用当前模型 "+profile.model.model, async () => {
       const old = draft.config;
       draft.config = {...old,model:profile.model};
-      try { await saveProject("为相同接口绑定本机凭据"); } catch (err) { draft.config = old; throw err; }
-      renderDraft(); notice("已采用当前接口的本机配置。");
+      try { await saveProject("为后续推演采用当前模型配置"); } catch (err) { draft.config = old; throw err; }
+      renderDraft(); notice("已保存采用当前模型的场景版本。");
     }));
-    else adv.append(button("用当前模型重新整理",prepareScene));
   }
   root.append(disclosure("高级编辑", adv));
   if (project) {

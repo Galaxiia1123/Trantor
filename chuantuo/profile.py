@@ -51,15 +51,19 @@ class ModelProfile:
 
     def view(self):
         with self.lock:
+            previous=self.saved.get("previous_model")
             return {"model":self.model.model_dump(mode="json") if self.model else None,
                     "ready":bool(self.model and credential_ready(self.model)),
-                    "key_storage":"windows_user" if os.name == "nt" else "session"}
+                    "key_storage":"windows_user" if os.name == "nt" else "session",
+                    "previous_model":{k:previous[k] for k in ("provider","model")} if previous else None}
 
     def save(self, request):
         model = request.model
         if model.provider == "demo":
             raise ValueError("请选择实际使用的模型接口")
         secret = request.key.get_secret_value() if request.key else ""
+        if model.provider == "codex_cli" and secret:
+            raise ValueError("CLI 使用本机 ChatGPT 登录，请清空 API 密钥输入框")
         if secret and (not secret.isascii() or any(ord(c) <= 32 or ord(c) == 127 for c in secret)):
             raise ValueError("密钥中包含不可用于请求头的字符")
         if secret and any(secret in str(value) for value in model.model_dump().values()):
@@ -76,9 +80,19 @@ class ModelProfile:
                 model = model.model_copy(update={"api_key_env":self.model.api_key_env})
             if not model.api_key_env and model.base_url and model.provider in _BASE_URLS and scope[1] != _BASE_URLS[model.provider]:
                 raise ValueError("更换 API 地址后请为该地址填写密钥或指定其环境变量")
+            previous = self.model.model_dump(mode="json") if self.model and self.model.provider != model.provider else self.saved.get("previous_model")
             saved = {"model":model.model_dump(mode="json"),"keys":keys}
+            if previous:
+                saved["previous_model"] = previous
             atomic_json(self.path, saved)
             if secret:
                 register_key(ref, scope, secret)
             self.saved, self.model = saved, model
             return self.view()
+
+    def restore_previous(self):
+        with self.lock:
+            previous = self.saved.get("previous_model")
+            if not previous:
+                raise ValueError("尚未保存可切回的模型配置")
+            return self.save(ProfileInput(model=ModelConfig.model_validate(previous)))

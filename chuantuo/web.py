@@ -287,8 +287,19 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
     def save_model(request: ProfileInput):
         return profile.save(request)
 
+    @app.get("/api/model/cli")
+    def cli_status():
+        from .codex_cli import status
+        return status()
+
+    @app.post("/api/model/restore")
+    def restore_model():
+        return profile.restore_previous()
+
     def submit_preparation(job_id, request, model, parent=None):
         if not model or (owns_gateway and not credential_ready(model)):
+            if model and model.provider == "codex_cli":
+                raise ValueError("请先安装支持临时调用的 Codex CLI，并用 ChatGPT 账户完成本机登录")
             raise ValueError("请先配置本次使用的模型与凭据")
         protect_credentials(request.model_dump(mode="json"), [model])
         def run(progress):

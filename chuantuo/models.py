@@ -105,7 +105,7 @@ class ModelConfig(BaseModel):
         revalidate_instances="always",
     )
 
-    provider: Literal["openai", "anthropic", "deepseek", "custom", "demo"]
+    provider: Literal["openai", "anthropic", "deepseek", "custom", "demo", "codex_cli"]
     model: str = Field(min_length=1, max_length=256)
     base_url: str | None = None
     api_key_env: str | None = None
@@ -119,7 +119,7 @@ class ModelConfig(BaseModel):
     max_retries: int | None = Field(default=0, ge=0, strict=True)
     retry_delay_seconds: float = Field(default=2, gt=0, le=30, allow_inf_nan=False)
     json_output: bool = False
-    thinking: Literal["default", "disabled", "low", "high", "max"] = "default"
+    thinking: Literal["default", "disabled", "low", "medium", "high", "xhigh", "max", "ultra"] = "default"
     supports_images: bool = False
 
     @field_validator("model")
@@ -165,6 +165,14 @@ class ModelConfig(BaseModel):
         protect_credentials([self.model,self.base_url,self.api_key_env], [self])
         if re.match(r"^sk-(?:proj-|ant-|live-)?[A-Za-z0-9_-]{24,}$",self.model):
             raise ValueError("模型名疑似密钥，请填写模型编号")
+        if self.provider == "codex_cli":
+            if any((self.base_url,self.api_key_env,self.protocol,self.workspace_id_env,self.supports_images,self.json_output)):
+                raise ValueError("Codex CLI 使用本机订阅登录及文本任务，请清空 API、图片与强制 JSON 接口选项")
+            if self.thinking == "disabled":
+                raise ValueError("Codex CLI 请使用模型支持的推理强度")
+            if self.max_retries != 0:
+                raise ValueError("CLI 连接重试请设为 0，失败后可从工作台恢复")
+            return self
         if self.provider == "custom" and self.base_url is None:
             raise ValueError("custom provider requires base_url")
         allowed = {"openai":{"responses","chat_completions"}, "anthropic":{"messages"}, "deepseek":{"chat_completions"},
@@ -181,10 +189,14 @@ class ModelConfig(BaseModel):
             raise ValueError("json_output currently requires a Chat Completions provider")
         if self.thinking != "default" and (self.provider != "deepseek" or self.wire_protocol != "chat_completions"):
             raise ValueError("此思考参数适用于 DeepSeek Chat Completions 接口")
+        if self.provider == "deepseek" and self.thinking not in {"default","disabled","low","high","max"}:
+            raise ValueError("DeepSeek 请使用默认、关闭、低、高或最高思考强度")
         return self
 
     @property
     def wire_protocol(self):
+        if self.provider == "codex_cli":
+            return "codex_cli"
         if self.protocol:
             return self.protocol
         endpoint = (self.base_url or "").rstrip("/")
@@ -203,6 +215,10 @@ class RetryStopped(ModelError):
 
 
 def credential_ready(config: ModelConfig) -> bool:
+    if config.provider == "codex_cli":
+        from .codex_cli import status
+        state = status()
+        return state["supported"] and state["logged_in"]
     if config.provider == "demo":
         return True
     name = config.api_key_env or _KEY_ENVS.get(config.provider)
@@ -224,7 +240,7 @@ def _copy_messages(config: ModelConfig, messages: list[dict]) -> list[dict]:
     copied: list[dict[str, str]] = []
     total = 0
     roles = {"system", "user", "assistant"}
-    if config.provider in {"openai", "custom", "demo"} and config.wire_protocol != "messages":
+    if config.provider in {"openai", "custom", "demo", "codex_cli"} and config.wire_protocol != "messages":
         roles.add("developer")
     for message in messages:
         if not isinstance(message, dict) or set(message) != {"role", "content"}:
@@ -261,6 +277,7 @@ class ModelGateway:
         self._transport = transport
         self._client_lock = threading.Lock()
         self._clients = {}
+        self._processes = set()
         self._finalizers = []
         self._closed = False
 
@@ -280,6 +297,19 @@ class ModelGateway:
             self._closed = True
             for finalize in self._finalizers:
                 finalize()
+            for process in self._processes:
+                if process.poll() is None:
+                    process.kill()
+
+    def _register_process(self,process):
+        with self._client_lock:
+            if self._closed:
+                raise ModelError("模型接口已关闭")
+            self._processes.add(process)
+
+    def _unregister_process(self,process):
+        with self._client_lock:
+            self._processes.discard(process)
 
     def _receipt(self, config, attempt, started, response=None, error=None, secret=None):
         sink = _receipt_sink.get()
@@ -355,6 +385,15 @@ class ModelGateway:
             protect_credentials([part["content"] for part in copied],[config])
         except ValueError:
             raise _failure(config,"credential_in_prompt","configured credential appears in message content") from None
+
+        if config.provider == "codex_cli":
+            from .codex_cli import complete
+            result = complete(config,copied,self._register_process,self._unregister_process)
+            try:
+                protect_credentials(result,[config])
+            except ValueError:
+                raise _failure(config,"credential_in_response","provider response contained a credential") from None
+            return result
 
         if config.provider == "demo":
             try:
