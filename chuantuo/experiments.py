@@ -161,7 +161,7 @@ def compare(left, right, left_window=None, right_window=None):
 
 class EventMove(Record):
     event_id: Identifier
-    new_window: int = Field(ge=1,strict=True)
+    new_window: int | None = Field(default=None,ge=1,strict=True)
 
 
 class DeliveryMove(Record):
@@ -172,7 +172,7 @@ class DeliveryMove(Record):
 class ExperimentRequest(Record):
     window: int = Field(ge=0)
     through: int = Field(ge=1)
-    kind: Literal["condition","field","opening","transit","delivery_time","event_time","repeat","extend","model_continue"] = "condition"
+    kind: Literal["condition","field","opening","transit","delivery_time","event_time","event_cancel","repeat","extend","model_continue"] = "condition"
     extension_limit: int | None = Field(default=None,ge=1,le=1_000_000,strict=True)
     ends_window: int | None = Field(default=None,ge=1,strict=True)
     condition: str = Field(default="", max_length=1600)
@@ -207,10 +207,12 @@ class ExperimentRequest(Record):
             raise ValueError("单封信的新到达日期须在分岔之后。发件正文和收件人沿用原信")
         if self.kind=="transit" and (self.audience!="world" or self.condition.strip()):
             raise ValueError("线路实验只改变指定方向的通信时效，时效由通信双方知晓")
-        if (self.kind=="event_time")!=(self.event_move is not None):
+        if (self.kind in {"event_time","event_cancel"})!=(self.event_move is not None):
             raise ValueError("事件日期实验需要选择一个日历事件及新的发生窗口")
-        if self.kind=="event_time" and (self.audience!="world" or self.condition.strip() or self.event_move.new_window<=self.window):
+        if self.kind=="event_time" and (self.audience!="world" or self.condition.strip() or self.event_move.new_window is None or self.event_move.new_window<=self.window):
             raise ValueError("新日期必须晚于分岔点，原事件的内容与通知范围沿用原设定")
+        if self.kind=="event_cancel" and (self.event_move.new_window is not None or self.audience!="world" or self.condition.strip()):
+            raise ValueError("取消预定事件时，新的日期须为空，主体继续依据此前的所知行动")
         if (self.audience == "readers") != bool(self.readers) or len(set(self.readers)) != len(self.readers):
             raise ValueError("请选择实际获知条件的主体")
         if self.kind == "repeat" and self.audience != "world":
@@ -318,17 +320,29 @@ def apply_intervention(baseline,spec,source_id,state=None,configs=(),*,allow_sam
             "provenance":{"kind":"user","explanation":"操作者在对照实验中指定新发件的送达时效。"}})
         timing=f"发出后第 {r.transit_windows} 窗的窗首送达" if r.transit_windows else "发出当轮结束时送达"
         condition=f"{names[r.source]}发给{names[r.target]}的新消息，{timing}"
-    elif spec.kind=="event_time":
+    elif spec.kind in {"event_time","event_cancel"}:
         move=spec.event_move
         event=next((item for item in scene["scheduled_events"] if item["id"]==move.event_id),None)
         if not event or event["window"]<=spec.window:
             raise ValueError("请选择在分岔时尚未发生的已定义事件")
         original=event["window"]
-        if original==move.new_window or min(original,move.new_window)>spec.through:
-            raise ValueError("两个日期应不同，并至少有一个落在观察区间内")
-        event["window"]=move.new_window
-        event["provenance"]={"kind":"user","explanation":f"对照实验将原定第 {original} 窗的事件改至第 {move.new_window} 窗，沿用原事件内容和通知范围。"}
-        condition=f"把“{event['text'][:90]}”从第 {original} 窗改到第 {move.new_window} 窗"
+        if spec.kind=="event_cancel":
+            if original>spec.through:
+                raise ValueError("请把比较终点选到原定事件所在窗口或之后")
+            scene["scheduled_events"].remove(event)
+            condition=f"取消原定第 {original} 窗的“{event['text'][:90]}”"
+            scene["rules"].append({
+                "text":f"本路线取消原定第 {original} 窗的外部事件 {event['id']}（{event['text']}）。"
+                       "该事件的预设通知和预设字段赋值一并撤销。若主体采取其他行动，请根据实际行动另行判断后果。",
+                "active_from":spec.window+1,"visibility":{"public":False,"readers":[]},
+                "provenance":{"kind":"user","explanation":"操作者取消尚未发生的日历事件，作为本路线的客观条件。"},
+            })
+        else:
+            if original==move.new_window or min(original,move.new_window)>spec.through:
+                raise ValueError("两个日期应不同，并至少有一个落在观察区间内")
+            event["window"]=move.new_window
+            event["provenance"]={"kind":"user","explanation":f"对照实验将原定第 {original} 窗的事件改至第 {move.new_window} 窗，沿用原事件内容和通知范围。"}
+            condition=f"把“{event['text'][:90]}”从第 {original} 窗改到第 {move.new_window} 窗"
     elif condition:
         scene["rules"].append({"text":condition, "active_from":spec.window + 1,"active_until":spec.ends_window,
             "visibility":{"public":spec.audience == "public","readers":spec.readers},
@@ -385,12 +399,17 @@ def fork_experiment(parent, spec, run_id, job_id, directory: Path, *, study=None
         expected=deepcopy(expected)
         expected[change.entity_id][change.field_id]=change.value
         marker["opening_state_sha256"]=hashlib.sha256(encode(expected).encode()).hexdigest()
-    if spec.kind=="event_time":
+    cancelled=deepcopy((parent.experiment or {}).get("cancelled_events",[]))
+    if spec.kind in {"event_time","event_cancel"}:
         source_event=next(e for e in parent._scenario.scheduled_events if e.id==spec.event_move.event_id)
         marker["original_event"]={"id":source_event.id,"window":source_event.window,"provenance":source_event.provenance.model_dump(mode="json")}
         if source_event.window<=parent.window:
             receipts,_=parent.journal.window_rows(source_event.window,0,kind="external_event")
             marker["original_event"]["record"]=next((e["id"] for e in receipts if e["data"]["id"]==source_event.id and e["id"] not in parent._discarded),None)
+        if spec.kind=="event_cancel":
+            cancelled.append({"event":source_event.model_dump(mode="json"),"after_window":spec.window,"source_run":parent.run_id})
+    if cancelled:
+        marker["cancelled_events"]=cancelled
     directory.mkdir(parents=True, exist_ok=False)
     cutoff = int(selected["event_id"][1:])
     with (parent.journal.directory/"events.jsonl").open("rb") as source, (directory/"events.jsonl").open("xb") as dest:

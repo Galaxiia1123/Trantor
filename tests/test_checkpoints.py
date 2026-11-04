@@ -56,6 +56,30 @@ def test_pause_goal_survives_restart_runs_once_and_stays_out_of_branches(tmp_pat
         arm_goal(restored,"b"*32,question)
 
 
+def test_cancelled_calendar_event_has_no_notification_or_assignment(tmp_path):
+    gateway=CalendarGateway()
+    restored=calendar_run(tmp_path/"base",gateway)
+    assert restored.run()["status"]=="completed"
+    original=(restored.journal.directory/"events.jsonl").read_bytes()
+    cancelled=fork_experiment(restored,ExperimentRequest(kind="event_cancel",window=1,through=3,event_move={"event_id":"notice"}),
+                              "f"*12,None,tmp_path/"cancelled")
+    assert not cancelled.scenario.scheduled_events and cancelled.run()["status"]=="completed"
+    assert cancelled.state["a"]["posted"] is None and restored.state["a"]["posted"] is True
+    assert not cancelled.journal.snapshot({"external_event"})
+    for event in cancelled.journal.snapshot({"model_input"}):
+        if event["data"]["purpose"]=="agent":
+            assert "预设通知和预设字段赋值一并撤销" not in str(event["data"]["messages"])
+    assert (restored.journal.directory/"events.jsonl").read_bytes()==original
+    from fastapi.testclient import TestClient
+    from chuantuo.web import create_app
+    with TestClient(create_app(tmp_path,gateway)) as client:
+        rows=client.get("/api/runs/"+cancelled.run_id+"/calendar").json()
+        assert rows[0]["status"]=="cancelled" and rows[0]["record"] is None and rows[0]["after_window"]==1
+    with pytest.raises(ValueError,match="尚未发生"):
+        fork_experiment(restored,ExperimentRequest(kind="event_cancel",window=2,through=3,event_move={"event_id":"notice"}),
+                        "d"*12,None,tmp_path/"too-late")
+
+
 def test_goal_rechecks_after_interrupted_boundary_and_unknown_deadline_expires(tmp_path,monkeypatch):
     gateway = CalendarGateway()
     sim = calendar_run(tmp_path/"interrupted",gateway)

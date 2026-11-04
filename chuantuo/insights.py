@@ -122,6 +122,7 @@ def watch_window(simulation, selected=None, offset=0, limit=100, actor_id=None, 
                     model_at_window=change["after"]["model"]
         return {"title":scene.title, "format_version":getattr(scene,"format_version","1.0"),
                 "scheduled_count":len(getattr(scene,"scheduled_events",[])),"timed_rule_count":sum(bool(getattr(r,"active_until",None)) for r in scene.rules),
+                "cancelled_event_count":len((simulation.experiment or {}).get("cancelled_events",[])),
                 "has_mail_routes":bool(getattr(scene,"mail_routes",[])),
                 "capacity_count":len(getattr(scene,"capacity_pools",())),
                 "has_requested_replies":simulation.journal.has_requested_mail(committed,simulation._discarded),

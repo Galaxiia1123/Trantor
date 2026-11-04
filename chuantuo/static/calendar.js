@@ -6,14 +6,14 @@ function eventAudience(event, actors) {
   return names.length ? "通知"+names.join("、") : "仅世界系统知情";
 }
 
-function eventCard(event, actors) {
+function eventCard(event, actors, cancelled=false) {
   const card=h("article",null,"cohort");
   const origin=({user:"用户设定",material:"文稿原文",ai_assumption:"模拟假设",missing:"资料待补"})[event.provenance?.kind] || "用户设定";
-  card.append(h("small",windowName(event.window)+" · "+eventAudience(event,actors)+" · "+origin,"quiet"),h("p",event.text));
+  card.append(h("small",(cancelled ? "原定" : "")+windowName(event.window)+" · "+eventAudience(event,actors)+" · "+origin,"quiet"),h("p",event.text));
   for(const set of event.assignments || []) {
     const actor=actors.find(a=>a.id===set.entity_id);
     const field=Array.isArray(actor?.fields) ? actor.fields.find(f=>f.id===set.field_id) : actor?.fields?.[set.field_id];
-    card.append(h("p","窗末结算："+(actor?.name || set.entity_id)+"的"+(field?.label || set.field_id)+" → "+watchValue(set,field?.unit),"hint"));
+    card.append(h("p",(cancelled ? "原定窗末更新" : "窗末结算")+" · "+(actor?.name || set.entity_id)+"的"+(field?.label || set.field_id)+" → "+watchValue(set,field?.unit),"hint"));
   }
   return card;
 }
@@ -146,7 +146,13 @@ async function openRunCalendar(view) {
       h("small",eventAudience(rule,view.actors),"quiet"));body.append(card);
   }
   for(const item of rows) {
-    const card=eventCard(item.event,view.actors);
+    const card=eventCard(item.event,view.actors,item.status==="cancelled");
+    if(item.status==="cancelled"){
+      card.prepend(h("p","已取消的原定安排","eyebrow"));
+      card.append(h("p","在"+windowName(item.after_window)+"之后取消，预设通知与字段赋值一并撤销。","hint"),
+        button("查看取消依据",()=>evidence(item.cancellation_record,run),"link"));
+      body.append(card);continue;
+    }
     card.append(h("small",({scheduled:"预定中",pending:"本窗已通知，尚未提交",committed:"已随窗口提交",beyond_run:"运行结束时尚未到预定日期"})[item.status],"quiet"));
     if(item.record)card.append(evidenceLinks([item.record],run));body.append(card);
   }

@@ -193,6 +193,7 @@ interpretation 用于解释、局限及不能外推的讨论。每条结论按�
 evidence_ids 只填本次 events 的事件 id（形如 e000001）。材料编号只填在结论的 source_ids；引用文稿的章节用收录该文稿的开局事件作 evidence_ids。客观状态变化引用已提交窗口。带 simulation_ref 的来源是先前推演的快照。
 对解释明确标注“报告解释”。模拟结果不能直接作为现实结论。失败或未完成的窗口不得写成已提交。
 分岔时操作者选择的字段、日期和收件范围属于 method，引用 experiment_forked 或带 experiment 的 run_created。实际到件或状态变化另写 simulation 结论，分别引用相应的 message_delivered 或 window_committed。不要把预定到达日期直接写成已到件。
+event_cancel 撤销一项尚未发生的预定事件及其预设通知和赋值，属于方法变化。后续主体自主行动和实际字段结果应分别引用其记录，不能把取消计划本身写成已经发生的主体行动。
 如果 experiment.model_history 记录了更换模型，应按每次 starts_window 区分前后的模型。换用模型属于方法变化，不能把随后差异全部归因于场景条件。
 experiment.runtime_after 只说明分岔后采用的引擎。分岔前的方法记录以原路线为准。
 不包含密钥或内部思维链，不补造情节。不能将离线脚本演示称为真实模型实验。

@@ -2,38 +2,44 @@
 
 function eventShiftPicker(run,seed=null) {
   const node=h("fieldset",null,"value-picker"),which=h("select"),date=h("input"),notice=h("p",null,"hint");
-  node.append(h("legend","改变已有事件的日期"));
-  function field(name,input){const tag=h("label",name);input.setAttribute("aria-label",name);tag.append(input);node.append(tag);}
+  const legend=h("legend","改变已有事件的日期");node.append(legend);
+  function field(name,input){const tag=h("label",name);input.setAttribute("aria-label",name);tag.append(input);node.append(tag);return tag;}
   which.required=true;date.type="number";date.step="1";date.required=true;
-  field("要改期的外部事件",which);field("改到第几窗",date);node.append(notice);
-  let items=null,request=null,from=0,until=0,chosen="";
+  const eventLabel=field("要改期的外部事件",which),dateLabel=field("改到第几窗",date);node.append(notice);
+  let items=null,request=null,from=0,until=0,chosen="",cancel=false;
   function showDate(){
     const item=items?.find(i=>i.event.id===which.value)?.event;
-    if(!item){notice.textContent="这个分岔点以后没有可改期的事件。";return;}
+    if(!item){notice.textContent="这个观察区间没有可调整的预定事件。";return;}
     if(which.value!==chosen){
       chosen=which.value;
-      date.value=String(seed?.event_id===chosen ? seed.new_window : item.window+1);
+      date.value=String(seed?.event_id===chosen && seed.new_window!=null ? seed.new_window : item.window+1);
     }
+    if(cancel){notice.textContent="原定第 "+item.window+" 窗发生。取消后，预设通知与字段赋值一并撤销，主体继续依据此前所知行动。";return;}
     const n=Number(date.value);notice.textContent="原定第 "+item.window+" 窗发生。"+
       (n>until ? "新日期晚于本次比较终点。":"原有通知范围和预定字段值沿用。");
   }
   which.onchange=showDate;date.oninput=showDate;
   function draw(){
     const selected=which.value || seed?.event_id;
-    const eligible=items.filter(i=>i.event.window>from);
+    const eligible=items.filter(i=>i.status!=="cancelled" && i.event.window>from && (!cancel || i.event.window<=until));
     which.replaceChildren(...eligible.map(i=>new Option("第 "+i.event.window+" 窗 · "+i.event.text,i.event.id)));
     if(eligible.some(i=>i.event.id===selected))which.value=selected;
     which.disabled=false;date.min=String(from+1);showDate();
   }
-  return {node,update(enabled,start,end){
-    node.disabled=node.hidden=!enabled;from=start;until=end;if(!enabled)return;
+  return {node,update(enabled,start,end,cancelling=false){
+    node.disabled=node.hidden=!enabled;from=start;until=end;cancel=cancelling;
+    dateLabel.hidden=date.disabled=cancel;date.required=!cancel;
+    legend.textContent=cancel ? "取消一个预定事件" : "改变已有事件的日期";
+    const label=cancel ? "要取消的外部事件" : "要改期的外部事件";
+    eventLabel.firstChild.textContent=label;which.setAttribute("aria-label",label);
+    if(!enabled)return;
     if(items){draw();return;}
     if(request)return;
     which.disabled=true;notice.textContent="正在读取原路线的日历…";
     request=api("/api/runs/"+run+"/calendar").then(rows=>{items=rows;draw();}).catch(err=>{request=null;notice.textContent=err.message;});
   },read(){
     if(!which.value || !items)throw new Error("请选择尚未发生的原定事件。");
-    return {event_id:which.value,new_window:Number(date.value)};
+    return {event_id:which.value,new_window:cancel ? null : Number(date.value)};
   }};
 }
 

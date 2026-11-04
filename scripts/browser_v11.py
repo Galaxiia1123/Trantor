@@ -482,6 +482,22 @@ def main():
                 expect(page.locator("#window-status")).to_contain_text("第 10 窗 / 共 10 窗")
                 page.get_by_role("link",name="回到原路线终点").click()
                 expect(page.locator("#window-status")).to_contain_text("第 9 窗 / 共 9 窗")
+                page.goto(run_url)
+                page.locator("#window").select_option("1")
+                page.get_by_role("button",name="试一个条件",exact=True).click()
+                page.get_by_label("探索方式").select_option("event_cancel")
+                page.get_by_label("从哪里分岔").select_option("1")
+                page.get_by_label("比较到哪个窗口").select_option("2")
+                page.get_by_label("要取消的外部事件").select_option(index=0)
+                expect(page.get_by_label("改到第几窗")).to_be_hidden()
+                page.get_by_role("button",name="启动新路线",exact=True).click()
+                expect(page.locator("#experiment-tools")).to_contain_text("取消事件对照")
+                expect(page.locator("#watch-meta")).to_contain_text("已完成",timeout=25000)
+                page.get_by_role("button",name="外部事件日历",exact=True).click()
+                expect(page.locator("#reading-content")).to_contain_text("已取消的原定安排")
+                page.get_by_role("button",name="查看取消依据",exact=True).click()
+                expect(page.locator("#reading-content")).to_contain_text("event_cancel")
+                page.keyboard.press("Escape")
                 selected=page.request.get(url+"/api/model").json()["model"]
                 selected["model"]="local-script-continuation"
                 updated=page.request.put(url+"/api/model",data={"model":selected})
@@ -496,8 +512,8 @@ def main():
                 page.locator("#window").select_option("9")
                 expect(page.locator("#watch-meta")).to_contain_text("local-script-http")
                 expect(page.locator("#watch-meta")).not_to_contain_text("local-script-continuation")
-            assert len([task for _,task in endpoint.calls if task=="agent"]) == 200
-            assert len(endpoint.calls)==225 and {m for m,_ in endpoint.calls}=={"local-script-http","local-script-continuation"},endpoint.calls
+            assert len([task for _,task in endpoint.calls if task=="agent"]) == 210
+            assert len(endpoint.calls)==236 and {m for m,_ in endpoint.calls}=={"local-script-http","local-script-continuation"},endpoint.calls
             assert not errors and not endpoint.errors,(errors,endpoint.errors)
             browser.close(); print(f"Browser acceptance passed: source intake, nine windows, field and calendar experiments, suggested research question, interview, report and repeated comparisons; {len(endpoint.calls)} loopback model calls.")
     finally:

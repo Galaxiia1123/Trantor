@@ -56,7 +56,7 @@ function experimentForm(view,idea=null,priorWindow=null) {
   const timing=routeTimingPicker(view.actors);
   if(view.actors.length>=2)modes.push(["transit","改变一条线路的送达时间"]);
   const shift=eventShiftPicker(run,preset?.event_move);
-  if(view.scheduled_count)modes.push(["event_time","改变外部事件的发生日期"]);
+  if(view.scheduled_count)modes.push(["event_time","改变外部事件的发生日期"],["event_cancel","取消一个外部事件"]);
   modes.push(["repeat","按相同条件再运行一次"]);
   const kind = select("探索方式",modes);
   const range = Array.from({length:committed - earliest}, (_,i) => earliest + i);
@@ -97,7 +97,7 @@ function experimentForm(view,idea=null,priorWindow=null) {
     levels.show(fieldMode);const extra=levels.tokens().length;
     label.hidden=kind.value!=="condition";audience.parentElement.hidden=!changed;prompt.required=kind.value==="condition";
     timing.node.hidden=timing.node.disabled=kind.value!=="transit";
-    shift.update(kind.value==="event_time",Number(split.value),Number(through.value));
+    shift.update(["event_time","event_cancel"].includes(kind.value),Number(split.value),Number(through.value),kind.value==="event_cancel");
     picker.node.hidden=picker.node.disabled=!fieldMode;
     group.hidden=!changed || audience.value!=="readers";
     const windows=Number(through.value)-Number(split.value);
@@ -138,7 +138,7 @@ function experimentForm(view,idea=null,priorWindow=null) {
     try {
       const spec={window:Number(split.value),through:Number(through.value),kind:kind.value,condition:kind.value==="condition" ? prompt.value.trim() : "",
                   assignment:["field","opening"].includes(kind.value) ? picker.read() : null,route:kind.value==="transit" ? timing.read() : null,
-                  event_move:kind.value==="event_time" ? shift.read() : null,audience:scope,readers};
+                  event_move:["event_time","event_cancel"].includes(kind.value) ? shift.read() : null,audience:scope,readers};
       if(kind.value==="condition" && endInput.value!=="")spec.ends_window=Number(endInput.value);
       const contrast=!pair.disabled && pair.checked;
       const extra=levels.read(spec.assignment?.value);
@@ -163,7 +163,7 @@ function experimentForm(view,idea=null,priorWindow=null) {
 }
 
 const continuationKinds=new Set(["extend","model_continue"]);
-const experimentKind = meta => ({extend:"延长观察",model_continue:"换用模型继续",repeat:"原样重跑",field:"字段实验",opening:"开局初值实验",transit:"线路实验",delivery_time:"单封信改期",event_time:"日历实验"}[meta.kind] || "条件实验");
+const experimentKind = meta => ({extend:"延长观察",model_continue:"换用模型继续",repeat:"原样重跑",field:"字段实验",opening:"开局初值实验",transit:"线路实验",delivery_time:"单封信改期",event_time:"日历实验",event_cancel:"取消事件对照"}[meta.kind] || "条件实验");
 
 async function changeRunModel(view){
   const run=activeRun;
@@ -295,8 +295,8 @@ function showExperimentTools(view) {
   }
   const origin=h("p",null,"hint"); origin.append("第 "+meta.window+" 窗后分岔，比较至第 "+meta.through+" 窗。 ",source);
   if(meta.ends_window)origin.append("　条件从第 "+(meta.window+1)+" 窗起生效，至第 "+meta.ends_window+" 窗末结束。");
-  if(meta.kind==="event_time"){
-    origin.append("　事件内容与通知对象沿用原日历。");
+  if(["event_time","event_cancel"].includes(meta.kind)){
+    origin.append(meta.kind==="event_cancel" ? "　该事件的预设通知与字段赋值一并撤销。" : "　事件内容与通知对象沿用原日历。");
     if(meta.original_event?.record)origin.append(button("查阅原日期的事件凭据",()=>evidence(meta.original_event.record,meta.parent_id),"link"));
   }else if(meta.kind==="delivery_time"){
     origin.append("　只改变这封在途信的到件日。",button("查原发件凭据",()=>evidence(meta.delivery_move.dispatch_id,meta.parent_id),"link"));
@@ -317,9 +317,12 @@ function showExperimentTools(view) {
 }
 
 function drawExperimentComparison(root, result, actors, isLetter, options={}) {
+  const w=result.right.window,changed=result.rows.filter(r=>r.status==="different");
+  const uncertain=result.rows.filter(r=>!["different","equal"].includes(r.status)).length;
+  const counts=result.rows.length ? changed.length+" 项状态不同"+(uncertain ? " · "+uncertain+" 项尚无法比较" : "") : "本场未定义可比较字段";
+  const heading=(w ? "第 "+w+" 窗" : "开局")+" · "+counts;
   if(options.compact){
-    const changed=result.rows.filter(r=>r.status==="different"),w=result.right.window;
-    const bar=h("div",null,"compact-contrast"),title=h("strong",(w?"第 "+w+" 窗":"开局")+" · "+changed.length+" 项状态不同");
+    const bar=h("div",null,"compact-contrast"),title=h("strong",heading);
     bar.append(title);
     const names=Object.fromEntries(actors.map(a=>[a.id,a.name]));
     const show=v=>v===null?"未知":typeof v==="boolean"?(v?"是":"否"):String(v);
@@ -340,16 +343,15 @@ function drawExperimentComparison(root, result, actors, isLetter, options={}) {
     root.replaceChildren(bar,details);return;
   }
   const [leftLabel,rightLabel]=options.labels || ["原路线","新路线"];
-  const w=result.right.window, changed=result.rows.filter(r=>r.status==="different");
   const names=Object.fromEntries(actors.map(a=>[a.id,a.name]));
   const intro=h("div",null,"comparison-heading");
-  intro.append(h("strong",(w?"第 "+w+" 窗":"开局")+" · "+changed.length+" 项状态不同"));
+  intro.append(h("strong",heading));
   const first=result.first_state_difference;
   if (first!=null && first!==w) {
     const caption=first===0?"开局已有差异":"首次状态分化 · 第 "+first+" 窗";
     if(options.selectWindow)intro.append(button(caption,()=>options.selectWindow(first),"link"));
     else{const link=h("a",caption);link.href="#run/"+result.right.run_id+"/"+first;intro.append(link);}
-  } else intro.append(h("small",first===0?"开局初值不同":first!=null?"首次状态分化":"截至共同终点，未观察到字段差异","quiet"));
+  } else if(result.rows.length)intro.append(h("small",first===0?"开局初值不同":first!=null?"首次状态分化":"截至共同终点，未观察到字段差异","quiet"));
   root.append(intro);
   if(result.delivery_comparison){
     const box=h("div",null,"brief-pair"),labels=[leftLabel,rightLabel];

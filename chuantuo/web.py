@@ -700,10 +700,14 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
         sim=get_run(run_id)
         with sim._lock:
             recorded={e["data"]["id"]:e for e in sim.journal.snapshot({"external_event"}) if e["id"] not in sim._discarded}
-            return [{"event":event.model_dump(mode="json"),"record":recorded[event.id]["id"] if event.id in recorded else None,
+            rows=[{"event":event.model_dump(mode="json"),"record":recorded[event.id]["id"] if event.id in recorded else None,
                      "status":"committed" if event.window<=sim.window else "pending" if event.id in recorded else
                               "beyond_run" if sim.status in {"completed","stopped"} else "scheduled"}
                     for event in sorted(getattr(sim._scenario,"scheduled_events",[]),key=lambda e:e.window)]
+            for item in (sim.experiment or {}).get("cancelled_events",[]):
+                rows.append({"event":item["event"],"record":None,"status":"cancelled",
+                             "after_window":item["after_window"],"cancellation_record":"e000001"})
+            return sorted(rows,key=lambda row:row["event"]["window"])
 
     @app.get("/api/runs/{run_id}/windows")
     def committed_history(run_id: str, offset: int = Query(default=0,ge=0), limit: int = Query(default=40,ge=1,le=100),
