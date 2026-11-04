@@ -8,8 +8,10 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from pydantic import Field
 
 from .engine import encode
+from .schema import Record
 
 
 def now():
@@ -34,6 +36,24 @@ def atomic_json(path: Path, value, *, create_only=False):
 
 class VersionConflict(ValueError):
     pass
+
+
+class RunLabel(Record):
+    title: str = Field(default="",max_length=120,pattern=r"^[^\x00-\x1f\x7f]*$")
+    version: int = Field(default=0,ge=0,strict=True)
+
+
+def read_run_label(directory):
+    if directory is None or not (directory/"label.json").is_file():
+        return RunLabel().model_dump()
+    try:
+        with (directory/"label.json").open("r",encoding="utf-8") as stream:
+            body=stream.read(4097)
+        if len(body)>4096:
+            raise ValueError("oversized label")
+        return RunLabel.model_validate_json(body).model_dump()
+    except (OSError,ValueError):
+        return {**RunLabel().model_dump(),"error":"路线名称记录暂时无法读取，推演原文仍可回看。"}
 
 
 class Repository:
@@ -63,6 +83,20 @@ class Repository:
                     items[watch_id]=value
                 atomic_json(path,items)
             return items
+
+    def save_run_label(self, directory, request):
+        with self.lock:
+            current=read_run_label(directory)
+            if current.get("error"):
+                raise ValueError(current["error"])
+            title=request.title.strip()
+            if title==current["title"]:
+                return current
+            if request.version!=current["version"]:
+                raise VersionConflict("这条路线的名称已在别处更改，请重新打开命名窗口。")
+            result=RunLabel(title=title,version=current["version"]+1).model_dump()
+            atomic_json(directory/"label.json",result)
+            return result
 
     def save_project(self, payload: dict, project_id=None, expected_version=0):
         with self.lock:
@@ -152,15 +186,16 @@ class Repository:
             stat = path.stat()
             signature = (stat.st_size, stat.st_mtime_ns)
             cached = self._catalog.get(str(path))
+            label=read_run_label(path.parent)
             if cached and cached[0] == signature:
-                result.append({**cached[1], **({"end_state":cached[2]} if with_outcomes and cached[2] is not None else {})})
+                result.append({**cached[1], "label":label, **({"end_state":cached[2]} if with_outcomes and cached[2] is not None else {})})
                 continue
             try:
                 record = None
                 with path.open("rb") as stream:
                     record, end_state = self._summarize(stream, path)
                 self._catalog[str(path)] = (signature, record, end_state)
-                result.append({**record, **({"end_state":end_state} if with_outcomes and end_state is not None else {})})
+                result.append({**record, "label":label, **({"end_state":end_state} if with_outcomes and end_state is not None else {})})
             except (ValueError, KeyError, TypeError, OSError):
                 recoverable = False
                 if path.is_file() and stat.st_size:

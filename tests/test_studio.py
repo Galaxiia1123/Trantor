@@ -64,6 +64,36 @@ def test_project_versions_reopen_and_launch_receipt(tmp_path):
         assert file.read_bytes() == baseline
 
 
+def test_run_labels_are_versioned_separate_from_execution_and_exported(tmp_path):
+    from chuantuo.replay_export import replay_route
+    sim=Simulation(demo_scenario(),demo_config().model_copy(update={"windows":1}),directory=tmp_path/"labeled")
+    sim.run()
+    file=sim.journal.directory/"events.jsonl"
+    original=file.read_bytes()
+    path="/api/runs/"+sim.run_id
+    with TestClient(create_app(tmp_path)) as client:
+        assert client.get("/api/runs").json()["runs"][0]["label"]=={"title":"","version":0}
+        change={"title":"  提前送达的路线  ","version":0}
+        saved=client.put(path+"/label",json=change)
+        assert saved.status_code==200 and saved.json()=={"title":"提前送达的路线","version":1}
+        assert client.put(path+"/label",json=change).json()==saved.json()
+        assert client.put(path+"/label",json={"title":"过期编辑","version":0}).status_code==409
+        assert client.put(path+"/label",json={"title":"名称\n换行","version":1}).status_code==422
+        assert client.get("/api/runs").json()["runs"][0]["label"]["title"]=="提前送达的路线"
+        assert client.get(path+"/watch").json()["label"]["version"]==1
+    with TestClient(create_app(tmp_path)) as client:
+        assert client.get(path+"/label").json()["title"]=="提前送达的路线"
+        exported=replay_route(sim,1)
+        assert exported["title"]=="提前送达的路线" and exported["scenario_title"]==sim.scenario.title
+        assert exported["events"][0]["data"]["scenario"]["title"]==sim.scenario.title
+        assert client.put(path+"/label",json={"title":"","version":1}).json()["version"]==2
+        (sim.journal.directory/"label.json").write_text("broken fixture",encoding="utf-8")
+        assert client.get(path+"/watch").json()["label"]["error"]
+        assert client.get("/api/runs").json()["runs"][0]["label"]["error"]
+        assert client.put(path+"/label",json={"title":"覆盖","version":0}).status_code==400
+    assert file.read_bytes()==original
+
+
 def test_restart_restores_exact_private_memory_inbox_and_state(tmp_path):
     class PauseAtOne:
         def complete(self, model, messages):

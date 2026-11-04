@@ -2,6 +2,9 @@
   grid-template-columns:minmax(0,1fr) minmax(0,1.8fr);
 }
 #library-count { margin:12px 0 22px; }
+.run-title-line { display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; }
+.run-title-line h1 { overflow-wrap:anywhere; min-width:0; }
+.run-title-line button { flex-shrink:0; font-size:13px; }
 .route-family { padding:22px 0; border-bottom:1px solid var(--line); }
 .route-family:last-child { border-bottom:0; padding-bottom:0; }
 .route-family-head,.route-node-head {

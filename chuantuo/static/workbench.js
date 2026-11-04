@@ -796,7 +796,7 @@ function drawLibrary() {
   const matches = (...parts) => parts.some(x => String(x || "").toLocaleLowerCase().includes(query));
   const families=routeFamilies(catalog.runs).map(family=>{
     const matching=family.members.filter(run=>matches(
-      run.title,run.run_id,statuses[run.status],run.status,routeModelLabel(run),
+      run.label?.title,run.title,run.run_id,statuses[run.status],run.status,routeModelLabel(run),
       run.experiment?.condition,run.experiment && experimentKind(run.experiment)
     ));
     return {family,matching};
@@ -1002,7 +1002,14 @@ function renderWindow(view) {
   const everyone = h("option","全局推演记录"); everyone.value = "";
   scope.replaceChildren(everyone, ...view.actors.map(a => {const o = h("option",a.name + "当时可见的记录"); o.value = a.id; return o;}));
   if (names[priorScope]) scope.value = priorScope;
-  $("watch-title").textContent = view.title;
+  $("watch-title").textContent = view.label?.title || view.title;
+  $("name-run").hidden=isCase;
+  $("name-run").textContent=view.label?.title ? "重命名" : "命名路线";
+  $("name-run").onclick=safe(()=>nameRoute(activeRun));
+  $("run-scene-title").hidden=!view.label?.title || view.label.title===view.title;
+  $("run-scene-title").textContent="场景 · "+view.title;
+  $("run-label-error").hidden=!view.label?.error;
+  $("run-label-error").textContent=view.label?.error || "";
   $("export-replay").hidden=isCase;
   $("export-replay").onclick=()=>replayDownload(view);
   const mode=view.mode==="recorded_api"?"真实接口实录 · 只读回放":isCase || view.mode==="sample"?"脚本案例 · 未调用真实模型":"模型 "+(view.model_at_window || view.model);

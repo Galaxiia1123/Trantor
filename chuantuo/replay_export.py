@@ -82,7 +82,11 @@ def replay_route(sim, through):
     literals={text for model in model_configs for text in (model.base_url,model.api_key_env) if text and len(text)>=8}
     result=_redact_connections(result,sorted(literals,key=len,reverse=True))
     protect_credentials(result,model_configs)
-    return {"id":run_id,"title":title,"through":through,"events":result}
+    from .repository import read_run_label
+    label=read_run_label(sim.journal.directory)["title"]
+    protect_credentials(label,model_configs)
+    label=_redact_connections(label,sorted(literals,key=len,reverse=True))
+    return {"id":run_id,"title":label or title,"scenario_title":title,"through":through,"events":result}
 
 
 def export_replay(sim, through=None, parent=None):

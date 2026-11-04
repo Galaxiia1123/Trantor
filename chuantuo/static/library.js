@@ -2,6 +2,27 @@
 
 const openRouteFamilies=new Set(), routeFamilyLimits=new Map();
 
+async function nameRoute(run) {
+  const ticket=++readingRequest;
+  const saved=await api("/api/runs/"+run+"/label");
+  if(run!==activeRun || ticket!==readingRequest)return;
+  if(saved.error)throw new Error(saved.error);
+  const form=h("form"),input=h("input"),label=h("label","路线名称"),error=h("p",null,"form-error"),submit=h("button","保存名称","primary");
+  input.value=saved.title;input.maxLength=120;input.placeholder="例如：邀请在截止前送达";label.append(input);
+  submit.type="submit";
+  form.append(h("p","用于历史列表、观察页和导出回放。留空可恢复场景名称。","hint"),label,error,submit);
+  form.onsubmit=async event=>{
+    event.preventDefault();if(submit.disabled)return;submit.disabled=true;error.textContent="";
+    try {
+      await api("/api/runs/"+run+"/label","PUT",{title:input.value,version:saved.version});
+      if(form.isConnected && $("reading").open)$("reading").close();
+      if(run===activeRun){lastView="";await refreshWatch(routeGeneration);}
+    } catch(problem){if(form.isConnected)error.textContent=problem.message;}
+    finally {submit.disabled=false;}
+  };
+  reading("为这条路线命名",form);input.focus();input.select();
+}
+
 function routeFamilies(runs) {
   const byId=new Map(runs.map(run=>[run.run_id,run])), owners=new Map(), families=new Map();
   for(const run of runs) {
@@ -66,7 +87,7 @@ function routeModelLabel(run) {
 function familyCard(family,matching,searching) {
   const card=h("article",null,"route-family"),latest=matching[0],all=family.members;
   card.dataset.family=family.key;
-  const title=family.root?.title || all.at(-1).title;
+  const title=family.root?.label?.title || family.root?.title || all.at(-1).title;
   const head=h("div",null,"route-family-head"),heading=h("div");
   heading.append(h("h3",title),h("p",searching ? matching.length+" / "+all.length+" 条路线匹配" : all.length+" 条相关路线","hint"));
   head.append(heading,button(all.length===1 ? "回看" : "打开最近路线",()=>{location.hash="run/"+latest.run_id;}));
@@ -77,7 +98,7 @@ function familyCard(family,matching,searching) {
   if(["failed","interrupted"].includes(latest.status))line.classList.add("needs-attention");
   if(latest.status==="running")line.classList.add("is-running");
   card.append(line);
-  const name=latest.experiment ? experimentKind(latest.experiment)+" · "+(latest.experiment.condition || "原条件") : "原路线";
+  const name=latest.label?.title || (latest.experiment ? experimentKind(latest.experiment)+" · "+(latest.experiment.condition || "原条件") : "原路线");
   card.append(h("p",name,"route-latest-name"),h("small",routeModelLabel(latest),"quiet"));
   if(family.key.startsWith("missing:"))card.append(h("p","这组路线的原始记录不在本机，仍可分别回看已有结果。","hint"));
   if(family.key.startsWith("cycle:"))card.append(h("p","路线来源存在循环，请在开局记录中核对。已有记录可分别回看。","error"));
@@ -92,8 +113,9 @@ function familyCard(family,matching,searching) {
       const item=h("li",null,"route-node");item.dataset.run=run.run_id;
       item.style.setProperty("--route-depth",Math.min(depth,3));
       const top=h("div",null,"route-node-head"),label=run.experiment ? experimentKind(run.experiment) : "原路线";
-      top.append(h("strong",label),button("回看",()=>{location.hash="run/"+run.run_id;},"link"));
+      top.append(h("strong",run.label?.title || label),button("回看",()=>{location.hash="run/"+run.run_id;},"link"));
       item.append(top);
+      if(run.label?.title)item.append(h("small",label,"quiet"));
       if(run.experiment?.condition)item.append(readablePassage(run.experiment.condition));
       item.append(h("p",(statuses[run.status]||run.status)+" · "+run.window+"/"+run.windows+" 窗 · "+routeTimestamp(run)+" · "+run.run_id,"route-node-meta"));
       item.append(h("small",routeModelLabel(run),"quiet"));

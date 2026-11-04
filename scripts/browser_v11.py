@@ -288,6 +288,10 @@ def main():
                 page.wait_for_url(re.compile(r"#run/[a-f0-9]{12}"), timeout=25000)
                 expect(page.locator("#watch-meta")).to_contain_text("已完成",timeout=55000)
                 run_url = page.url; rid = run_url.split("#run/")[1]
+                page.get_by_role("button",name="命名路线",exact=True).click()
+                page.get_by_label("路线名称",exact=True).fill("潮汐港基线 · 九窗")
+                page.get_by_role("button",name="保存名称",exact=True).click()
+                expect(page.locator("#watch-title")).to_have_text("潮汐港基线 · 九窗")
                 page.locator("#window").select_option("3");page.get_by_role("button",name="查询在途与到件").click()
                 expect(page.locator("#reading-content")).to_contain_text("1 件在途，0 件已送达")
                 expect(page.get_by_role("button",name="收件时看到的内容")).to_have_count(0)
@@ -361,6 +365,7 @@ def main():
                 with browser.new_context(offline=True) as offline:
                     viewer=offline.new_page();viewer.goto(replay_file.as_uri())
                     expect(viewer.get_by_role("heading",name="过程记录")).to_be_visible()
+                    expect(viewer.get_by_role("heading",name="潮汐港基线 · 九窗",exact=True)).to_be_visible()
                     expect(viewer.locator("summary")).to_contain_text("有条件担保")
                     viewer.locator("summary").filter(has_text="有条件担保").click()
                     expect(viewer.locator("body")).to_contain_text("关注问题")

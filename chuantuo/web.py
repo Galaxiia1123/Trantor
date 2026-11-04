@@ -35,7 +35,7 @@ from .intake import MaterialStore, MAX_FILE_BYTES
 from .jobs import Jobs, fingerprint_for
 from .locking import writer_lock
 from .live import stream_events
-from .repository import Repository, VersionConflict
+from .repository import Repository, VersionConflict, RunLabel, read_run_label
 from .project_io import export_project, import_project
 from . import __version__
 from .checkpoints import arm_goal, cancel_goal, pause_goals
@@ -667,9 +667,20 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
                        actor: str | None = None, kind: Literal["expression","decision_deferred","external_event","message_dispatched","message_delivered","window_committed","settlement_rejected","model_failure"] | None = None):
         simulation=get_run(run_id)
         result=watch_window(simulation, window, offset, limit, actor, kind)
+        result["label"]=read_run_label(simulation.journal.directory)
         result["can_change_model"]=bool(isinstance(simulation.config,RunConfig11) and profile.model
                                         and simulation.config.model!=profile.model and simulation.config.model.provider!="demo")
         return result
+
+    @app.get("/api/runs/{run_id}/label")
+    def run_label(run_id:str):
+        return read_run_label(get_run(run_id).journal.directory)
+
+    @app.put("/api/runs/{run_id}/label")
+    def rename_run(run_id:str,request:RunLabel):
+        sim=get_run(run_id)
+        protect_credentials(request.title,sim.config.catalog.values())
+        return repository.save_run_label(sim.journal.directory,request)
 
     @app.get("/api/runs/{run_id}/window-strip")
     def strip(run_id:str,start:int=Query(default=1,ge=1),through:int|None=Query(default=None,ge=0),slots:int=Query(default=32,ge=2,le=64)):
