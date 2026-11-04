@@ -45,7 +45,7 @@ from .interactions import interaction_map, conversation, dispatch_ledger, reply_
 from .studies import Studies, StudyRequest, study_notes
 from .readings import ReadingRequest, read_field
 from .asking import PlanQuestion, plan_question
-from .story import field_reason, window_strip
+from .story import actor_activity, field_reason, window_strip
 from .documents import document_history
 from .ideas import useful_ideas
 from .briefing import runtime_scene
@@ -647,6 +647,12 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
     def explain_field(run_id:str,window:int=Query(ge=0),actor:str=Query(),field:str=Query(),
                       offset:int=Query(default=0,ge=0),limit:int=Query(default=12,ge=1,le=40)):
         return field_reason(get_run(run_id),window,actor,field,offset,limit)
+
+    @app.get("/api/runs/{run_id}/activity")
+    def activity(run_id:str,start:int=Query(default=1,ge=1),through:int|None=Query(default=None,ge=1),
+                 slots:int=Query(default=24,ge=2,le=48),search:str=Query(default="",max_length=120),
+                 offset:int=Query(default=0,ge=0),limit:int=Query(default=16,ge=1,le=40)):
+        return actor_activity(get_run(run_id),start,through,slots,search,offset,limit)
 
     @app.get("/api/runs/{run_id}/timed-rules")
     def timed_rules(run_id:str,window:int=Query(ge=0)):

@@ -78,6 +78,103 @@ async function showWindowStrip(view) {
   if(focused)rail.querySelector('[data-window="'+focused+'"]')?.focus({preventScroll:true});
 }
 
+function openActivity(view) {
+  const run=activeRun, total=view.status.window;
+  const body=h("div",null,"activity-reader"), tools=h("div",null,"activity-tools");
+  const search=h("input"), status=h("p",null,"hint"), result=h("div"), detail=h("div",null,"activity-detail");
+  search.type="search";search.placeholder="查找主体名称";search.setAttribute("aria-label","查找动向中的主体");
+  const reset=button("查看整场",()=>{range=[1,total];offset=0;return load();},"link");
+  tools.append(search,reset);body.append(tools,status,result,detail);
+  const legend=h("div",null,"activity-legend");
+  for(const [tone,label] of [["change","状态变化"],["contact","通信"],["decision","自主判断"],["waiting","延续等待"]]){
+    const item=h("span",label);item.dataset.tone=tone;legend.append(item);
+  }
+  body.prepend(h("p","按已结算记录呈现。发信按收件人计数，收信按实际送达计数。选择色块可追看原文。","hint"),legend);
+  reading("主体动向",body);
+  let range=[1,total],offset=0,ticket=0,debounce;
+
+  function selectCell(actor,cell,node) {
+    result.querySelector("[aria-pressed=true]")?.setAttribute("aria-pressed","false");
+    result.querySelector("button[tabindex='0']")?.setAttribute("tabindex","-1");
+    node.tabIndex=0;
+    node.setAttribute("aria-pressed","true");
+    const target=cell.last_change || cell.last_active || cell.end;
+    const name=cell.start===cell.end ? windowName(cell.start) : "第 "+cell.start+" 至 "+cell.end+" 窗";
+    detail.replaceChildren(h("strong",actor.name+" · "+name),
+      h("p",cell.changes+" 项字段变化 · "+cell.sent+" 次发信 · "+cell.received+" 次到件 · "+
+        cell.decisions+" 次判断 · "+cell.waiting+" 次延续等待","hint"));
+    const actions=h("div",null,"actions");
+    if(cell.end>cell.start)actions.append(button("放大这一段",()=>{range=[cell.start,cell.end];return load();}));
+    actions.append(button("按此主体回看"+windowName(target),async()=>{
+      if(activeRun!==run)return;
+      $("reading").close();$("feed-actor").value=actor.actor_id;$("feed-kind").value="";
+      await pinWindow(target);$("events").scrollIntoView({block:"start"});
+    },"link"));
+    if(cell.last_active)actions.append(button(windowName(cell.last_active)+"当时知道什么",()=>
+      openActorContext({id:actor.actor_id,name:actor.name},cell.last_active,null,false,run),"link"));
+    detail.append(actions);
+    detail.scrollIntoView({block:"nearest"});
+  }
+
+  async function load() {
+    if(!body.isConnected || activeRun!==run)return;
+    const seq=++ticket, [start,through]=range;
+    const slots=Math.max(6,Math.min(24,Math.floor((Math.min(innerWidth*.94,740)-185)/22)));
+    status.textContent="正在读取主体动向…";detail.replaceChildren();
+    const params=new URLSearchParams({start,through,slots,search:search.value.trim(),offset,limit:16});
+    const data=await api("/api/runs/"+run+"/activity?"+params);
+    if(ticket!==seq || !body.isConnected || activeRun!==run)return;
+    reset.hidden=start===1 && through===total;
+    status.textContent=(start===1 && through===total ? "整场 "+total+" 窗" : "第 "+start+" 至 "+through+" 窗")+
+      " · "+(data.total ? "第 "+(offset+1)+"–"+data.next+" 位，共 "+data.total+" 个主体" : "没有符合名称的主体");
+    if(data.bins.length && data.bins[0].end>data.bins[0].start)
+      status.textContent+=" · 每格最多 "+(data.bins[0].end-data.bins[0].start+1)+" 窗";
+    result.replaceChildren();
+    if(!data.actors.length)return;
+    const table=h("table",null,"activity-table"),head=h("thead"),headRow=h("tr"),first=h("th","主体");
+    first.scope="col";headRow.append(first);
+    data.bins.forEach((bin,index)=>{
+      const label=index===data.bins.length-1 ? String(bin.end) : index===0 || bin.start===bin.end ? String(bin.start) : "·";
+      const col=h("th",label);col.scope="col";col.title="第 "+bin.start+" 至 "+bin.end+" 窗";headRow.append(col);
+    });
+    head.append(headRow);table.append(head);const content=h("tbody");
+    for(const actor of data.actors){
+      const row=h("tr"),name=h("th");name.scope="row";
+      name.append(h("span",actor.name),h("small",actor.depth ? "嵌套第 "+actor.depth+" 层" : "顶层主体","quiet"));
+      row.append(name);
+      for(const [column,cell] of actor.cells.entries()){
+        const tone=cell.changes ? "change" : cell.sent || cell.received ? "contact" : cell.decisions ? "decision" : cell.waiting ? "waiting" : "quiet";
+        const symbol={change:"◆",contact:"↗",decision:"·",waiting:"○",quiet:"–"}[tone];
+        const item=h("td"),mark=button(symbol,()=>selectCell(actor,cell,mark),"activity-cell");
+        mark.dataset.tone=tone;mark.dataset.actor=actor.actor_id;mark.dataset.start=cell.start;
+        mark.title=actor.name+"，第 "+cell.start+" 至 "+cell.end+" 窗，"+cell.changes+" 项字段变化，"+
+          cell.sent+" 次发信，"+cell.received+" 次到件，"+cell.decisions+" 次判断，"+cell.waiting+" 次延续等待";
+        mark.setAttribute("aria-label",mark.title);mark.setAttribute("aria-pressed","false");
+        mark.tabIndex=content.children.length===0 && column===0 ? 0 : -1;
+        item.append(mark);row.append(item);
+      }
+      content.append(row);
+    }
+    table.onkeydown=event=>{
+      if(!event.target.classList.contains("activity-cell"))return;
+      const row=event.target.closest("tr"),rows=Array.from(content.children),r=rows.indexOf(row);
+      const cells=Array.from(row.querySelectorAll("button")),c=cells.indexOf(event.target);
+      const positions={ArrowLeft:[r,Math.max(0,c-1)],ArrowRight:[r,Math.min(cells.length-1,c+1)],
+        ArrowUp:[Math.max(0,r-1),c],ArrowDown:[Math.min(rows.length-1,r+1),c],Home:[r,0],End:[r,cells.length-1]};
+      const next=positions[event.key];if(!next)return;
+      event.preventDefault();event.target.tabIndex=-1;
+      const target=rows[next[0]].querySelectorAll("button")[next[1]];target.tabIndex=0;target.focus();
+    };
+    table.append(content);result.append(table);
+    const pages=h("div",null,"activity-pages");
+    if(offset)pages.append(button("上一组主体",()=>{offset=Math.max(0,offset-16);return load();},"link"));
+    if(data.next<data.total)pages.append(button("下一组主体",()=>{offset=data.next;return load();},"link"));
+    result.append(pages);
+  }
+  search.oninput=()=>{ticket++;clearTimeout(debounce);offset=0;debounce=setTimeout(safe(load),250);};
+  return load();
+}
+
 function openFieldReason(view,actorId,fieldId,window=view.settled_through) {
   const run=activeRun,body=h("div",null,"reason-reader"),choose=h("select"),content=h("div");
   const fields=[];

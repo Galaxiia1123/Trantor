@@ -960,6 +960,8 @@ function renderWindow(view) {
   const open = new Set(Array.from($("actors").querySelectorAll("details[open]"), el => el.dataset.actor));
   $("actors").replaceChildren(); $("state-time").textContent = view.settled_through ? "来自第 " + view.settled_through + " 窗的已提交状态" : "来自开局配置";
   const displayActors=focus ? view.actors.filter(a=>a.id===focus) : view.actors;
+  $("open-activity").hidden=isCase || s.window<1;
+  $("open-activity").onclick=safe(()=>openActivity(view));
   for (const a of displayActors.slice(0,actorLimit)) {
     const card = h("div",null,"actor");
     const who=!isCase && view.settled_through ? button(a.name+" ↗",()=>enterPerspective(a.id,view.settled_through),"perspective-name") : h("strong",a.name);

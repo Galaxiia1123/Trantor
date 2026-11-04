@@ -10,6 +10,7 @@ from chuantuo.interactions import conversation, dispatch_ledger
 from chuantuo.models import ModelError
 from chuantuo.schema import RunConfig11, Scenario11
 from chuantuo.settlement import actor_evidence, verify_commits
+from chuantuo.story import actor_activity
 
 
 class PostGateway:
@@ -46,12 +47,23 @@ def test_mail_in_flight_is_inherited_private_and_settled_once(tmp_path):
     assert run.run()["status"]=="failed" and run.window==2
     at_two=dispatch_ledger(run,2)
     assert (at_two["pending"],at_two["arrived"])==(2,0)
+    activity = actor_activity(run, slots=2)
+    sender = next(a for a in activity["actors"] if a["actor_id"] == "a")
+    recipient = next(a for a in activity["actors"] if a["actor_id"] == "b")
+    assert [c["sent"] for c in sender["cells"]] == [1,1]
+    assert [c["received"] for c in recipient["cells"]] == [0,0]
+    with pytest.raises(ValueError, match="已经结算"):
+        actor_activity(run, through=3)
     assert not [m for o in run.journal.private_history("b",2) if o["kind"]=="observation" for m in o["data"]["visible"]["messages"]]
     sent=run.journal.event(at_two["items"][0]["dispatch"])
     assert actor_evidence(sent,"a") and not actor_evidence(sent,"b")
     run=Simulation.restore(tmp_path/"base",g)
     decisions=len(g.decisions);run.recover()
     assert run.run()["status"]=="completed" and len(g.decisions)==decisions
+    last_activity = actor_activity(run, slots=2, search="b", limit=1)
+    assert last_activity["total"] == last_activity["next"] == 1
+    cell = last_activity["actors"][0]["cells"][-1]
+    assert (cell["changes"],cell["received"],cell["decisions"],cell["last_change"]) == (1,1,2,3)
     last=dispatch_ledger(run,3)
     arrived=next(m for m in last["items"] if m["stage"]=="arrived")
     assert last["pending"]==last["arrived"]==1 and last["ended"] and arrived["seen"]

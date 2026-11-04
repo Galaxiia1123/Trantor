@@ -44,6 +44,51 @@ def window_strip(sim, start=1, through=None, slots=32):
         return {"start":start,"through":end,"slots":bins,"changed_windows":changed_windows,"first_change":first,"last_change":last}
 
 
+def actor_activity(sim, start=1, through=None, slots=24, search="", offset=0, limit=16):
+    """Summarize committed behavior without ranking actors or interpreting their motives."""
+    with sim._lock:
+        end = sim.window if through is None else through
+        if not 1 <= start <= end <= sim.window:
+            raise ValueError("只能查看已经结算的主体动向")
+        if not 2 <= slots <= 48 or not 0 <= offset or not 1 <= limit <= 40:
+            raise ValueError("主体动向的范围不合法")
+        query = search.strip().casefold()
+        actors = [a for a in sim._scenario.entities if query in (a.name + " " + a.id).casefold()]
+        selected = actors[offset:offset + limit]
+        width = (end - start + slots) // slots
+        bins = [{"start":low, "end":min(end, low + width - 1)} for low in range(start,end+1,width)]
+        rows = {a.id:{"actor_id":a.id, "name":a.name, "depth":sim.depths[a.id],
+                     "cells":[{**b, "changes":0, "sent":0, "received":0, "decisions":0, "waiting":0,
+                               "last_active":None, "last_change":None} for b in bins]} for a in selected}
+        for window in range(start,end+1):
+            index = (window-start)//width
+            events, _ = sim.journal.window_rows(window,0)
+            for event in events:
+                if event["id"] in sim._discarded:
+                    continue
+                data = event["data"]
+                kind = event["kind"]
+                actor = data.get("actor_id") if kind != "message_delivered" else data["to"]
+                cell = rows[actor]["cells"][index] if actor in rows else None
+                if cell is not None and kind in {"expression","decision_deferred","message_delivered"}:
+                    cell["last_active"] = window
+                    if kind == "expression":
+                        cell["decisions"] += 1
+                        cell["sent"] += sum(len(set(m["recipients"])) for m in data.get("messages",()))
+                    elif kind == "decision_deferred":
+                        cell["waiting"] += 1
+                    else:
+                        cell["received"] += 1
+                if kind == "window_committed":
+                    for change in data["changes"]:
+                        if change["entity_id"] in rows:
+                            affected = rows[change["entity_id"]]["cells"][index]
+                            affected["changes"] += 1
+                            affected["last_change"] = window
+        return {"start":start, "through":end, "bins":bins, "actors":list(rows.values()),
+                "total":len(actors), "offset":offset, "next":min(offset+limit,len(actors))}
+
+
 def _evidence_row(sim, ref, names):
     e=sim.journal.event(ref)
     d=e["data"]

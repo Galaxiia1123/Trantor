@@ -114,6 +114,19 @@
 .reason-card{padding:.8rem 1rem;margin:.6rem 0;border:1px solid #dedad4;border-left:3px solid #716684;border-radius:8px}
 .reason-card[data-kind=event]{border-left-color:#55837d}.reason-card small,.reason-card .link{margin-right:.6rem}
 @media(max-width:600px){.window-strip{padding:12px 14px}.strip-meta>.link{margin-left:0}.strip-meta,.strip-legend{gap:7px}}
+.activity-tools{display:flex;align-items:center;justify-content:space-between;gap:12px}.activity-tools input{width:min(270px,70%)}
+.activity-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;margin-bottom:16px}
+.activity-legend span:before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;background:#b6b0be}
+.activity-legend [data-tone=change]:before{background:#a35e46}.activity-legend [data-tone=contact]:before{background:#5b8784}.activity-legend [data-tone=waiting]:before{background:#e4dfd5}
+.activity-table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:12px}
+.activity-table th,.activity-table td{padding:3px 2px;border:0;text-align:center}.activity-table th:first-child{width:25%;text-align:left;padding-right:8px}
+.activity-table thead th{font-size:11px;font-weight:500;color:var(--muted)}.activity-table tbody th{font-weight:550}
+.activity-table th small{display:block;font-size:10px;font-weight:400}.activity-cell{display:block;width:100%;min-width:0;height:27px;padding:0;border:0;border-radius:3px;background:#eeebe5;color:#8a8376;font-size:12px}
+.activity-cell[data-tone=change]{background:#a35e46;color:#fff}.activity-cell[data-tone=contact]{background:#5b8784;color:#fff}
+.activity-cell[data-tone=decision]{background:#c7bfce;color:#42354e}.activity-cell[data-tone=waiting]{background:#e4dfd5;color:#6c6255}
+.activity-cell[aria-pressed=true]{outline:2px solid #453353;outline-offset:1px}
+.activity-detail:not(:empty){border-top:1px solid var(--line);margin-top:16px;padding-top:14px}.activity-detail .actions{gap:8px}
+.activity-pages{display:flex;justify-content:space-between;gap:12px;margin:10px 0}
 .document-holder{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;padding:.4rem 0;border-bottom:1px solid var(--line)}
 .document-holder span{color:#645f67;font-size:13px}.document-holder+details code{overflow-wrap:anywhere}
 .sample-switch{display:flex;flex-wrap:wrap;gap:5px;margin:.6rem 0}
