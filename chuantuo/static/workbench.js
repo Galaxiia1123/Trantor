@@ -122,6 +122,8 @@ function showProfile() {
   const m = profile?.model;
   $("open-model").classList.toggle("ready", Boolean(profile?.ready));
   $("open-model").querySelector("span").textContent = !m ? "配置模型" : profile.ready ? m.model : "补充凭据";
+  const label=!m ? "配置模型" : (profile.ready ? "模型设置 · " : "补充凭据 · ")+m.model;
+  $("open-model").title=label;$("open-model").setAttribute("aria-label",label);
 }
 function modelDialog() {
   const m = profile?.model || {};

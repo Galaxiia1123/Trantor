@@ -99,3 +99,18 @@ def test_numeric_distributions_merge_equivalent_representations_and_keep_unknown
     summary=outcomes_for(members)
     assert [r["indices"] for r in summary["outcomes"]]==[[1,2],[3],[4]]
     assert summary["numeric"]=={"known":3,"unknown":1,"min":"1","max":"9007199254740993","median":"1.0"}
+    assert summary["timings"]==[]
+
+
+def test_first_record_distribution_keeps_opening_unknowns_and_partial_routes_distinct():
+    results=[{"status":"observed","first_hit":{"window":0,"record":"e000001"}},
+             {"status":"observed","first_hit":{"window":2,"record":"e000022"}},
+             {"status":"observed","first_hit":{"window":2,"record":"e000033"}},
+             {"status":"undetermined","first_hit":None},
+             {"status":"observed"}]
+    members=[{"index":i,"calls":3,"status":"completed","outcome":result} for i,result in enumerate(results,1)]
+    members.append({"index":6,"calls":1,"status":"failed","outcome":results[0]})
+    summary=outcomes_for(members)
+    assert summary["completed"]==5
+    assert [(g["kind"],g["window"],g["indices"]) for g in summary["timings"]]==[
+        ("recorded",0,[1]),("recorded",2,[2,3]),("not_recorded",None,[4]),("unavailable",None,[5])]

@@ -69,6 +69,7 @@ def measured(sim, watch, through):
 
 def outcomes_for(members):
     groups={}
+    timings={}
     samples=[]
     completed=unknown=0
     for member in members:
@@ -79,6 +80,13 @@ def outcomes_for(members):
         if result is None:
             continue
         if result["status"]!="tracking":
+            hit=result.get("first_hit")
+            timing_kind="recorded" if hit is not None else "not_recorded" if "first_hit" in result else "unavailable"
+            window=hit["window"] if hit is not None else None
+            time_key=(timing_kind,window)
+            timing=timings.setdefault(time_key,{"key":encode(("first_record",*time_key)),
+                                               "kind":timing_kind,"window":window,"indices":[]})
+            timing["indices"].append(member["index"])
             key=("finding",result["status"])
         elif result["numeric_text"] is not None:
             number=Decimal(result["numeric_text"])
@@ -101,7 +109,20 @@ def outcomes_for(members):
             median=samples[middle] if len(samples)%2 else (samples[middle-1]+samples[middle])/2
         numeric={"known":len(samples),"unknown":unknown,"min":str(samples[0]),"max":str(samples[-1]),"median":str(median)}
     return {"total":len(members),"completed":completed,"calls":sum(m["calls"] for m in members),
-            "outcomes":list(groups.values()),"numeric":numeric}
+            "outcomes":list(groups.values()),"numeric":numeric,
+            "timings":sorted(timings.values(),key=lambda t:(t["window"] is None,t["window"] or 0,t["kind"]))}
+
+
+def timing_label(group, experiment):
+    if group["kind"]=="not_recorded":
+        return "观察期限内没有达成记录"
+    if group["kind"]=="unavailable":
+        return "旧记录未保存首次时间"
+    window=group["window"]
+    label="开局已记录满足" if window==0 else f"第 {window} 窗首次记录满足"
+    if window<=experiment["window"] and experiment["kind"]!="opening":
+        label+="（分岔前）"
+    return label
 
 
 def member_marker(record,member):
@@ -143,11 +164,19 @@ def study_notes(record):
         if (stats:=arm["numeric"]) and stats["known"]>=2:
             unit=note_text((b or {}).get("unit") or "")
             lines.append(f'已知数值 {stats["known"]} 个，中位数 {stats["median"]}{unit}，范围 {stats["min"]}{unit} 至 {stats["max"]}{unit}。')
+        if arm.get("timings"):
+            lines+=["","首次记录满足的时间",""]
+            for group in arm["timings"]:
+                indices="、".join(str(i) for i in group["indices"])
+                lines.append(f'- {timing_label(group,spec)}，{len(group["indices"])}/{arm["completed"]} 次，对应路线 {indices}。')
     lines+=["","## 路线与依据","","| 路线 | 条件 | 状态 | 提交窗口 | 调用 | 观测结果 | 运行与证据编号 |",
             "| --- | --- | --- | --- | --- | --- | --- |"]
     for m in record["members"]:
         doc=m["outcome"]
         evidence=f'`{m["run_id"]}`'+(f' / `{doc["record"]}`' if doc else "") if m.get("created") or m["status"]=="completed" else "—"
+        first=doc.get("first_hit") if doc else None
+        if first is not None:
+            evidence+=f'，首次记录第 {first["window"]} 窗 / `{first["record"]}`'
         lines.append(f'| {m["index"]} | {labels[m.get("arm","single")]} | {labels.get(m["status"],m["status"])} | {m["window"]} | {m["calls"]} | {outcome(doc)} | {evidence} |')
     lines+=["","次数来自本机已完成的独立推演。未完成路线保留在清单中。",""]
     return "\n".join(lines)

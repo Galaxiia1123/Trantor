@@ -68,6 +68,13 @@ function studyOutcome(row) {
   return results[row.status] || "尚未确定";
 }
 
+function studyTiming(group,spec) {
+  if(group.kind==="not_recorded")return "观察期限内没有达成记录";
+  if(group.kind==="unavailable")return "旧记录未保存首次时间";
+  const name=group.window===0 ? "开局已记录满足" : windowName(group.window)+"首次记录满足";
+  return name+(group.window<=spec.window && spec.kind!=="opening" ? "（分岔前）" : "");
+}
+
 async function studyPage(id,gen) {
   const page=$("study-page"), heading=h("h1","正在打开实验组"), subtitle=h("p",null,"lead"), controls=h("div",null,"actions");
   const header=h("div",null,"watch-head"), titles=h("div");titles.append(heading,subtitle);header.append(titles,controls);
@@ -98,7 +105,7 @@ async function studyPage(id,gen) {
       if(["running","paused","interrupted","failed","pausing"].includes(r.status))controls.append(control("结束实验组","stop"));
       const notes=h("a","下载实验记录");notes.href="/api/studies/"+id+"/notes";controls.append(notes);
     }
-    const stamp=JSON.stringify([filter,r.completed,r.status,r.error,r.members.map(m=>[m.status,m.window]),r.outcomes,r.arms?.map(a=>a.outcomes)]);
+    const stamp=JSON.stringify([filter,r.completed,r.status,r.error,r.members.map(m=>[m.status,m.window]),r.outcomes,r.timings,r.arms?.map(a=>[a.outcomes,a.timings])]);
     if(stamp!==previous) {
       previous=stamp;facts.replaceChildren(h("div","观测结果","eyebrow"));
       const b=r.baseline;
@@ -147,6 +154,29 @@ async function studyPage(id,gen) {
         numeric(r.numeric,facts);
         if(r.outcomes.length)facts.append(h("small","分母为已到达共同终点的 "+r.completed+" 条新路线。次数描述本组采样。","quiet"));
       }
+      const timeArms=r.arms?.length ? r.arms : [{arm:"single",completed:r.completed,timings:r.timings}];
+      if(timeArms.some(a=>a.timings?.length)){
+        const section=h("section",null,"study-timings"),table=h("table",null,"study-contrast");
+        section.append(h("h3","首次记录满足的时间"),h("p","以观察问题的目标和期限为准。选择次数可以筛出对应路线，再回看首次记录。","hint"));
+        const head=table.createTHead().insertRow(),first=h("th","时间");first.scope="col";head.append(first);
+        for(const arm of timeArms){const cell=h("th",arm.arm==="single" ? "本组路线" : armName(arm.arm));cell.scope="col";head.append(cell);}
+        const groups=new Map();
+        for(const arm of timeArms)for(const group of arm.timings || [])groups.set(group.key,group);
+        const ordered=[...groups.values()].sort((a,b)=>(a.window===null)-(b.window===null) || (a.window || 0)-(b.window || 0) || a.kind.localeCompare(b.kind));
+        const tbody=table.createTBody();
+        for(const group of ordered){
+          const row=tbody.insertRow(),label=studyTiming(group,spec),name=h("th",label);name.scope="row";row.append(name);
+          for(const arm of timeArms){
+            const cell=row.insertCell(),found=arm.timings?.find(t=>t.key===group.key);
+            if(found){
+              const choice=pick(arm.arm,found,found.indices.length+" / "+arm.completed);
+              choice.setAttribute("aria-label",(arm.arm==="single" ? "本组路线" : armName(arm.arm))+" · "+label+" · 查看 "+found.indices.length+" 条路线");
+              cell.append(choice);
+            }else cell.textContent=arm.completed ? "0 / "+arm.completed : "尚无完成路线";
+          }
+        }
+        const scroll=h("div",null,"study-table-scroll");scroll.append(table);section.append(scroll);facts.append(section);
+      }
       if(r.error)facts.append(h("p",r.error,"error"));
       list.replaceChildren(h("h2","每条路线"));
       if(filter)list.append(button("显示全部路线",async()=>{filter=null;await refresh();},"link"));
@@ -157,7 +187,7 @@ async function studyPage(id,gen) {
           h("small",m.status==="queued" ? "等待前面的路线结束" : windowName(m.window)+" · "+m.calls+" 次调用"+(m.outcome ? " · "+studyOutcome(m.outcome) : "")));
         item.append(text);
         if(m.outcome?.first_hit) {
-          const w=m.outcome.first_hit.window, hit=h("a",windowName(w)+"首次达成"+(w<=spec.window ? "（分岔前）" : ""));
+          const w=m.outcome.first_hit.window, hit=h("a",studyTiming({kind:"recorded",window:w},spec));
           hit.href="#run/"+m.run_id+"/"+w;text.append(hit);
         }
         if(!["queued","opening"].includes(m.status)){
