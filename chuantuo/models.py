@@ -360,9 +360,9 @@ class ModelGateway:
             try:
                 from .demo import respond
                 answer=None
-                if config.model in {"letter-desk-v1","letter-desk-v2"}:
+                if config.model in {"letter-desk-v1","letter-desk-v2","letter-desk-v3"}:
                     from .letter_case import scripted_response
-                    answer=scripted_response(json.loads(copied[-1]["content"]))
+                    answer=scripted_response(json.loads(copied[-1]["content"]),request_reply=config.model=="letter-desk-v3")
                 elif config.model=="mountain-post-v1":
                     from .mountain_case import respond as post_response
                     answer=post_response(json.loads(copied[-1]["content"]))

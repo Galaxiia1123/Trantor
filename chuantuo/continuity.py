@@ -39,7 +39,7 @@ def world_instruction(allowed):
 
 
 def actor_instruction(config, documents=False, replies=False):
-    instruction=AGENT_INSTRUCTION
+    instruction=AGENT_INSTRUCTION+"\n需要对方专门回信时可在消息中填 reply_by：希望回信送达的窗口编号，无期限填 open。普通通知省略。收信方自行决定是否回应。"
     if replies:
         instruction+="\n直接答复哪一封来信，就在发给原发件人的那条消息中填 reply_to，使用本轮收件或 reply_targets 中的 receipt_id。主动发起的新话题省略 reply_to。"
     if documents:
@@ -217,12 +217,14 @@ def add_decision_inbox(payload, journal, discarded, budget):
         for m in inbox:
             local=actions.get(m["action_id"])
             index=next((i for i,out in enumerate(local["messages"]) if m["to"] in out["recipients"] and out["text"]==m["text"]
-                        and out.get("enclosures",[])==[d["id"] for d in m.get("enclosures",())]),None) if local else None
+                        and out.get("enclosures",[])==[d["id"] for d in m.get("enclosures",())]
+                        and out.get("reply_to")==m.get("reply_to") and out.get("reply_by")==m.get("reply_by")),None) if local else None
             item=({"from":m["from"],"this_window_action":local["id"],"message_index":index} if index is not None else
                   {"from":m["from"],"text":m["text"][:700],**({"excerpt":True} if len(m["text"])>700 else {})})
             if enclosed:=m.get("enclosures"):
                 item["attached"]=[d["title"] for d in enclosed]
             if m.get("reply_to"):item["reply_to"]=m["reply_to"]
+            if m.get("reply_by"):item["reply_by"]=m["reply_by"]
             row["attest"].append(item)
             if len(json.dumps(row,ensure_ascii=False))+2>allowance:
                 row["attest"].pop();break

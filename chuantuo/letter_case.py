@@ -6,7 +6,7 @@ from .experiments import ExperimentRequest
 from .schema import RunConfig11, Scenario11
 
 
-MODEL = "letter-desk-v2"
+MODEL = "letter-desk-v3"
 SIGNED = "第 2 窗开始时，有效签字函已送达收件台。"
 ACCEPT = "核对签章并将申请排入复核。"
 
@@ -29,20 +29,21 @@ def opening():
         "assumptions":["虚构的三日办理过程，主体和世界的应答由本机案例脚本提供。"]})
 
 
-def scripted_response(payload):
+def scripted_response(payload, *, request_reply=False):
     """Only facts in the actor's own observation can activate its decision."""
-    answer=_response(payload)
+    answer=_response(payload,request_reply)
     if payload["task"]=="agent" and payload["window"]<3 and payload.get("latest_review_window"):
         answer["review_at"]=payload["latest_review_window"]
     return answer
 
 
-def _response(payload):
+def _response(payload,request_reply):
     if payload["task"] == "agent":
         actor, window, view = payload["actor_id"], payload["window"], payload["observation"]
         if window == 1:
             if actor == "shop":
-                return {"text":"递交复核申请并承诺补交有效签字函。","messages":[{"recipients":["desk"],"text":"我方请求复核，将补交签字函。担保意向不构成付款。"}],
+                return {"text":"递交复核申请并承诺补交有效签字函。","messages":[{"recipients":["desk"],"text":"我方请求复核，将补交签字函。担保意向不构成付款。",
+                        **({"reply_by":3} if request_reply else {})}],
                         "matters":[{"key":"letter","text":"在三个工作日内等候运营社的收件答复。"}]}
             return {"text":"告知申请方签章要求，等候签字函。","messages":[{"recipients":["shop"],"text":"请补交有效签字函，由我社核验后决定是否登记。"}]}
         if actor == "desk":

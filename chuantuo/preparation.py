@@ -14,6 +14,7 @@ from .models import protect_credentials
 from .observatory import FieldWatch
 from .ideas import ComparisonIdea, useful_ideas
 from .briefing import separate_brief, scope_generated_access_rules
+from .mail_opening import opening_guards, scope_generated_opening, check_opening_inputs
 from .preparation_trace import accepted
 from .public_sources import PublicSearch
 from .schema import Identifier, Record, RunConfig11, RunPlan, Scenario11, Source, SourceQuote
@@ -119,6 +120,7 @@ SYSTEM = """你负责把用户文稿变为可运行的沙盘。按 schema 返回
 直接返回实例，只写有实际内容的字段。不要输出 schema、$defs、字段说明或空白填充。外层结构示意为 {"summary":"…","scenario":{"title":"…","background":"…","domains":[],"entities":[{"id":"a","name":"…","identity":"…"}]},"plan":{},"plan_reason":"…","checklist":{},"gaps":[],"findings":[]}。checklist 补齐 schema 中的七项。
 先复用已有设定，逐项检查 checklist。把 scene 的 sources 留空，系统会放回原件。领域和状态字段由材料定义，有意义的字段用易读的 label 和原单位，未知用 null。没有资料支持的评分不创建。背景/规则仅写所有人可知的内容，敏感内容挂到各主体及其可见范围，默认私有。
 规则总是提供给世界。仅当规则可告知所有主体时标 visibility.public=true；仅部分知情则设 readers，未设读者的规则只送给世界。保密约束本身也须限知情人，不能把秘密原文写进公共规则、背景、关系或别人的档案。
+收件人若要等未来的信送达才知道所问事项，开局偏好可以写“收到来信后自行核对”，不要抄入尚未送达的独特名称。寄件授权只决定能否寄给对方，不赋予开局知情权。
 私有字段或资料跨主体的初始可见权需在 visibility.reader_evidence 逐个给 reader_id 和原文 quote，证明开局已知或有查阅权。拟告知、拟发送、未来可以签约不构成开局已知；预定收件人应在实际投递后才看见消息。
 对受限资料，初始可见权与后续可发送对象分开。材料明确限定或禁止某些接收人时，在该 material.sharing 中列出 allowed_recipients 或 excluded_recipients，并引用支持该通信边界的原文。protected_terms 只列能识别秘密的独特词句。公开数字与私下额度偶然相同时应保护私下关联，不封锁公共金额。
 原文列出结算字段时沿用该清单。身份资料、内部代号放 materials，不作为结算字段；把内部代号等必须原样限知情人的短语逐字列入该资料的 protected_terms。提议和有条件承诺由主体表达并跟踪，不为意向额外建客观字段。开局没有送达的私下意向不可提前放进收件人的规则或材料。
@@ -311,6 +313,8 @@ def prepare(seed, model, gateway, materials, progress, search=None):
                         note = f"{detail}（{item['provenance'].get('explanation') or '模拟假设'}）"
                         if note not in scene.setdefault("assumptions", []):
                             scene["assumptions"].append(note)
+                guards=opening_guards(scene.get("entities",()),scene["sources"])
+                opening_edits=scope_generated_opening(scene,guards,preserved)
                 scope_generated_access_rules(scene)
                 output["plan"] = {**output["plan"], **fixed}
                 draft = Draft.model_validate(output)
@@ -329,6 +333,9 @@ def prepare(seed, model, gateway, materials, progress, search=None):
                 # Narrowing opening permissions can reveal a contradiction in another rule.
                 # Check the complete product contract before accepting this billed model step.
                 normalized = reconcile({"scenario":draft.scenario.model_dump(mode="json"),"preparation_records":[{}]})
+                if guards:
+                    check_opening_inputs(Scenario11.model_validate(normalized["scenario"]),RunConfig11(model=model,**draft.plan.model_dump()),guards)
+                    normalized["preparation_records"][0]["opening_knowledge"]={"passages":guards,"adjustments":opening_edits}
                 if found:
                     retained = {(q["source_id"],q["quote"]) for _,obj in _objects(normalized["scenario"])
                                 for q in obj["provenance"].get("quotes",[])}

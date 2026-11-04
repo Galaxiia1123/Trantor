@@ -24,7 +24,7 @@ from .settlement import actor_evidence, complete_scheduled_reviews, settled_stat
 from .schema import validate_outbox
 from .documents import envelope_scope
 from .briefing import runtime_scene
-from .replies import envelope_key, validate_reply
+from .replies import envelope_key, validate_reply, validate_requested_time
 
 
 def encode(value) -> str:
@@ -51,6 +51,8 @@ class Journal:
         self._round_observations = {}
         self._letters_by_envelope={}
         self._letters_by_reader={}
+        self._requested_letters={}
+        self._request_mail=[]
         self._reply_events={}
         self._settlements = {}
         self._usage = {}
@@ -132,8 +134,13 @@ class Journal:
         elif kind=="message_delivered":
             self._letters_by_envelope.setdefault(envelope_key(data),[]).append(event)
             self._letters_by_reader.setdefault(data["to"],[]).append(event)
-        if kind in {"message_delivered","message_dispatched"} and data.get("reply_to"):
-            self._reply_events.setdefault(data["reply_to"],[]).append(event)
+            if data.get("reply_by") is not None:
+                self._requested_letters.setdefault(data["to"],[]).append(event)
+        if kind in {"message_delivered","message_dispatched"}:
+            if data.get("reply_to"):
+                self._reply_events.setdefault(data["reply_to"],[]).append(event)
+            if data.get("reply_by") is not None:
+                self._request_mail.append(event)
         if event["kind"] in {"expression","decision_deferred","message_dispatched","message_delivered","window_committed","settlement_rejected","model_failure","external_event"}:
             self._window_rows.setdefault(event["window"], []).append(event)
         if event["kind"] == "window_committed":
@@ -165,7 +172,7 @@ class Journal:
             for obs in reversed(self._round_observations.get((window,turn,actor),())):
                 if obs["id"] in discarded:
                     continue
-                if any(all(m.get(k)==delivery.get(k) for k in ("action_id","from","to","text","dispatch_id","enclosures","reply_to")) for m in obs["data"]["visible"]["messages"]):
+                if any(all(m.get(k)==delivery.get(k) for k in ("action_id","from","to","text","dispatch_id","enclosures","reply_to","reply_by")) for m in obs["data"]["visible"]["messages"]):
                     return obs["id"]
         return None
 
@@ -193,6 +200,18 @@ class Journal:
                     raise ValueError("收件箱与这轮实际送达的信件不符")
                 ref=choices[index]["id"];counts[key]=index+1;current.add(ref)
                 messages.append({**message,"receipt_id":ref})
+            # A few unanswered requests can survive the ordinary recent-history boundary.
+            requests=self._requested_letters.get(actor,())
+            for letter in reversed(requests[-64:]):
+                ref=letter["id"]
+                if int(ref[1:])>=before or ref in current or ref in discarded:
+                    continue
+                if any(int(r["id"][1:])<before and r["id"] not in discarded for r in self._reply_events.get(ref,())):
+                    continue
+                d=letter["data"]
+                recent.append({"receipt_id":ref,"from":d["from"],"window":letter["window"],"excerpt":d["text"][:72],"reply_by":d["reply_by"]})
+                current.add(ref)
+                if len(recent)==2:break
             for letter in reversed(self._letters_by_reader.get(actor,())):
                 if letter["window"]<obs["window"]-recent_windows:break
                 ref=letter["id"]
@@ -204,6 +223,15 @@ class Journal:
 
     def has_replies(self,ref,through,discarded):
         with self._lock:return any(e["window"]<=through and e["id"] not in discarded for e in self._reply_events.get(ref,()))
+
+    def request_mail(self,through,discarded,*,responses_to=None):
+        with self._lock:
+            rows=self._request_mail if responses_to is None else self._reply_events.get(responses_to,())
+            return [e for e in rows if e["window"]<=through and e["id"] not in discarded]
+
+    def has_requested_mail(self,through,discarded):
+        with self._lock:
+            return any(e["window"]<=through and e["id"] not in discarded for e in self._request_mail)
 
     def validate_replies(self,decision,actor,observation_id,discarded):
         for message in decision.messages:
@@ -376,7 +404,11 @@ class Simulation:
         self.config = config.model_copy(deep=True)
         self.depths = self._scenario.depths()
         if _journal is None:
-            protect_credentials(self._scenario.model_dump(mode="json"),self.config.catalog.values())
+            spec=self._scenario.model_dump(mode="json")
+            protect_credentials(spec,self.config.catalog.values())
+            if isinstance(self._scenario,Scenario11) and isinstance(self.config,RunConfig11):
+                from .mail_opening import check_opening_inputs, opening_guards
+                check_opening_inputs(self._scenario,self.config,opening_guards(spec["entities"],spec["sources"]))
         if isinstance(scenario, Scenario11) != isinstance(config, RunConfig11):
             raise ValueError("场景与运行方案的版本不一致")
         if isinstance(config, RunConfig) and not set(self.depths.values()) <= config.models.layers.keys():
@@ -663,6 +695,8 @@ class Simulation:
                 result = schema.model_validate_json(raw)
                 if schema is Decision:
                     validate_outbox(result,self._perception.delivery_limits)
+                    for message in result.messages:
+                        validate_requested_time(message.reply_by,self.window+1)
                     self._perception.documents.validate(result,self._observations[actor_id])
                     if any(m.reply_to for m in result.messages):
                         obs=self.journal.round_observation(actor_id,self.window+1,self.round,self._discarded)
@@ -804,6 +838,7 @@ class Simulation:
         window=self.window+1
         data={"from":sender,"to":recipient,"text":message.text,"action_id":action_id}
         if ref:=getattr(message,"reply_to",None):data["reply_to"]=ref
+        if due:=getattr(message,"reply_by",None):data["reply_by"]=due
         if keys:=getattr(message,"enclosures",()):
             data["enclosures"]=self._perception.documents.envelope(keys)
         if scope:=envelope_scope(data,self._perception.delivery_limits):

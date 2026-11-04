@@ -230,7 +230,7 @@ async function experimentShelf(parent) {
 
 function showExperimentTools(view) {
   const root=$("experiment-tools"), meta=view.status.experiment;
-  const letter=view.mode==="sample" && ["letter-desk-v1","letter-desk-v2"].includes(view.model);
+  const letter=view.mode==="sample" && ["letter-desk-v1","letter-desk-v2","letter-desk-v3"].includes(view.model);
   const post=view.mode==="sample" && view.model==="mountain-post-v1";
   const available=!playback() && view.format_version==="1.1" && view.status.window>(meta?.window || 0);
   const stamp=[activeRun,view.selected,view.status.window,view.settled_through].join("/");

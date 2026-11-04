@@ -848,6 +848,12 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
                 headers={"Content-Disposition":f'attachment; filename="comparison-{run_id}-{other_id}-w{brief["through"]}.md"'})
         return brief
 
+    @app.get("/api/runs/{run_id}/requested-replies")
+    def list_requested_replies(run_id:str,through:int|None=Query(default=None,ge=0),actor:str|None=None,
+                               stage:str="all",offset:int=Query(default=0,ge=0),limit:int=Query(default=24,ge=1,le=100)):
+        from .correspondence import requested_replies
+        return requested_replies(get_run(run_id),through,actor,stage,offset,limit)
+
     @app.get("/api/runs/{run_id}/actors/{actor_id}/journey")
     def actor_journey(run_id:str, actor_id:str, window:int|None=Query(default=None,ge=1),
                       turn:int|None=Query(default=None,ge=1), news_only:bool=False, through:int|None=Query(default=None,ge=1)):
@@ -1001,6 +1007,7 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
                         "letters":("loan-correspondence.md","榆岸档案馆 · 两封并行来信 · 3 窗",None),
                         "mail":("mountain-mail.md","山线货运站 · 跨窗通信 · 3 窗",None)}
     material_templates["guide"]=("example-domain-guide.md","栖灯手册 · 引用公开资料 · 2 窗",None)
+    material_templates["proof"]=("proof-reply.md","桦湾演出单 · 回信期限 · 4 窗",None)
     asset_names=[row[0] for row in material_templates.values()]+["tidal-replay.json","verified-replay.json"]
     case_assets = {name:(static.parent/"templates"/name).read_bytes() for name in asset_names}
     revision = hashlib.sha256(b"".join(assets.values())).hexdigest()[:12]

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from .replies import validate_reply
+from .replies import validate_reply, validate_requested_time
 from collections import Counter
 from copy import deepcopy
 
@@ -223,13 +223,14 @@ def verify_commits(scenario, config, events):
             for message in data["messages"]:
                 if ref:=message.get("reply_to"):
                     validate_reply(seen_letters.get(ref),owner,message["recipients"],observation_ids[owner])
+                validate_requested_time(message.get("reply_by"),event["window"])
                 for recipient in set(message["recipients"]):
                     if recipient not in actors:
                         raise ValueError("表达包含不存在的收件人")
-                    expected_messages[event["id"],owner,recipient,message["text"],tuple(message.get("enclosures",())),message.get("reply_to")]+=1
+                    expected_messages[event["id"],owner,recipient,message["text"],tuple(message.get("enclosures",())),message.get("reply_to"),message.get("reply_by")]+=1
         elif kind in {"message_delivered","message_dispatched"}:
             doc_ids=tuple(doc["id"] for doc in data.get("enclosures",()))
-            key = data["action_id"], data["from"], data["to"], data["text"], doc_ids, data.get("reply_to")
+            key = data["action_id"], data["from"], data["to"], data["text"], doc_ids, data.get("reply_to"),data.get("reply_by")
             if outbound[key] >= expected_messages[key]:
                 raise ValueError(f"投递 {event['id']} 与该表达的收件人或内容不符")
             if doc_ids and (not perception or not _same(data["enclosures"],perception.documents.envelope(doc_ids))):

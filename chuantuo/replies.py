@@ -3,7 +3,12 @@
 
 def envelope_key(message):
     return (message["action_id"],message["from"],message["to"],message["text"],message.get("dispatch_id"),
-            tuple(d["id"] for d in message.get("enclosures",())),message.get("reply_to"))
+            tuple(d["id"] for d in message.get("enclosures",())),message.get("reply_to"),message.get("reply_by"))
+
+
+def validate_requested_time(reply_by, window):
+    if type(reply_by) is int and reply_by < window:
+        raise ValueError(f"回信希望送达的窗口不能早于当前第 {window} 窗。不指定期限时可用 open")
 
 
 def validate_reply(receipt,actor,recipients,observation_id):

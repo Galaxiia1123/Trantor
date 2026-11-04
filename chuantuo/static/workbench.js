@@ -333,6 +333,10 @@ function sourceReview(record) {
   for (const f of record.findings || []) list.append(h("p", f.quote.quote + " — " + f.relevance + "。 " + f.time_and_authority));
   if (record.research?.length) list.append(disclosure("查询与候选来源", h("pre", json(record.research))));
   const names = Object.fromEntries(draft.scenario.entities.map(a => [a.id,a.name]));
+  const sealed=record.opening_knowledge?.passages || [];
+  if(sealed.length)list.append(disclosure("开局知情与待送达的原文",bullets(sealed.map(item=>
+    "“"+item.term+"” · 开局资料在"+item.holders.map(id=>names[id]||id).join("、")+"手中；"+
+    item.withheld.map(id=>names[id]||id).join("、")+"的开局判断不含这段文字。依据："+item.quote))));
   const deferred = record.visibility_review?.pending_grants || [];
   if (deferred.length) list.append(disclosure("开局尚未获知的资料", bullets(deferred.map(g =>
     (names[g.owner] || g.owner) + "的资料尚未向" + g.readers.map(r => names[r] || r).join("、") + "开放。"))));
@@ -790,6 +794,8 @@ function renderWindow(view) {
   currentStateWindow = view.settled_through;
   $("open-interactions").hidden=isCase;
   $("open-interactions").onclick=safe(()=>openInteractions(view));
+  $("open-requests").hidden=isCase || !view.has_requested_replies;
+  $("open-requests").onclick=()=>openRequestedReplies(activeRun,view.settled_through);
   const experimentSlot=$(s.experiment ? "comparison-lead" : "experiment-follow");
   if($("experiment-tools").parentElement!==experimentSlot)experimentSlot.append($("experiment-tools"));
   safe(()=>showWindowStrip(view))();
@@ -1134,7 +1140,7 @@ async function route() {
     $("changed-windows").checked=false; $("window-order").value="new";
     $("followup").open = false; $("answers").replaceChildren(); $("question-text").value = "";
     $("watch-meta").textContent = ""; ["events","actors","reports","run-actions","window"].forEach(k => $(k).replaceChildren());
-    $("open-interactions").hidden=true;$("window").disabled=$("next-window").disabled=$("previous-window").disabled=true;
+    $("open-interactions").hidden=$("open-requests").hidden=true;$("window").disabled=$("next-window").disabled=$("previous-window").disabled=true;
     $("events").append(h("p","正在读取该窗口的推演记录…","hint"));
     await refreshWatch(gen);
     if(gen===routeGeneration && perspectiveOrigin?.run===id && perspectiveOrigin.url===location.hash) {

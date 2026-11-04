@@ -372,7 +372,7 @@ class Scenario(Record):
                         raise ValueError("摘引的材料页码不存在")
                     text = text[page.text_start:page.text_end]
                 if quote.quote not in text:
-                    raise ValueError("材料摘引与指定原文不符，请逐字核对")
+                    raise ValueError(f"材料摘引与指定原文不符，请逐字核对 {source.id} 中的“{quote.quote[:80]}”。保留原有标点和空格")
         self.depths()  # Detect containment cycles independently of influence cycles.
         return self
 
@@ -541,9 +541,14 @@ class Scenario11(Scenario):
                         if term and term not in public_amounts:
                             private.setdefault(term,set()).update([actor.id,*material.visibility.readers])
 
+        conflicts=[]
         def check(text, readers, location):
-            if any(term in text and not readers <= allowed for term,allowed in private.items()):
-                raise ValueError(f"{location}含有超出读者权限的私有内容。请调整可见范围，或把涉密内容移入主体资料")
+            for term,allowed in private.items():
+                if term in text and not readers <= allowed:
+                    conflict=f"{location}（该资料开局知情者为 {', '.join(sorted(allowed)) or '仅世界系统'}）"
+                    if conflict not in conflicts and len(conflicts)<6:
+                        conflicts.append(conflict)
+                    break
         check(self.public_brief.text if self.public_brief is not None else self.background, actor_ids, "公共背景")
         from .briefing import check_public_numbers
         check_public_numbers(self)
@@ -569,7 +574,7 @@ class Scenario11(Scenario):
             check(edge.description, {edge.source,edge.target}, "有向关系描述")
         for actor in self.entities:
             check(actor.name,actor_ids,"主体名称")
-            check(actor.identity + "\n" + actor.preferences,{actor.id},"主体档案")
+            check(actor.identity + "\n" + actor.preferences,{actor.id},f"主体 {actor.id} 的身份或偏好")
             for obj in [*actor.materials,*actor.fields]:
                 value = obj.text if isinstance(obj,Material) else obj.value
                 readers = actor_ids if obj.visibility.public else {actor.id,*obj.visibility.readers}
@@ -577,6 +582,8 @@ class Scenario11(Scenario):
                     check(value, readers, "主体字段或资料")
                 if isinstance(obj,StateField):
                     check((obj.label or "") + (obj.unit or ""), readers, "字段说明")
+        if conflicts:
+            raise ValueError("以下位置含有超出读者权限的私有内容："+"、".join(conflicts)+"。保留原资料读权，把尚未送达的专名移出不知情者的档案或规则")
         return self
 
 
@@ -689,6 +696,7 @@ class MatterUpdate(Record):
 class AgentMessage(Message):
     enclosures: list[Identifier] = Field(default_factory=list,max_length=4)
     reply_to: str | None = Field(default=None,pattern=r"^e[0-9]{6,12}$")
+    reply_by: Annotated[int, Field(ge=1,le=1_000_000,strict=True)] | Literal["open"] | None = None
 
     @model_validator(mode="after")
     def separate_enclosures(self):

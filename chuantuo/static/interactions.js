@@ -98,6 +98,40 @@ function openConversation(run,one,two,start,end) {
   reading(one.name+"与"+two.name+"的往来",body);safe(()=>page())();
 }
 
+function openRequestedReplies(run,through) {
+  const body=h("div"), filters=h("div",null,"map-controls"), who=h("select"), status=h("select");
+  const head=h("p",null,"hint"), list=h("div"), moreBox=h("div");let sequence=0;
+  const choose=(title,control)=>{const label=h("label",title);control.setAttribute("aria-label",title);label.append(control);return label;};
+  who.append(new Option("全部主体",""));
+  for(const [key,label] of [["all","全部问询"],["outstanding","尚未收回"],["overdue","已过截止仍未收回"],["answered","已有回函送达"]])status.append(new Option(label,key));
+  filters.append(choose("往来主体",who),choose("回函进度",status));body.append(filters,head,list,moreBox);
+  const stages={outbound:"原信在途",waiting:"已送达，尚未见明确回信",returning:"回信在途",answered:"回信已送达"};
+  const times={open:"未设截止",on_time:"按期到件",late:"截止后到件",due:"本窗截止",overdue:"已过截止",upcoming:"尚未到期"};
+  async function draw(offset=0) {
+    const ticket=++sequence, params=new URLSearchParams({through,stage:status.value,offset});
+    if(who.value)params.set("actor",who.value);
+    const result=await api("/api/runs/"+run+"/requested-replies?"+params);
+    if(ticket!==sequence || !body.isConnected)return;
+    if(who.options.length===1)result.actors.forEach(a=>who.append(new Option(a.name,a.id)));
+    if(!offset)list.replaceChildren();moreBox.replaceChildren();
+    head.textContent="截至"+windowName(through)+"，"+result.counts.all+" 封信明确请求回函，"+result.counts.answered+" 封已收到回复，"+result.counts.overdue+" 封超过希望送达的窗口。";
+    for(const item of result.items){
+      const card=h("article",null,"conversation-entry requested-letter"),timing=item.by==="open"?times.open:"希望第 "+item.by+" 窗末前收到 · "+times[item.timing];
+      card.append(h("small",stages[item.status]+" · "+timing,"eyebrow"),h("h3",item.sender_name+" → "+item.recipient_name),
+        h("p",item.text+(item.excerpt?"…":"")),h("small",windowName(item.sent)+"发出"+(item.arrival?"，"+windowName(item.arrival)+"原信送达":"")+
+          (item.reply_sent?"，"+windowName(item.reply_sent)+"发出回信":"")+(item.reply_arrival?"，"+windowName(item.reply_arrival)+"收回":"")+"。","quiet"));
+      card.append(button("查原信",()=>evidence(item.id,run),"link"));
+      if(item.receipt)card.append(button("沿这封信读回复",()=>openReplyChain(run,item.receipt,through),"link"));
+      if(item.reply_id)card.append(button("查回函",()=>evidence(item.reply_id,run),"link"));list.append(card);
+    }
+    if(!result.total)list.append(h("p","这个范围内没有符合条件的问询。","hint"));
+    if(result.next<result.total)moreBox.append(button("更多问询",()=>draw(result.next),"link"));
+  }
+  who.onchange=status.onchange=safe(()=>draw());
+  body.append(h("p","按发件人登记的请求及收件人的原信引用追踪。收到回复只表明答复到件，具体立场可回看原文。","hint"));
+  reading("哪些信在等回函",body);safe(()=>draw())();
+}
+
 function openReplyChain(run,receipt,through){
   const body=h("div"),status=h("p","","hint"),list=h("div");body.append(status,list);
   async function load(offset=0){
