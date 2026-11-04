@@ -180,7 +180,7 @@ def main():
                 expect(page.locator(".watch-finding")).to_contain_text("第 2 窗首次记录达成")
                 expect(page.locator(".watch-baseline")).to_contain_text("待签收")
                 page.get_by_role("button",name="固定到观察台").click()
-                expect(page.locator("#field-watches")).to_contain_text("申请何时被登记？")
+                expect(page.locator("#question-outcomes")).to_contain_text("申请何时被登记？")
                 with page.expect_download() as notes: page.get_by_role("link",name="下载观察笔记").click()
                 assert "observations" in notes.value.suggested_filename
                 page.get_by_role("button",name="主体持续事项").click()
@@ -284,7 +284,7 @@ def main():
                 page.get_by_role("button",name="外部事件日历").click()
                 expect(page.locator("#reading-content")).to_contain_text("已随窗口提交")
                 page.keyboard.press("Escape")
-                expect(page.locator("#field-watches")).to_contain_text("第 8 窗首次记录达成")
+                expect(page.locator("#question-outcomes")).to_contain_text("第 8 窗首次记录达成")
                 page.locator("#all-windows>summary").click()
                 page.locator("#window-list .record-row").filter(has_text="第 8 窗").get_by_role("button",name="回看").click()
                 expect(page.locator("#window")).to_have_value("8"); expect(page.locator("#actors")).to_contain_text("资金缺口为2000万元")

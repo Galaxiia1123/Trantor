@@ -90,6 +90,12 @@ def test_preflight_rejects_impossible_first_round_without_creating_run(tmp_path)
         assert check["blocking_context"] and check["by_model"]["offline"]==33
         assert client.post("/api/runs",json=payload).status_code==400
         assert not client.get("/api/runs").json()["runs"]
+        payload=client.get("/api/demo").json()
+        saved=client.post("/api/projects",json={**payload,"assistant":{"pause_questions":[
+            {"actor_id":"city","field_id":"readiness","operator":"equals","target":20}]}}).json()
+        rejected=client.post("/api/runs",json={**payload,"project_id":saved["id"],"project_version":saved["version"]})
+        assert rejected.status_code==400 and "已经满足" in rejected.json()["detail"]
+        assert not client.get("/api/runs").json()["runs"]
 
 
 def test_stop_interrupts_infinite_backoff_preserving_last_boundary(tmp_path):

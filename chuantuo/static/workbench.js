@@ -307,14 +307,17 @@ async function job(kind, path, payload, follow, sourceRun = activeRun) {
   } finally { busy = false; $("prepare").disabled = false; }
 }
 async function saveProject(reason = "", preparedJob = null) {
+  const editedDraft=draft;
   const assistant = {summary:draft.summary, goal:$("brief").value, extra_answers:extraAnswers,
     source_ids:sources.map(s => s.id), overrides, plan_reason:draft.plan_reason, revision_reason:reason};
   if (draft.observation_questions || draft.preparation_records.at(-1)?.observation_questions)
     assistant.observation_questions=applicableQuestions(draft.scenario,draft.observation_questions ?? draft.preparation_records.at(-1).observation_questions);
+  assistant.pause_questions=applicableQuestions(draft.scenario,draft.pause_questions || []);
   const payload = {scenario:draft.scenario, config:draft.config, preparation_records:draft.preparation_records,
     assistant, expected_version:project?.version || 0};
   const endpoint = "/api/projects" + (project ? "/" + project.id : "") + (preparedJob ? "?prepared_job=" + encodeURIComponent(preparedJob) : "");
   const saved = await api(endpoint, "POST", payload);
+  if(draft!==editedDraft)return saved;
   project = saved; draft.scenario = saved.payload.scenario; draft.config = saved.payload.config;
   draft.preparation_records = saved.payload.preparation_records;
   draft.questions = draft.preparation_records.at(-1)?.blocking_questions || [];
@@ -547,25 +550,49 @@ function renderDraft() {
   root.append(top, h("h2", scene.title), h("p", draft.summary, "summary"), h("p", scene.entities.length + " 个主体　·　" + config.windows + " 个窗口　·　每窗 " + config.window_duration + "　·　" + config.model.model, "badge"));
   root.append(h("p", "每窗互动 " + config.rounds_per_window + " 轮，若逐轮判断共需 " + (config.windows * (scene.entities.length * config.rounds_per_window + 1)) + " 次基础调用。"+
     (config.max_review_interval ? "主体可自行等待，最迟 "+config.max_review_interval+" 窗后重新判断；来信和可见变化会提前唤醒。" : "")+"纠正或重试另计。", "hint"));
-  const proposed=applicableQuestions(scene,record.observation_questions || []);
+  const combined=[...(record.observation_questions || []),...(draft.observation_questions || [])];
+  const proposed=applicableQuestions(scene,combined.filter((q,i)=>combined.findIndex(p=>sameValue(p,q))===i));
   if (proposed.length) {
-    const selected=draft.observation_questions ?? proposed, panel=h("div");
-    panel.append(h("p","整理模型根据文稿建议了这些观察问题。勾选的项目会在启动后显示，可随时增删。","hint"));
+    const selected=draft.observation_questions ?? proposed, panel=h("div"), options=[];
+    panel.append(h("p","勾选希望关注的问题。选择“达成后暂停”，将在该目标出现的窗末暂停一次。","hint"));
     for (const question of proposed) {
-      const label=h("label",null,"check"), checkbox=h("input");checkbox.type="checkbox";
+      const row=h("div",null,"initial-watch"),label=h("label",null,"check"), checkbox=h("input");checkbox.type="checkbox";
       checkbox.checked=selected.some(s=>sameValue(s,question));
       const actor=scene.entities.find(a=>a.id===question.actor_id), field=actor.fields.find(f=>f.id===question.field_id);
-      label.append(checkbox,document.createTextNode(question.title || actor.name+" · "+(field.label || field.id)));panel.append(label);
-      checkbox.onchange=safe(async()=>{
-        const old=draft.observation_questions;
-        draft.observation_questions=proposed.filter((q,i)=>panel.querySelectorAll("input")[i].checked);
+      label.append(checkbox,document.createTextNode(question.title || actor.name+" · "+(field.label || field.id)));row.append(label);
+      let pauseChoice=null;
+      if((question.operator || "track")!=="track" && (question.criterion || "ever")==="ever"){
+        pauseChoice=h("input");pauseChoice.type="checkbox";pauseChoice.disabled=!checkbox.checked;
+        pauseChoice.checked=checkbox.checked && (draft.pause_questions || []).some(q=>sameValue(q,question));
+        const control=h("label",null,"check initial-pause");control.append(pauseChoice,document.createTextNode("达成后暂停"));row.append(control);
+      }
+      const choiceIndex=options.length;options.push({question,checkbox,pauseChoice});panel.append(row);
+      const saveChoices=safe(async event=>{
+        const editedDraft=draft,old=draft.observation_questions,oldPauses=draft.pause_questions;
+        if(pauseChoice && !checkbox.checked)pauseChoice.checked=false;
+        draft.observation_questions=options.filter(o=>o.checkbox.checked).map(o=>o.question);
+        draft.pause_questions=options.filter(o=>o.checkbox.checked && o.pauseChoice?.checked).map(o=>o.question);
         panel.querySelectorAll("input").forEach(input=>input.disabled=true);
+        root.querySelector("[data-start-run]")?.setAttribute("disabled","");
         try {await saveProject("调整开局关注的问题");}
-        catch(error){draft.observation_questions=old;throw error;}
-        finally{renderDraft();}
+        catch(error){editedDraft.observation_questions=old;editedDraft.pause_questions=oldPauses;throw error;}
+        finally{
+          if(draft===editedDraft){
+            renderDraft();
+            const group=root.querySelector(".initial-watches");
+            if(group){
+              group.open=true;
+              const controls=group.querySelectorAll(".initial-watch")[choiceIndex]?.querySelectorAll("input");
+              controls?.[event.target===pauseChoice ? 1 : 0]?.focus({preventScroll:true});
+            }
+          }
+        }
       });
+      checkbox.onchange=saveChoices;
+      if(pauseChoice)pauseChoice.onchange=saveChoices;
     }
-    root.append(disclosure("准备追踪的问题（"+selected.length+"）",panel));
+    const watchOptions=disclosure("准备追踪的问题（"+selected.length+"）",panel);
+    watchOptions.classList.add("initial-watches");root.append(watchOptions);
   }
   root.append(disclosure("参与者与有向关系", relationExplorer(scene),draftMailRoutes(scene)),draftBrief(scene,config));
   if(record.comparison_ideas?.length)root.append(disclosure("可以怎样对照（"+record.comparison_ideas.length+"）",
@@ -655,10 +682,12 @@ function renderDraft() {
   const controls = h("div", null, "actions right");
   if (project) { const exp = h("a", "导出项目包"); exp.href = "/api/projects/" + project.id + "/package"; controls.append(exp); }
   const launch = button("启动推演 →", async () => {
+    const editedDraft=draft;
     if (!project) await saveProject();
+    if(draft!==editedDraft)return;
     await job("launch", "/api/jobs/{id}/launch", {scenario:draft.scenario, config:draft.config, preparation_records:draft.preparation_records, project_id:project.id,project_version:project.version},
       async result => { location.hash = "run/" + result.run_id; });
-  }, "primary"); launch.disabled = Boolean(qs.length); controls.append(launch); root.append(controls);
+  }, "primary"); launch.disabled = Boolean(qs.length);launch.dataset.startRun="true";controls.append(launch);root.append(controls);
 }
 function openProject(p) {
   project = p; const data = p.payload, a = data.assistant || {}, record = data.preparation_records.at(-1) || {};
@@ -666,6 +695,7 @@ function openProject(p) {
   draft = {scenario:data.scenario, config:data.config,preparation_records:data.preparation_records, summary:a.summary || record.summary || data.scenario.background,
     plan_reason:a.plan_reason || record.plan_reason, questions:record.blocking_questions || []};
   draft.observation_questions=a.observation_questions ?? record.observation_questions;
+  draft.pause_questions=a.pause_questions || [];
   sources = data.scenario.sources.filter(s => (a.source_ids || []).includes(s.id)); $("brief").value = a.goal || "";
   extraAnswers = a.extra_answers || ""; overrides = {...(record.explicit_settings || {}), ...(a.overrides || {})};
   showFiles(); renderDraft();
@@ -1244,6 +1274,7 @@ async function route() {
     $("field-watches").hidden=true; $("field-watches").replaceChildren(); delete $("field-watches").dataset.stamp;
     $("capacity-summary").hidden=true;$("capacity-summary").replaceChildren();delete $("capacity-summary").dataset.key;
     $("window-outcome").hidden=true;$("run-problem").hidden=true;$("run-problem").replaceChildren();
+    $("question-outcomes").hidden=true;$("question-outcomes").replaceChildren();
     $("feed-actor").replaceChildren(new Option("全部主体","")); $("feed-kind").value=""; actorLimit=8;
     $("all-windows").open = false; historyThrough = -1; requestedWindows = 40; $("window-list").replaceChildren();
     $("changed-windows").checked=false; $("window-order").value="new";

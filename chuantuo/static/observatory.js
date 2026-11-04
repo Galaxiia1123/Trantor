@@ -22,14 +22,24 @@ function watchFinding(row) {
   return messages[row.status] || "";
 }
 
+function fieldWatchCard(view,row,cls="watch-card") {
+  const card=h("button",null,cls);card.type="button";
+  card.append(h("small",row.actor+" · "+row.label),h("strong",row.question.title || row.label+"走势"),
+    h("span",watchValue(row,row.unit)+"　·　"+watchFinding(row)));
+  card.onclick=safe(()=>openFieldWatch(view,row.question,row.id));
+  return card;
+}
+
 function showFieldWatches(view) {
   const root=$("field-watches"), run=activeRun;
+  const outcomes=$("question-outcomes");
   const hasFields=view.actors.some(a=>Object.keys(a.fields).length);
   root.hidden=playback() || (!hasFields && view.format_version!=="1.1");
-  if (root.hidden) return;
+  if (root.hidden) {outcomes.hidden=true;outcomes.replaceChildren();return;}
   const stamp=[run,view.settled_through,view.status.status,json(view.status.pause_goals || [])].join("/");
   if(root.dataset.stamp===stamp && root.childElementCount) return;
   root.dataset.stamp=stamp;
+  outcomes.hidden=true;outcomes.replaceChildren();
   const head=h("div",null,"watchlist-head");
   const menu=h("div",null,"actions");head.append(h("h2","观察问题"),menu);
   if(hasFields) menu.append(button("添加关注",()=>openFieldWatch(view),"link"));
@@ -72,11 +82,18 @@ function showFieldWatches(view) {
     if (!rows.length) {list.append(h("p",hasFields ? "关注一个字段，观察它何时达到目标、后来是否回落。" : "这个场景以文字互动为主，可以回看各方记录的持续事项。","hint"));return;}
     const download=h("a","下载观察笔记");download.href="/api/runs/"+run+"/watch-notes?through="+view.settled_through;
     menu.append(download);
-    for (const row of rows) {
-      const card=h("button",null,"watch-card"); card.type="button";
-      card.append(h("small",row.actor+" · "+row.label),h("strong",row.question.title || row.label+"走势"),
-        h("span",watchValue(row,row.unit)+"　·　"+watchFinding(row)));
-      card.onclick=safe(()=>openFieldWatch(view,row.question,row.id)); list.append(card);
+    const hasOverview=["completed","stopped"].includes(view.status.status) && view.settled_through>0;
+    if(hasOverview){
+      const heading=h("div",null,"card-top"),cards=h("div",null,"watch-cards");
+      heading.append(h("h2","关注问题的结果"),h("small","截至"+windowName(view.settled_through),"quiet"));
+      for(const row of rows.slice(0,3))cards.append(fieldWatchCard(view,row));
+      outcomes.append(heading,cards);
+      if(rows.length>3)outcomes.append(button("查看其余 "+(rows.length-3)+" 项",()=>root.scrollIntoView({block:"start"}),"link"));
+      outcomes.hidden=false;
+      head.querySelector("h2").textContent=rows.length>3 ? "其他关注问题" : "观察工具";
+    }
+    for (const row of hasOverview ? rows.slice(3) : rows) {
+      list.append(fieldWatchCard(view,row));
     }
   }).catch(err=>{if(list.isConnected){list.append(h("p",err.message,"error"));delete root.dataset.stamp;}});
 }

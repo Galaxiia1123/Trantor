@@ -466,6 +466,7 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
 
     def create_run(request: RunRequest, run_id, launch_id=None):
         suggested = next((r.get("observation_questions",[]) for r in reversed(request.preparation_records) if r.get("kind")=="scene_parse"),[])
+        initial_pauses = []
         if isinstance(request.config, RunConfig11):
             if any(record.get("blocking_questions") for record in request.preparation_records):
                 raise ValueError("开局仍有关键问题，请补充回答并重新整理场景")
@@ -476,6 +477,9 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
         if request.project_id:
             project = repository.get_project(request.project_id, request.project_version)
             suggested = project["payload"].get("assistant",{}).get("observation_questions",suggested)
+            initial_pauses = project["payload"].get("assistant",{}).get("pause_questions",[])
+            if not isinstance(initial_pauses,list) or len(initial_pauses)>20:
+                raise ValueError("开局暂停条件须为不超过 20 项的列表")
             saved = SceneBundle.model_validate({k: project["payload"][k] for k in SceneBundle.model_fields}).model_dump(mode="json")
             if any(saved[key] != getattr(request, key).model_dump(mode="json") for key in ("scenario", "config")) or saved["preparation_records"] != request.preparation_records:
                 raise VersionConflict("请先保存当前配置为新版本，再关联这次推演")
@@ -498,6 +502,10 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
                 watch.resolve(simulation._scenario,simulation.config.catalog.values())
                 wid=uuid.uuid5(uuid.NAMESPACE_URL,encode(watch.model_dump(mode="json"))).hex
                 repository.field_watches(stage,wid,watch.model_dump(mode="json"))
+            for data in initial_pauses:
+                question=FieldWatch.model_validate(data)
+                goal_id=uuid.uuid5(uuid.NAMESPACE_URL,"pause/"+encode(question.model_dump(mode="json"))).hex
+                arm_goal(simulation,goal_id,question)
             stage.rename(target)
             simulation.journal.directory = target
         with guard:
