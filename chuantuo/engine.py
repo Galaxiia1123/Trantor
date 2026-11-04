@@ -7,6 +7,7 @@ import re
 import threading
 import uuid
 from copy import deepcopy
+from collections import OrderedDict
 from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,6 +41,7 @@ class InvalidSettlement(ValueError):
 
 class Journal:
     _TRANSPORT = TRANSPORT_KINDS
+    _LAZY = TRANSPORT_KINDS | {"observation"}
 
     def __init__(self, directory: Path | None = None):
         self._events: list[dict] = []
@@ -49,6 +51,8 @@ class Journal:
         self.directory = directory
         self._disk_size = 0
         self._offsets = {}
+        self._observation_cache = OrderedDict()
+        self._observation_bytes = 0
         self._window_rows = {}
         self._round_observations = {}
         self._pending_rounds = {}
@@ -127,10 +131,15 @@ class Journal:
             if "new_model_calls" in trace:
                 phase["calls"] = trace["new_model_calls"]
             self._usage["关联场景准备"] = phase
-        if self.directory and event["kind"] in self._TRANSPORT:
-            # Keep large model prompts on disk. Polling and recovery need only the header.
+        if self.directory and kind in self._LAZY:
+            # Older observations stay on disk alongside the complete model records.
             self._offsets[event["id"]] = (self._disk_size, size)
-            event = {**event, "data": {k: event["data"][k] for k in HEADER_KEYS if k in event["data"]}}
+            if kind == "observation":
+                self._cache_observation(event,size)
+                header = {"actor_id":data["actor_id"], "round":data["visible"]["round"]}
+            else:
+                header = {k:data[k] for k in HEADER_KEYS if k in data}
+            event = {**event, "data":header}
         self._events.append(event)
         if kind=="round_pending":
             self._pending_rounds[event["window"]]=event
@@ -182,7 +191,8 @@ class Journal:
             for obs in reversed(self._round_observations.get((window,turn,actor),())):
                 if obs["id"] in discarded:
                     continue
-                if any(all(m.get(k)==delivery.get(k) for k in ("action_id","from","to","text","dispatch_id","enclosures","reply_to","reply_by")) for m in obs["data"]["visible"]["messages"]):
+                visible = self._full(obs)["data"]["visible"]
+                if any(all(m.get(k)==delivery.get(k) for k in ("action_id","from","to","text","dispatch_id","enclosures","reply_to","reply_by")) for m in visible["messages"]):
                     return obs["id"]
         return None
 
@@ -194,7 +204,7 @@ class Journal:
         with self._lock:
             for obs in reversed(self._round_observations.get((window,turn,actor),())):
                 if obs["id"] not in discarded and (before is None or int(obs["id"][1:])<int(before[1:])):
-                    return obs
+                    return self._full(obs)
         return None
 
     def reply_mail(self,obs,discarded,*,recent_windows=3):
@@ -274,13 +284,33 @@ class Journal:
         with self._lock:
             return deepcopy(self._usage)
 
+    def _cache_observation(self,event,size):
+        if size > 4 * 1024 * 1024:
+            return False
+        previous = self._observation_cache.pop(event["id"],None)
+        if previous:
+            self._observation_bytes -= previous[1]
+        self._observation_cache[event["id"]] = (event,size)
+        self._observation_bytes += size
+        while len(self._observation_cache) > 64 or self._observation_bytes > 4 * 1024 * 1024:
+            _, (_,removed) = self._observation_cache.popitem(last=False)
+            self._observation_bytes -= removed
+        return True
+
     def _full(self, event):
+        cached = self._observation_cache.get(event["id"])
+        if cached:
+            self._observation_cache.move_to_end(event["id"])
+            return deepcopy(cached[0])
         position = self._offsets.get(event["id"])
         if position is None:
             return deepcopy(event)
         with (self.directory / "events.jsonl").open("rb") as stream:
             stream.seek(position[0])
-            return read_record(stream.read(position[1]))
+            full = read_record(stream.read(position[1]))
+        if event["kind"] == "observation" and self._cache_observation(full,position[1]):
+            return deepcopy(full)
+        return full
 
     def append(self, kind: str, data: dict, window: int = 0) -> dict:
         with self._lock:
@@ -326,7 +356,8 @@ class Journal:
 
     def selected(self, kinds=None, *, transport_details=True) -> list[dict]:
         with self._lock:
-            copy_event = self._full if transport_details else deepcopy
+            def copy_event(event):
+                return deepcopy(event) if not transport_details and event["kind"] in self._TRANSPORT else self._full(event)
             return [copy_event(e) for e in self._events if kinds is None or e["kind"] in kinds]
 
     def event(self, event_id):
@@ -410,8 +441,14 @@ class Journal:
                 raise ValueError("事件偏移不合法")
             end = len(self._events) if limit is None else min(after + limit, len(self._events))
             batch = self._events[after:end]
-            return {"events": [deepcopy(project(e)) if project else self._full(e) for e in batch], "next_offset": end,
-                    "total": len(self._events), "has_more": end < len(self._events)}
+            records = []
+            for event in batch:
+                if project:
+                    source = self._full(event) if event["kind"] == "observation" else event
+                    records.append(deepcopy(project(source)))
+                else:
+                    records.append(self._full(event))
+            return {"events":records, "next_offset":end, "total":len(self._events), "has_more":end < len(self._events)}
 
 
 AGENT_SYSTEM = """你是沙盘中一个独立主体。只依据提供的可见信息和自己的记忆自主决定；
