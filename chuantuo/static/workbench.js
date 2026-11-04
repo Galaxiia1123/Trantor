@@ -795,7 +795,7 @@ function renderWindow(view) {
   $("open-interactions").hidden=isCase;
   $("open-interactions").onclick=safe(()=>openInteractions(view));
   $("open-requests").hidden=isCase || !view.has_requested_replies;
-  $("open-requests").onclick=()=>openRequestedReplies(activeRun,view.settled_through);
+  $("open-requests").onclick=()=>openRequestedReplies(activeRun,view);
   const experimentSlot=$(s.experiment ? "comparison-lead" : "experiment-follow");
   if($("experiment-tools").parentElement!==experimentSlot)experimentSlot.append($("experiment-tools"));
   safe(()=>showWindowStrip(view))();

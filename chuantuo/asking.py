@@ -27,6 +27,7 @@ PLANNER = """你协助观察者把一个新的“如果”问题变成可编辑�
 一次改变一个条件。数值实验用 field 和 assignment；同一数值字段的其他档位用 additional_values。具体事件改期用 event_time；
 若明确要从第一轮判断前采用另一个初值，用 opening、window=0、assignment，不另发通知。固定字段只可在新的开局设定。字段的原有读者和运行约束照常生效。
 通信时效用 transit。自由条件用 condition 并明确起初的知情范围。不要替主体预先决定同意、拒绝或结果。
+若问题要求只改已经在途的某一封信的到达窗口，使用 delivery_time 和 delivery_move，dispatch_id 必须来自在途目录；其他发件不受影响。
 window 是保留到的最后一个已结算窗口，through 是观察终点，必须在给出的范围内。没有明确时点时用 default_split。
 若文本条件只持续到某一窗，写 experiment.ends_window；through 是继续观察到哪一窗，两者可以不同。
 操作者已经选好了起点。文中的“下一窗”或与 window_duration 对应的“下一班次”等相对时间，就是 default_split 后的新窗口，并非需要目录提供的外部事件。能据此拟定时直接给方案。
@@ -106,6 +107,11 @@ def _catalog(sim,question,budget,split):
         rows.append({"event":e.id,"window":e.window,"text":e.text[:240]})
     for r in sim._scenario.mail_routes:
         rows.append({"from":r.source,"to":r.target,"active_from":r.active_from,"transit_windows":r.transit_windows})
+    if sim._scenario.mail_routes and split:
+        from .interactions import dispatch_ledger
+        for mail in dispatch_ledger(sim,split,stage="pending",limit=40)["items"]:
+            rows.append({"dispatch_id":mail["dispatch"],"from":mail["from"],"to":mail["to"],"due_window":mail["due_window"],
+                         "excerpt":mail["text"][:96]})
     query=terms(question);ordered=sorted(rows,key=lambda obj:len(terms(encode(obj)) & query),reverse=True)
     kept=[]
     for row in ordered:

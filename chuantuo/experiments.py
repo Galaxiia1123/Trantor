@@ -13,6 +13,7 @@ from .engine import Simulation, encode
 from pydantic import Field, model_validator
 
 from .models import protect_credentials
+from .mail_timing import seal
 from .schema import Identifier, Provenance, Record, RouteTiming, RunConfig11, Scenario11, ScheduledValue, Source, StateField, load_scenario
 
 
@@ -163,16 +164,22 @@ class EventMove(Record):
     new_window: int = Field(ge=1,strict=True)
 
 
+class DeliveryMove(Record):
+    dispatch_id: str = Field(pattern=r"^e[0-9]{6,12}$")
+    new_window: int = Field(ge=1,le=1_000_000,strict=True)
+
+
 class ExperimentRequest(Record):
     window: int = Field(ge=0)
     through: int = Field(ge=1)
-    kind: Literal["condition","field","opening","transit","event_time","repeat","extend"] = "condition"
+    kind: Literal["condition","field","opening","transit","delivery_time","event_time","repeat","extend"] = "condition"
     extension_limit: int | None = Field(default=None,ge=1,le=1_000_000,strict=True)
     ends_window: int | None = Field(default=None,ge=1,strict=True)
     condition: str = Field(default="", max_length=1600)
     assignment: ScheduledValue | None = None
     route: RouteTiming | None = None
     event_move: EventMove | None = None
+    delivery_move: DeliveryMove | None = None
     audience: Literal["public", "readers", "world"] = "world"
     readers: list[Identifier] = Field(default_factory=list)
 
@@ -194,6 +201,10 @@ class ExperimentRequest(Record):
             raise ValueError("改变开局初值须从开局分岔，并沿用该字段原有的可见范围")
         if (self.kind=="transit")!=(self.route is not None):
             raise ValueError("线路实验需要一个发送方、一个收件方和送达时间")
+        if (self.kind=="delivery_time")!=(self.delivery_move is not None):
+            raise ValueError("单封信改期需要已寄出的发件凭据和新的到达窗口")
+        if self.delivery_move and (self.delivery_move.new_window<=self.window or self.audience!="world" or self.condition.strip()):
+            raise ValueError("单封信的新到达日期须在分岔之后。发件正文和收件人沿用原信")
         if self.kind=="transit" and (self.audience!="world" or self.condition.strip()):
             raise ValueError("线路实验只改变指定方向的通信时效，时效由通信双方知晓")
         if (self.kind=="event_time")!=(self.event_move is not None):
@@ -221,14 +232,42 @@ def prepare_experiment(parent, spec, *, allow_same_field=False):
     if parent.experiment and spec.window < parent.experiment["window"]:
         raise ValueError("请打开原路线以选择更早的分岔窗口")
     selected = boundary(parent, spec.window)
+    if spec.kind=="delivery_time":
+        mail,old=_move_in_transit(parent,spec)
+        names={a.id:a.name for a in parent._scenario.entities}
+        text=f"{names[mail['data']['from']]}寄给{names[mail['data']['to']]}的这一封信从第 {old} 窗改至第 {spec.delivery_move.new_window} 窗送达"
+        return selected,parent.scenario,text
     scene,condition=apply_intervention(parent._scenario,spec,parent.run_id,selected["state"],parent.config.catalog.values(),allow_same_field=allow_same_field)
     return selected,scene,condition
+
+
+def _move_in_transit(parent,spec):
+    mail,old=in_transit_at(parent,spec.delivery_move.dispatch_id,spec.window)
+    new=spec.delivery_move.new_window
+    if old==new or min(old,new)>spec.through:
+        raise ValueError("新旧日期应不同，且至少有一个落在比较时段内")
+    return mail,old
+
+
+def in_transit_at(parent,key,window):
+    try:
+        mail=parent.journal.event(key)
+    except FileNotFoundError:
+        raise ValueError("没有这封信的发件凭据") from None
+    if not 0<=window<=parent.window or mail["kind"]!="message_dispatched" or key in parent._discarded or mail["window"]>window:
+        raise ValueError("只能改期分岔时已经寄出、仍在途的这封信")
+    old=parent.mail_timing.due(mail,window)
+    if old<=window or parent.journal.arrival(key,window,parent._discarded):
+        raise ValueError("这封信在分岔时已经送达，请选择更早的窗口或另一封在途信")
+    return mail,old
 
 
 def apply_intervention(baseline,spec,source_id,state=None,configs=(),*,allow_same_field=False):
     """Use the same scenario contract for a proposed question and an actual fork."""
     if spec.kind=="extend":
         raise ValueError("延长观察沿用已结束路线的原条件")
+    if spec.kind=="delivery_time":
+        raise ValueError("请从具体路线中选择分岔时仍在途的发件凭据")
     scene = baseline.model_dump(mode="json")
     condition = spec.condition.strip()
     if spec.kind in {"field","opening"}:
@@ -308,6 +347,12 @@ def fork_experiment(parent, spec, run_id, job_id, directory: Path, *, study=None
               "state_sha256":hashlib.sha256(encode(selected["state"]).encode()).hexdigest()}
     if study:
         marker["study"]=study
+    timing=list((parent.experiment or {}).get("mail_timing",()))
+    if spec.kind=="delivery_time":
+        mail,old=_move_in_transit(parent,spec)
+        timing.append({"dispatch":mail["id"],"seal":seal(mail),"after":spec.window,"old":old,"new":spec.delivery_move.new_window})
+    if timing:
+        marker["mail_timing"]=timing
     expected=selected["state"]
     if spec.kind=="opening":
         change=spec.assignment
@@ -371,6 +416,16 @@ def experiment_comparison(parent, alternate, window=None):
         return {**result,"mode":"continuation","experiment":marker,"latest":latest,"observed":end-start,
                 "changed_windows":len(changed),"first_change":changed[0] if changed else None}
     result=trajectory_comparison(parent,alternate,marker["window"],window)
+    if marker["kind"]=="delivery_time":
+        dispatch=marker["delivery_move"]["dispatch_id"]
+        selected=result["right"]["window"]
+        deliveries=[]
+        for sim in (parent,alternate):
+            sent=sim.journal.event(dispatch)
+            arrived=sim.journal.arrival(dispatch,selected,sim._discarded)
+            deliveries.append({"due":sim.mail_timing.due(sent,selected),
+                               "arrival":arrived["window"] if arrived else None,"receipt":arrived["id"] if arrived else None})
+        result["delivery_comparison"]={"dispatch":dispatch,"sides":deliveries}
     return {**result,"experiment":marker}
 
 

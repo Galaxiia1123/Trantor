@@ -854,6 +854,15 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
         from .correspondence import requested_replies
         return requested_replies(get_run(run_id),through,actor,stage,offset,limit)
 
+    @app.get("/api/runs/{run_id}/mail/{dispatch}/at/{window}")
+    def pending_envelope(run_id:str,dispatch:str,window:int):
+        from .experiments import in_transit_at
+        sim=get_run(run_id)
+        with sim._lock:
+            e,due=in_transit_at(sim,dispatch,window)
+            return {"dispatch":dispatch,"sent_window":e["window"],"due_window":due,"from":e["data"]["from"],
+                    "to":e["data"]["to"],"text":e["data"]["text"],"enclosures":[d["title"] for d in e["data"].get("enclosures",())]}
+
     @app.get("/api/runs/{run_id}/actors/{actor_id}/journey")
     def actor_journey(run_id:str, actor_id:str, window:int|None=Query(default=None,ge=1),
                       turn:int|None=Query(default=None,ge=1), news_only:bool=False, through:int|None=Query(default=None,ge=1)):

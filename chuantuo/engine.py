@@ -25,6 +25,7 @@ from .schema import validate_outbox
 from .documents import envelope_scope
 from .briefing import runtime_scene
 from .replies import envelope_key, validate_reply, validate_requested_time
+from .mail_timing import MailTiming
 
 
 def encode(value) -> str:
@@ -51,6 +52,7 @@ class Journal:
         self._round_observations = {}
         self._letters_by_envelope={}
         self._letters_by_reader={}
+        self._arrivals={}
         self._requested_letters={}
         self._request_mail=[]
         self._reply_events={}
@@ -134,6 +136,8 @@ class Journal:
         elif kind=="message_delivered":
             self._letters_by_envelope.setdefault(envelope_key(data),[]).append(event)
             self._letters_by_reader.setdefault(data["to"],[]).append(event)
+            if data.get("dispatch_id"):
+                self._arrivals.setdefault(data["dispatch_id"],[]).append(event)
             if data.get("reply_by") is not None:
                 self._requested_letters.setdefault(data["to"],[]).append(event)
         if kind in {"message_delivered","message_dispatched"}:
@@ -223,6 +227,10 @@ class Journal:
 
     def has_replies(self,ref,through,discarded):
         with self._lock:return any(e["window"]<=through and e["id"] not in discarded for e in self._reply_events.get(ref,()))
+
+    def arrival(self,ref,through,discarded):
+        with self._lock:
+            return next((e for e in self._arrivals.get(ref,()) if e["window"]<=through and e["id"] not in discarded),None)
 
     def request_mail(self,through,discarded,*,responses_to=None):
         with self._lock:
@@ -419,6 +427,7 @@ class Simulation:
         self.gateway = gateway or ModelGateway()
         self.journal = _journal or Journal(directory)
         self.experiment = _journal.event("e000001")["data"].get("experiment") if _journal else None
+        self.mail_timing=MailTiming(self.experiment)
         self._lock = threading.RLock()
         self._runner_lock = threading.Lock()
         self._pause = threading.Event()
@@ -787,7 +796,7 @@ class Simulation:
                     payload["mail"]=[]
                     for e in self._current_mail:
                         d=e["data"]
-                        row={k:d[k] for k in ("from","to","text","sent_window","due_window") if k in d}
+                        row={k:d[k] for k in ("from","to","text","sent_window","due_window","arrived_window") if k in d}
                         if d.get("enclosures"):
                             row["enclosures"]=[{k:doc[k] for k in ("id","title","origin","sha256")} for doc in d["enclosures"]]
                         if e["kind"]=="message_delivered":
@@ -809,6 +818,8 @@ class Simulation:
         instruction=world_instruction(payload["allowed_direct_actions"]) if self.notebooks else WORLD_SYSTEM
         if "review_fields" in payload:
             instruction+="\nreview_fields 按所有者列出本窗请你审查的确切字段。名单外不写 reviews。固定字段由引擎保持，即使主体表态想改也不能记为已经改变。"
+        if (self._settlement_correction or {}).get("issue","").startswith("直接影响引用"):
+            instruction+="\n上次未通过的是可选的 influence_refs。保持原值或只是确认收到了先前寄出的信时，在该字段上省略 influence_refs，只保留当窗的 action_ids 和实际到件的 event_ids。禁止把早先的寄件重新算成当窗直接行动。"
         if payload.get("mail_routes"):
             instruction+="\nmail_routes 是本窗口权威的通信时效，优先于旧材料里的预计送达时间。核对实际到件记录，再区分信中内容与收件人自己的决定。"
         if self._waiting_steps:
@@ -861,9 +872,9 @@ class Simulation:
         self._current_events=[self.journal.append("external_event",event.model_dump(mode="json"),self.window+1)
                               for event in self._perception.calendar.get(self.window+1,())]
         self._current_mail=[]
-        due=[e for e in self._in_transit.values() if e["data"]["due_window"]==self.window+1]
+        due=[e for e in self._in_transit.values() if self.mail_timing.due(e,self.window)==self.window+1]
         for dispatch in due:
-            data={**dispatch["data"],"dispatch_id":dispatch["id"]}
+            data=self.mail_timing.receipt(dispatch,self.window+1)
             receipt=self.journal.append("message_delivered",data,self.window+1)
             self._current_mail.append(receipt)
             self._inbox[data["to"]].append(self._perception.documents.received(receipt))

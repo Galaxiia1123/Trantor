@@ -189,6 +189,7 @@ def _report_inputs(simulation):
 interpretation 用于解释、局限及不能外推的讨论。每条结论按其实际依据填写；同一事实不要在不同章节反复重写。
 evidence_ids 只填本次 events 的事件 id（形如 e000001）。材料编号只填在结论的 source_ids；引用文稿的章节用收录该文稿的开局事件作 evidence_ids。客观状态变化引用已提交窗口。带 simulation_ref 的来源是先前推演的快照。
 对解释明确标注“报告解释”。模拟结果不能直接作为现实结论。失败或未完成的窗口不得写成已提交。
+分岔时操作者选择的字段、日期和收件范围属于 method，引用 experiment_forked 或带 experiment 的 run_created。实际到件或状态变化另写 simulation 结论，分别引用相应的 message_delivered 或 window_committed。不要把预定到达日期直接写成已到件。
 不包含密钥或内部思维链，不补造情节。不能将离线脚本演示称为真实模型实验。
 场景虚构与调用方式是两件事。sources 中保留的旧示例运行说明只描述原材料；本次实际调用方式
 如有 runtime_verification，依据其网络请求凭证描述。真实 API 调用不等于现实世界实验或有效性验证。"""},
@@ -297,7 +298,14 @@ def generate_report(simulation: Simulation, gateway=None, progress=None, *, max_
                                 problems.append(where + "缺少能核对所引材料的开局或准备记录")
                     snapshot_source = any(sources[sid].simulation_ref for sid in claim.source_ids) and any(e["kind"] == "run_created" for e in records)
                     if claim.basis == "simulation" and not snapshot_source and not any(e["kind"] in {"window_committed","expression","observation","message_dispatched","message_delivered","external_event"} and e["window"] <= cutoff_window for e in records):
-                        problems.append(where + "：模拟事件结论缺少已提交窗口内的证据。字段结果应引用提交 " + "、".join(commit_refs[-6:]) + "。若实际讨论请求、错误或完成状态，改用 method；若讨论局限，改用 interpretation")
+                        if any(e["kind"]=="experiment_forked" or e["kind"]=="run_created" and e["data"].get("experiment") for e in records):
+                            dispatch=(simulation.experiment or {}).get("delivery_move") or {}
+                            arrivals=[e["id"] for e in evidence if e["id"] in ids and e["kind"]=="message_delivered" and
+                                      dispatch.get("dispatch_id") and e["data"].get("dispatch_id")==dispatch["dispatch_id"]]
+                            extra="。证明该件实际到达时另写 simulation 结论，引用 "+arrivals[0] if arrivals else ""
+                            problems.append(where+"：你引的是操作者的分岔设定。若保留这些依据，此条使用 basis=method，并写“设为”或“预计”"+extra)
+                        else:
+                            problems.append(where + "：模拟事件结论缺少已提交窗口内的证据。字段结果应引用提交 " + "、".join(commit_refs[-6:]) + "。若实际讨论请求、错误或完成状态，改用 method；若讨论局限，改用 interpretation")
                     if claim.basis == "source" and any(sources[sid].simulation_ref for sid in claim.source_ids):
                         problems.append(where + "的派生项目状态快照必须标注为模拟来源")
                     if claim.basis == "method" and not any(e["kind"] in {"run_created","scene_parse","provider_attempt","model_validation_error","run_error","run_status","runtime_verification","run_recovered","settlement_rejected","settlement_resume_requested","experiment_forked","decision_deferred"} for e in records):

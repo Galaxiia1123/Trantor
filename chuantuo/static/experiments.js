@@ -39,6 +39,7 @@ function caseChoices(heading,intro,path,choices) {
 function experimentForm(view,idea=null,priorWindow=null) {
   const run = activeRun, committed = view.status.window, earliest = view.status.experiment?.window || 0;
   const preset=idea?.experiment;
+  if(preset?.kind==="delivery_time")return singleMailMove(view,preset.delivery_move.dispatch_id,preset.window,preset);
   const form = h("form", null, "experiment-form"), warning = h("p", null, "form-error");
   const select = (label, choices) => {
     const field = h("select");
@@ -160,7 +161,7 @@ function experimentForm(view,idea=null,priorWindow=null) {
     "两条路线在分岔前拥有相同的状态、私人记忆和已送达消息。新的条件从下一窗开始生效。","hint"),form);
 }
 
-const experimentKind = meta => ({extend:"延长观察",repeat:"原样重跑",field:"字段实验",opening:"开局初值实验",transit:"线路实验",event_time:"日历实验"}[meta.kind] || "条件实验");
+const experimentKind = meta => ({extend:"延长观察",repeat:"原样重跑",field:"字段实验",opening:"开局初值实验",transit:"线路实验",delivery_time:"单封信改期",event_time:"日历实验"}[meta.kind] || "条件实验");
 
 function extendRun(view){
   const run=activeRun,from=view.status.window,form=h("form",null,"experiment-form"),extra=h("input"),cap=h("input");
@@ -280,6 +281,8 @@ function showExperimentTools(view) {
   if(meta.kind==="event_time"){
     origin.append("　事件内容与通知对象沿用原日历。");
     if(meta.original_event?.record)origin.append(button("查阅原日期的事件凭据",()=>evidence(meta.original_event.record,meta.parent_id),"link"));
+  }else if(meta.kind==="delivery_time"){
+    origin.append("　只改变这封在途信的到件日。",button("查原发件凭据",()=>evidence(meta.delivery_move.dispatch_id,meta.parent_id),"link"));
   }else if(meta.kind==="opening")origin.append("　原初值“"+(meta.opening_change.before??"未知")+"”，新初值“"+(meta.opening_change.after??"未知")+"”。第一轮按该字段原有的可见范围呈现。");
   else if(meta.kind==="transit")origin.append("　新时效只用于分岔后的新发件。通信双方能看到这个时效。");
   else if (meta.kind!=="repeat") {
@@ -309,6 +312,15 @@ function drawExperimentComparison(root, result, actors, isLetter, options={}) {
     else{const link=h("a",caption);link.href="#run/"+result.right.run_id+"/"+first;intro.append(link);}
   } else intro.append(h("small",first===0?"开局初值不同":first!=null?"首次状态分化":"截至共同终点，未观察到字段差异","quiet"));
   root.append(intro);
+  if(result.delivery_comparison){
+    const box=h("div",null,"brief-pair"),labels=[leftLabel,rightLabel];
+    result.delivery_comparison.sides.forEach((post,i)=>{
+      const card=h("article",null,"brief-side"),head=i?result.right:result.left;
+      card.append(h("small",labels[i],"eyebrow"),h("strong",post.receipt?windowName(post.arrival)+"实际到件":"此时仍在途中"),
+        h("p",post.receipt?"可核对收件人的到件凭据。":"这封信预计"+windowName(post.due)+"送达，收件箱尚无此件。"));
+      if(post.receipt)card.append(button("查到件凭据",()=>evidence(post.receipt,head.run_id),"link"));box.append(card);
+    });root.append(box);
+  }
   const assigned=result.experiment?.assignment, defined=result.rows.filter(row=>row.left && row.right);
   const outcomes=defined.filter(row=>row.actor_id!==assigned?.entity_id || row.field_id!==assigned?.field_id);
   const target=result.focus || outcomes.find(row=>row.status==="different") || outcomes[0] || defined[0];

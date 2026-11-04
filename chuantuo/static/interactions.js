@@ -98,7 +98,8 @@ function openConversation(run,one,two,start,end) {
   reading(one.name+"与"+two.name+"的往来",body);safe(()=>page())();
 }
 
-function openRequestedReplies(run,through) {
+function openRequestedReplies(run,view) {
+  const through=view.settled_through;
   const body=h("div"), filters=h("div",null,"map-controls"), who=h("select"), status=h("select");
   const head=h("p",null,"hint"), list=h("div"), moreBox=h("div");let sequence=0;
   const choose=(title,control)=>{const label=h("label",title);control.setAttribute("aria-label",title);label.append(control);return label;};
@@ -122,7 +123,12 @@ function openRequestedReplies(run,through) {
           (item.reply_sent?"，"+windowName(item.reply_sent)+"发出回信":"")+(item.reply_arrival?"，"+windowName(item.reply_arrival)+"收回":"")+"。","quiet"));
       card.append(button("查原信",()=>evidence(item.id,run),"link"));
       if(item.receipt)card.append(button("沿这封信读回复",()=>openReplyChain(run,item.receipt,through),"link"));
-      if(item.reply_id)card.append(button("查回函",()=>evidence(item.reply_id,run),"link"));list.append(card);
+      if(item.reply_id)card.append(button("查回函",()=>evidence(item.reply_id,run),"link"));
+      if(item.reply_dispatch){
+        const split=mailMoveBoundary(view,item.reply_sent,item.reply_due,item.reply_arrival);
+        if(split!==null)card.append(button("只改这封回函的到件日",()=>singleMailMove(view,item.reply_dispatch,split),"link"));
+      }
+      list.append(card);
     }
     if(!result.total)list.append(h("p","这个范围内没有符合条件的问询。","hint"));
     if(result.next<result.total)moreBox.append(button("更多问询",()=>draw(result.next),"link"));

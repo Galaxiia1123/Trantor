@@ -58,7 +58,7 @@ def decision_view(observation):
     if observation["messages"] and (view.get("documents") or any(m.get("dispatch_id") or m.get("enclosures") for m in observation["messages"])):
         view["messages"]=[]
         for message in observation["messages"]:
-            when=f"第 {message['due_window']} 窗首" if message.get("dispatch_id") else "上一轮结束时"
+            when=f"第 {message.get('arrived_window',message.get('due_window'))} 窗首" if message.get("dispatch_id") else "上一轮结束时"
             attachments=[d["title"] for d in message.get("enclosures",())]
             contents="实际随信附件："+"、".join(attachments) if attachments else "本信只有文字，无随信附件"
             view["messages"].append({**message,"到件记录":when+"收到这封信。"+contents+"。"})

@@ -101,7 +101,8 @@ def reply_chain(sim,receipt_id,through=None,offset=0,limit=30):
             sent=sim.journal.event(d["action_id"])
             items.append({"id":ref,"parent":d.get("reply_to"),"depth":depth[ref],"sender":names[d["from"]],"recipient":names[d["to"]],
                           "sent_window":sent["window"],"round":sent["data"]["round"],"received_window":None if pending else e["window"],
-                          "due_window":d.get("due_window"),"text":d["text"][:1400],"truncated":len(d["text"])>1400,
+                          "due_window":sim.mail_timing.due(e,end) if pending else d.get("arrived_window",d.get("due_window")),
+                          "text":d["text"][:1400],"truncated":len(d["text"])>1400,
                           "enclosures":[doc["title"] for doc in d.get("enclosures",())]})
         return {"root":root,"selected":receipt_id,"through":end,"total":len(entries),"items":items,"next":offset+len(items)}
 
@@ -122,9 +123,12 @@ def dispatch_ledger(sim, through=None, actor=None, stage=None, offset=0, limit=3
                         continue
                     if kind=="message_dispatched":
                         items[e["id"]]={"dispatch":e["id"],"receipt":None,"seen":None,"stage":"pending",**d}
+                        effective=sim.mail_timing.due(e,end)
+                        if effective!=d["due_window"]:
+                            items[e["id"]].update(original_due_window=d["due_window"],due_window=effective)
                     elif ref:=d.get("dispatch_id"):
                         item=items[ref]
-                        item.update(stage="arrived",receipt=e["id"])
+                        item.update(stage="arrived",receipt=e["id"],due_window=e["window"])
         pending=sum(i["stage"]=="pending" for i in items.values())
         done=end==sim.window and sim.status in {"completed","stopped"}
         ordered=sorted((i for i in items.values() if stage is None or i["stage"]==stage),

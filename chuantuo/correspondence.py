@@ -35,7 +35,12 @@ def requested_replies(sim, through=None, actor=None, stage="all", offset=0, limi
                 item.update(reply_sent=first["data"].get("sent_window", first["window"]),reply_id=first["id"])
             arrived = next((ev for ev in responses if ev["kind"] == "message_delivered"), None)
             if arrived:
-                item.update(reply_arrival=arrived["window"],reply_id=arrived["id"])
+                item.update(reply_arrival=arrived["window"],reply_id=arrived["id"],
+                            reply_sent=arrived["data"].get("sent_window",arrived["window"]))
+            postmark = arrived["data"].get("dispatch_id") if arrived else responses[0]["id"] if responses else None
+            if postmark:
+                sent=sim.journal.event(postmark)
+                item.update(reply_dispatch=postmark,reply_due=sim.mail_timing.due(sent,end))
             if arrived:
                 status = "answered"
             elif responses:

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from .replies import validate_reply, validate_requested_time
+from .mail_timing import MailTiming
 from collections import Counter
 from copy import deepcopy
 
@@ -123,6 +124,8 @@ def _same(left, right):
 def verify_commits(scenario, config, events):
     """Validate committed rounds and state transitions; abandoned evidence remains readable."""
     state = scenario.initial_state()
+    timing=MailTiming(events[0]["data"].get("experiment") if events else None)
+    checked_mail=set()
     actors = {actor.id: actor for actor in scenario.entities}
     permitted_fields = {actor.id: {field.id: field for field in actor.fields} for actor in actors.values()}
     perception = Perception(scenario, scenario.depths(), config) if isinstance(config, RunConfig11) else None
@@ -177,13 +180,13 @@ def verify_commits(scenario, config, events):
             raise ValueError("主体观察或窗口提交之前缺少预定的外部事件")
         if kind=="message_delivered" and "dispatch_id" in data:
             original=in_transit.pop(data["dispatch_id"],None)
-            if (not original or original["data"]["due_window"]!=event["window"] or observations
-                    or not _same(data,{**original["data"],"dispatch_id":original["id"]})):
+            if (not original or timing.due(original,event["window"]-1)!=event["window"] or observations
+                    or not _same(data,timing.receipt(original,event["window"]))):
                 raise ValueError("到件与原始发件、预定到达时点或收件内容不符")
             arrivals.append(event)
             inboxes[data["to"]].append(perception.documents.received(event))
             continue
-        if kind=="observation" and not observations and any(e["data"]["due_window"]<=event["window"] for e in in_transit.values()):
+        if kind=="observation" and not observations and any(timing.due(e,event["window"]-1)<=event["window"] for e in in_transit.values()):
             raise ValueError("开始本窗观察前仍有到期未投递的消息")
         if kind in {"expression","decision_deferred"}:
             owner = data["actor_id"]
@@ -246,6 +249,9 @@ def verify_commits(scenario, config, events):
                         or data.get("due_window")!=event["window"]+delay):
                     raise ValueError("在途消息的发件时间或预定到达时间不符")
                 in_transit[event["id"]]=event
+                if event["id"] in timing.by_dispatch:
+                    timing.check_dispatch(event)
+                    checked_mail.add(event["id"])
                 dispatched_count+=1
             else:
                 if doc_ids:
@@ -312,6 +318,8 @@ def verify_commits(scenario, config, events):
     outputs = verify_references(events, discarded)
     complete_pending = (len(schedule) == expected_actions and all(n == 1 for n in schedule.values())
                         and observations == schedule and outbound == expected_messages)
+    if timing.by_dispatch.keys()!=checked_mail:
+        raise ValueError("单封信的改期引用了这条路线中没有寄出的邮件")
     return {"committed_windows": last_window, "verified_expressions": total_actions, "verified_deferred":total_deferred,"verified_deliveries": total_messages,
             "pending_actions_complete":complete_pending,"in_transit_at_boundary":committed_transit,
             **outputs,

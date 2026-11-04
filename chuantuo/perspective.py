@@ -77,7 +77,7 @@ def _letter(message, direction, names, clip=None):
         return {**row,"to":[names.get(a,a) for a in message["recipients"]], "enclosures":message.get("enclosures",[])}
     return {**row,"sender":names.get(message["from"],message["from"]),
             "enclosures":[{"id":d["id"],"title":d["title"]} for d in message.get("enclosures",())],
-            **({"dispatched":message["sent_window"],"arrived":message["due_window"]} if message.get("dispatch_id") else {})}
+            **({"dispatched":message["sent_window"],"arrived":message.get("arrived_window",message["due_window"])} if message.get("dispatch_id") else {})}
 
 
 def letter_at(sim, actor_id, window, turn, direction, index):

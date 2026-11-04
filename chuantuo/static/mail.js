@@ -45,6 +45,45 @@ function draftMailRoutes(scene) {
   return disclosure("定向通信时效（"+(scene.mail_routes||[]).length+"）",h("p","没有单设时效的方向，默认当轮结束后送达。","hint"),content);
 }
 
+function mailMoveBoundary(view,sent,due,arrived) {
+  if(playback())return null;
+  const end=view.settled_through, latest=view.status.window;
+  const split=Math.max(view.status.experiment?.window||0,!arrived && end<latest ? end : sent);
+  return split<latest && split<due ? split : null;
+}
+
+async function singleMailMove(view,dispatch,split,preset=null) {
+  const run=activeRun,ticket=++readingRequest;
+  const mail=await api("/api/runs/"+run+"/mail/"+encodeURIComponent(dispatch)+"/at/"+split);
+  if(run!==activeRun || ticket!==readingRequest)return;
+  const names=Object.fromEntries(view.actors.map(a=>[a.id,a.name])), form=h("form",null,"advanced");
+  form.append(h("p",names[mail.from]+" → "+names[mail.to]+" · "+windowName(mail.sent_window)+"寄出","eyebrow"),
+    h("p",mail.text),h("p","从"+windowName(split)+"结算后分岔。此时这封信预计"+windowName(mail.due_window)+"送达，收件人仍须等实际到件才能阅读。","hint"));
+  if(mail.enclosures.length)form.append(h("p","随信附件　"+mail.enclosures.join("、")));
+  function number(label,value,max){
+    const wrap=h("label",label),input=h("input");input.setAttribute("aria-label",label);input.type="number";input.step="1";input.min=String(split+1);
+    input.max=String(max);input.required=true;input.value=String(value);wrap.append(input);form.append(wrap);return input;
+  }
+  const fallback=mail.due_window>split+1?mail.due_window-1:mail.due_window+1;
+  const next=number("这封信改在第几窗到达",preset?.delivery_move?.new_window ?? fallback,1000000);
+  const end=number("比较到哪个窗口",preset?.through ?? view.status.window,view.status.window);
+  const cost=h("p",null,"hint"),error=h("p",null,"form-error"),go=h("button","按新日期开一条路线","primary");go.type="submit";
+  const estimate=()=>{cost.textContent=view.mode==="sample"?"使用本地案例脚本。":
+    "新路线重跑 "+Math.max(0,Number(end.value)-split)+" 窗，按每轮全体判断约 "+Math.max(0,Number(end.value)-split)*(view.actors.length*view.rounds_per_window+1)+" 次基础调用。";};
+  end.oninput=estimate;estimate();form.append(cost,error,go);
+  form.onsubmit=async e=>{
+    e.preventDefault();if(go.disabled || busy)return;
+    const due=Number(next.value),through=Number(end.value);
+    if(due===mail.due_window || Math.min(due,mail.due_window)>through){error.textContent="请选不同的新日期，并让比较时段至少覆盖一个到件日。";return;}
+    go.disabled=true;error.textContent="";
+    try {
+      await job("experiment","/api/jobs/{id}/experiment/"+run,{kind:"delivery_time",window:split,through,delivery_move:{dispatch_id:dispatch,new_window:due}},
+        async result=>{$("reading").close();location.hash="run/"+result.run_id;});
+    }catch(err){error.textContent=err.message;}finally{go.disabled=false;}
+  };
+  reading("只调整这封在途信",form);
+}
+
 function openRunMail(view) {
   const run=activeRun,end=view.settled_through, body=h("div"),controls=h("div",null,"interaction-controls");
   const who=h("select"),stage=h("select"),status=h("p",null,"hint"),list=h("div"),routes=h("div");
@@ -67,6 +106,9 @@ function openRunMail(view) {
         h("small",windowName(m.sent_window)+"第 "+m.sent_round+" 轮发出，"+(m.receipt ? "于" : "预计")+windowName(m.due_window)+"窗首送达。","quiet"));
       card.append(button("发件时的决定",()=>openActorContext({id:m.from,name:names[m.from]},m.sent_window,m.sent_round,false,run),"link"));
       if(m.seen)card.append(button("收件时看到的内容",()=>openActorContext({id:m.to,name:names[m.to]},m.due_window,1,false,run),"link"));
+      if(m.original_due_window)card.append(h("small","寄出时预计"+windowName(m.original_due_window)+"到达，后来单独改期。","hint"));
+      const split=mailMoveBoundary(view,m.sent_window,m.due_window,m.receipt);
+      if(split!==null)card.append(button("只调整这封信的到件日",()=>singleMailMove(view,m.dispatch,split),"link"));
       card.append(evidenceLinks([m.dispatch,m.receipt].filter(Boolean),run));list.append(card);
     }
     if(!r.total)list.append(h("p","这个时点还没有符合筛选的跨窗邮件。","empty"));

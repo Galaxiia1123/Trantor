@@ -106,7 +106,7 @@ def document_history(sim, through=None, document=None, offset=0, limit=30):
                         action=sim.journal.event(d["action_id"])
                         copies[link]={"from":d["from"],"to":d["to"],"sender":names[d["from"]],"recipient":names[d["to"]],
                                       "sent_window":action["window"],"sent_round":action["data"]["round"],"action":action["id"],
-                                      "due_window":d.get("due_window",window),"dispatch":link if kind=="message_dispatched" else None,
+                                      "due_window":sim.mail_timing.due(event,end) if kind=="message_dispatched" else window,"dispatch":link if kind=="message_dispatched" else None,
                                       "receipt":None,"arrived_window":None}
                     if kind=="message_delivered":
                         copies[link].update(receipt=event["id"],arrived_window=window)

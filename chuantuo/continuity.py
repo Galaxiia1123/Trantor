@@ -188,7 +188,7 @@ def objective_input(scene, config, state, actions, history, window, schema, rece
                 barred.append({"entity_id":actor.id,"field_id":f.id,"本窗不可转入":values})
     if barred:
         result["entry_limits"]=barred
-    if any(f.constraints and f.constraints.fixed for a in scene.entities for f in a.fields):
+    if any(not a.fields for a in scene.entities) or any(f.constraints and f.constraints.fixed for a in scene.entities for f in a.fields):
         assigned={(v["entity_id"],v["field_id"]) for e in receipts for v in e["data"].get("assignments",())}
         result["review_fields"]={a.id:[f.id for f in a.fields if not (f.constraints and f.constraints.fixed)
                                       and (a.id,f.id) not in assigned] for a in scene.entities}
