@@ -106,7 +106,9 @@ async function api(path, method = "GET", body) {
   const data = await response.json().catch(() => null);
   if (!response.ok) {
     const detail = data?.detail;
-    throw new Error(Array.isArray(detail) ? detail.map(d => d.loc.slice(1).join(".") + " " + d.msg).join(" / ") : detail || "请求未完成（" + response.status + "）");
+    const error=new Error(Array.isArray(detail) ? detail.map(d => d.loc.slice(1).join(".") + " " + d.msg).join(" / ") : detail || "请求未完成（" + response.status + "）");
+    error.status=response.status;
+    throw error;
   }
   return data;
 }
@@ -335,53 +337,84 @@ async function awaitJob(id) {
     notice(receipt.message || "正在处理"); await pause(720);
   }
 }
-async function job(kind, path, payload, follow, sourceRun = activeRun) {
+function preparationContext() {
+  return {project:project?.id || null,version:project?.version || 0,route:location.hash || "#new",
+    allow_search:$("allow-search").checked,
+    assistant:{goal:$("brief").value,extra_answers:extraAnswers,source_ids:sources.map(s=>s.id),overrides:structuredClone(overrides)}};
+}
+async function job(kind, path, payload, follow, sourceRun = activeRun, preparation = null) {
   if (busy) return;
   busy = true; $("prepare").disabled = true; const id = uid();
-  keep("job", {id, kind, project:project?.id, run:sourceRun});
+  const context=kind==="prepare" ? preparation || preparationContext() : null, generation=routeGeneration;
+  keep("job", {id, kind, project:context?.project || project?.id, run:sourceRun,preparation:context});
   try {
     await api(path.replace("{id}", id), "POST", payload);
     const result = await awaitJob(id);
-    await follow(result); keep("job", null);
+    await follow(result,context,generation); keep("job", null);
     if (kind === "prepare") { keep("failed-prepare",null); $("retry-panel").hidden = true; }
   } catch (err) {
     // Keep the receipt after a lost connection so a refresh can recover it.
-    if (!(err instanceof TypeError)) keep("job", null);
-    if (kind === "prepare" && !(err instanceof TypeError)) {
-      const receipt = await api("/api/jobs/" + id).catch(() => null);
+    if (!(err instanceof TypeError)) {
+      const receipt = kind==="prepare" ? await api("/api/jobs/" + id).catch(() => null) : null;
+      if(receipt?.status!=="completed") keep("job",null);
       if (["failed","interrupted"].includes(receipt?.status)) {
-        keep("failed-prepare",{id,project:project?.id || null}); $("retry-panel").hidden = false;
+        keep("failed-prepare",{id,project:context.project,preparation:context}); $("retry-panel").hidden = false;
       }
     }
     throw err;
   } finally { busy = false; $("prepare").disabled = false; }
 }
-async function saveProject(reason = "", preparedJob = null) {
-  const editedDraft=draft;
-  const assistant = {summary:draft.summary, goal:$("brief").value, extra_answers:extraAnswers,
-    source_ids:sources.map(s => s.id), overrides, plan_reason:draft.plan_reason, revision_reason:reason};
-  if (draft.observation_questions || draft.preparation_records.at(-1)?.observation_questions)
-    assistant.observation_questions=applicableQuestions(draft.scenario,draft.observation_questions ?? draft.preparation_records.at(-1).observation_questions);
-  assistant.pause_questions=applicableQuestions(draft.scenario,draft.pause_questions || []);
-  const payload = {scenario:draft.scenario, config:draft.config, preparation_records:draft.preparation_records,
-    assistant, expected_version:project?.version || 0};
-  const endpoint = "/api/projects" + (project ? "/" + project.id : "") + (preparedJob ? "?prepared_job=" + encodeURIComponent(preparedJob) : "");
-  const saved = await api(endpoint, "POST", payload);
+function projectPayload(data,assistant,version=0) {
+  if (data.observation_questions || data.preparation_records.at(-1)?.observation_questions)
+    assistant.observation_questions=applicableQuestions(data.scenario,data.observation_questions ?? data.preparation_records.at(-1).observation_questions);
+  assistant.pause_questions=applicableQuestions(data.scenario,data.pause_questions || []);
+  return {scenario:data.scenario,config:data.config,preparation_records:data.preparation_records,assistant,expected_version:version};
+}
+async function saveProject(reason = "") {
+  const editedDraft=draft, context=preparationContext();
+  const assistant = {...context.assistant,summary:draft.summary,plan_reason:draft.plan_reason,revision_reason:reason};
+  const saved = await api("/api/projects" + (project ? "/" + project.id : ""), "POST", projectPayload(draft,assistant,context.version));
   if(draft!==editedDraft)return saved;
   project = saved; draft.scenario = saved.payload.scenario; draft.config = saved.payload.config;
   draft.preparation_records = saved.payload.preparation_records;
   draft.questions = draft.preparation_records.at(-1)?.blocking_questions || [];
   return saved;
 }
-async function acceptedDraft(result) {
+async function acceptedDraft(result,context,generation=routeGeneration) {
   const origin = result.preparation_records[0]?.preparation_trace?.job_id;
-  if (origin && project?.payload?.assistant?.adopted_prepare_job === origin) {
-    openProject(project); notice("已恢复此前保存的整理结果。"); return;
+  if(!origin) throw new Error("整理结果缺少任务编号，请重新打开任务记录。");
+  const assistant=context?.assistant || {
+    goal:result.scenario.sources.find(s=>s.id.startsWith("user_brief") && s.name==="用户背景与补充")?.text || "",
+    extra_answers:"",source_ids:result.scenario.sources.filter(s=>s.asset_id).map(s=>s.id),overrides:{}};
+  const metadata={...assistant,summary:result.summary,plan_reason:result.plan_reason,
+    revision_reason:assistant.extra_answers || (context?.project ? "依据重新提交的场景文稿整理" : "")};
+  const payload=projectPayload(result,metadata,context?.version || 0);
+  const suffix="?prepared_job="+encodeURIComponent(origin);
+  let saved, separate=false;
+  try {
+    saved=await api("/api/projects"+(context?.project ? "/"+context.project : "")+suffix,"POST",payload);
+  } catch(err) {
+    if(err.status!==409 || !context?.project) throw err;
+    payload.expected_version=0;
+    payload.assistant.prepared_from_project={id:context.project,version:context.version};
+    saved=await api("/api/projects"+suffix,"POST",payload);
+    separate=true;
   }
-  draft = result; renderDraft();
-  await saveProject(extraAnswers || (project ? "依据重新提交的场景文稿整理" : ""), origin);
-  history.replaceState(null, "", "#project/" + project.id);
-  notice("场景已保存。"); renderDraft(); $("draft").scrollIntoView({block:"start"});
+  const samePlace=context && generation===routeGeneration && sameValue(context,preparationContext());
+  if(samePlace) {
+    openProject(saved);
+    history.replaceState(null,"","#project/"+saved.id);
+    notice(separate ? "原项目已有较新编辑，这次整理已另存为新项目。" : "场景已保存。");
+    $("draft").scrollIntoView({block:"start"});
+  } else {
+    notice(separate ? "原项目已有较新编辑，整理结果已另存。" : "文稿整理已完成，场景已保存。");
+    $("notice").append(" ",button("查看整理结果",async()=>{
+      const target="#project/"+saved.id;
+      if(location.hash===target) await route();
+      else location.hash=target;
+    },"link"));
+    if(location.hash==="#library") await library(routeGeneration);
+  }
 }
 async function prepareScene() {
   if (!$("brief").value.trim() && !sources.length && !draft) { $("brief").focus(); throw new Error("请输入背景或导入文稿。"); }
@@ -394,7 +427,8 @@ $("prepare").onclick = safe(prepareScene);
 $("retry-prepare").onclick = safe(async () => {
   const failed = local("failed-prepare");
   if (!failed || failed.project !== (project?.id || null)) throw new Error("请打开原项目后重试，或重新整理当前文稿。");
-  await job("prepare","/api/jobs/" + failed.id + "/retry/{id}",undefined,acceptedDraft);
+  await job("prepare","/api/jobs/" + failed.id + "/retry/{id}",undefined,acceptedDraft,activeRun,
+    failed.preparation || {project:failed.project,version:0});
 });
 function sourceCitations(scene,source) {
   const list=h("div"), lines=[], seen=new Set();
@@ -1371,15 +1405,25 @@ safe(async () => {
   const pending = local("job");
   if (!pending) return;
   busy = true; $("prepare").disabled = true;
+  const generation=routeGeneration;
+  let completed=false;
   try {
     const result = await awaitJob(pending.id);
+    completed=true;
     if (["launch","experiment"].includes(pending.kind)) location.hash = "run/" + result.run_id;
     else if (pending.kind === "prepare") {
-      if (pending.project && project?.id !== pending.project) openProject(await api("/api/projects/" + pending.project));
-      await acceptedDraft(result);
+      await acceptedDraft(result,pending.preparation || (pending.project ? {project:pending.project,version:0} : null),generation);
+      keep("failed-prepare",null);$("retry-panel").hidden=true;
     } else if (["report","question","field_reading","experiment_plan"].includes(pending.kind)) { location.hash = "run/" + pending.run; notice("结果已保存。"); }
     keep("job", null);
-  } catch (err) { if (!(err instanceof TypeError)) keep("job", null); throw err; }
+  } catch (err) {
+    if (!(err instanceof TypeError) && !(completed && pending.kind==="prepare")) keep("job", null);
+    if(!completed && pending.kind==="prepare") {
+      keep("failed-prepare",{id:pending.id,project:pending.preparation?.project || null,preparation:pending.preparation});
+      $("retry-panel").hidden=false;
+    }
+    throw err;
+  }
   finally { busy = false; $("prepare").disabled = false; }
 })();
 

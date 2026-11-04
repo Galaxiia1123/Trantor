@@ -26,6 +26,10 @@ class Endpoint(BaseHTTPRequestHandler):
             self.send_error(401); return
         try:
             data = json.loads(incoming["messages"][-1]["content"])
+            gate=getattr(self.server,"prepare_gate",None)
+            if data["task"]=="prepare_scene" and gate is not None:
+                self.server.preparing.set()
+                assert gate.wait(20), "Preparation navigation check did not release the model"
             answer = response(data)
             if data["task"] == "world" and data["window"] == 9:
                 answer["suggested_fields"] = ["如需研究具体收函日期，可由用户另行定义该字段。"]
@@ -220,9 +224,17 @@ def main():
                 page.locator("#model-key").fill("local-test-fixture-11"); page.get_by_text("高级连接设置").click()
                 page.locator("#context-limit").fill("2000000"); page.get_by_role("button",name="保存模型").click()
                 expect(page.locator("#open-model")).to_contain_text("local-script-http")
+                endpoint.preparing=threading.Event();endpoint.prepare_gate=threading.Event()
                 with page.expect_response(lambda r: r.request.method=="POST" and r.url.endswith("/prepare")) as prepared:
                     page.locator("#prepare").click()
                 job_id = prepared.value.json()["id"]
+                assert endpoint.preparing.wait(10)
+                page.locator("#nav-library").click()
+                expect(page).to_have_url(re.compile(r"#library$"))
+                endpoint.prepare_gate.set()
+                expect(page.get_by_role("button",name="查看整理结果",exact=True)).to_be_visible()
+                expect(page).to_have_url(re.compile(r"#library$"))
+                page.get_by_role("button",name="查看整理结果",exact=True).click()
                 expect(page.locator("#draft")).to_contain_text("9 个窗口")
                 expect(page.locator("#draft")).to_contain_text("准备追踪的问题（1）")
                 expect(page.locator("#draft")).to_contain_text("已存 · 第 1 版")
