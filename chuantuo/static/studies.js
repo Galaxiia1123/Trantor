@@ -177,7 +177,7 @@ async function studyPage(id,gen) {
         }
         const scroll=h("div",null,"study-table-scroll");scroll.append(table);section.append(scroll);facts.append(section);
       }
-      if(r.error)facts.append(h("p",r.error,"error"));
+      if(r.error)facts.append(failureCard(r.error));
       list.replaceChildren(h("h2","每条路线"));
       if(filter)list.append(button("显示全部路线",async()=>{filter=null;await refresh();},"link"));
       for(const m of r.members){

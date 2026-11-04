@@ -40,8 +40,51 @@ function bullets(items) {
   const ul = h("ul", null, "compact-list"); items.forEach(s => ul.append(h("li", s))); return ul;
 }
 function notice(message = "", error = false) {
-  $("notice").hidden = !message; $("notice").textContent = message;
+  $("notice").hidden = !message;
+  if(error && message){
+    const content=failureCard(message);content.removeAttribute("role");$("notice").replaceChildren(content);
+  }
+  else $("notice").textContent = message;
+  $("notice").setAttribute("role",error ? "alert" : "status");
+  $("notice").setAttribute("aria-live",error ? "assertive" : "polite");
   $("notice").classList.toggle("error", error);
+}
+function failureCard(message) {
+  const text=String(message), problems=new Map();
+  const help={
+    http_400:["请求格式未被接受","请核对模型、接口协议及所用参数。"],
+    http_401:["模型凭据未通过认证","请在模型设置中检查对应提供商的密钥。"],
+    http_402:["模型服务要求处理账户余额或账单","请在服务商账户核对余额和账单，处理完成后再重试。"],
+    http_403:["当前账户没有调用权限","请核对这个账户是否获准调用所选模型。"],
+    http_404:["没有找到所选模型或接口","请核对模型标识与 API 地址。"],
+    http_413:["服务商拒绝了过大的请求","请核对文稿或场景规模，以及接口支持的输入大小。"],
+    http_422:["模型参数未被接受","请核对接口协议和所选模型支持的参数。"],
+    http_429:["模型服务限制了当前请求","请在服务商账户检查请求速率和可用额度，再安排重试。"],
+    timeout:["等待模型响应超时","请检查网络和服务商状态，再决定是否重试。"],
+    transport_error:["模型连接未能完成","请检查网络以及 API 地址是否可达。"],
+    context_limit:["输入超过当前配置的字符上限","请核对场景规模和上下文方案。"],
+    output_limit:["模型回答触及输出上限","请核对输出上限与任务所需内容。"],
+    missing_api_key:["所选接口缺少可用凭据","请在模型设置中补充对应接口的密钥。"],
+    invalid_api_key:["模型密钥的格式不正确","请检查密钥是否混入换行或其他字符。"],
+    model_refusal:["模型拒绝了这次请求","请查看场景内容与服务商的使用要求。"],
+    invalid_response:["接口没有返回可用的文字回答","请核对模型是否支持当前接口协议。"],
+    incomplete_response:["接口返回的回答未完成","请检查接口状态及输出设置，再决定是否重试。"],
+    response_not_completed:["接口没有完成本次回答","请检查接口状态及输出设置，再决定是否重试。"],
+  };
+  for(const match of text.matchAll(/provider=(openai|anthropic|deepseek|custom|demo)\s+model=\S+\s+status=([a-z0-9_]+):/g)){
+    const [,provider,code]=match;
+    const entry=code==="http_402" && provider==="deepseek"
+      ? ["DeepSeek 账户余额不足","请先在 DeepSeek 账户补充可用余额，再重试此任务。"]
+      : help[code] || (/^http_5\d\d$/.test(code) ? ["模型服务暂时不可用","请等待服务恢复后重试。"] : null);
+    if(entry)problems.set(provider+"/"+code,{provider,code,entry});
+  }
+  if(!problems.size)return h("p",text,"error");
+  const box=h("section",null,"model-failure");box.setAttribute("role","alert");
+  for(const {provider,code,entry} of problems.values()){
+    const item=h("div");item.append(h("strong",entry[0]),h("p",entry[1]),h("small",provider+" · "+code,"quiet"));box.append(item);
+  }
+  box.append(disclosure("查看原始错误",h("pre",text)));
+  return box;
 }
 function local(key) { try { return JSON.parse(sessionStorage.getItem("ct11." + key)); } catch { return null; } }
 function keep(key, value) {
@@ -879,7 +922,8 @@ function renderWindow(view) {
     const r=s.round_recovery;
     feed.append(h("p","第 "+r.round+" 轮有 "+r.failed+" 个主体尚未完成，已保存 "+r.saved+" 份判断。重试时会核对同一批观察，复用输入一致的结果。","recovery-note"));
   }
-  if (s.error) feed.append(h("p", s.error, "error"));
+  $("run-problem").hidden=!s.error;
+  $("run-problem").replaceChildren(...(s.error ? [failureCard(s.error)] : []));
   const settlement = view.settlement || view.events.find(e => e.kind === "window_committed");
   const cited = new Set((settlement?.data.consequences || []).concat(settlement?.data.changes || []).flatMap(c => c.action_ids || []));
   const outcome=$("window-outcome"); outcome.hidden=!settlement; outcome.replaceChildren();
@@ -1191,7 +1235,8 @@ async function route() {
     stripState=null;$("window-strip").hidden=true;$("window-strip").replaceChildren();delete $("window-strip").dataset.stamp;
     $("field-watches").hidden=true; $("field-watches").replaceChildren(); delete $("field-watches").dataset.stamp;
     $("capacity-summary").hidden=true;$("capacity-summary").replaceChildren();delete $("capacity-summary").dataset.key;
-    $("window-outcome").hidden=true; $("feed-actor").replaceChildren(new Option("全部主体","")); $("feed-kind").value=""; actorLimit=8;
+    $("window-outcome").hidden=true;$("run-problem").hidden=true;$("run-problem").replaceChildren();
+    $("feed-actor").replaceChildren(new Option("全部主体","")); $("feed-kind").value=""; actorLimit=8;
     $("all-windows").open = false; historyThrough = -1; requestedWindows = 40; $("window-list").replaceChildren();
     $("changed-windows").checked=false; $("window-order").value="new";
     $("followup").open = false; $("answers").replaceChildren(); $("question-text").value = "";
