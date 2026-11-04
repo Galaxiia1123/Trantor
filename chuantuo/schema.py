@@ -733,6 +733,7 @@ class Decision(Expression):
     messages: list[AgentMessage] = Field(default_factory=list)
     review_at: int | None = Field(default=None,ge=1,strict=True)
     matters: list[MatterUpdate] = Field(default_factory=list, max_length=12)
+    recall_queries: list[Annotated[str,Field(min_length=1,max_length=160)]] = Field(default_factory=list,max_length=3)
 
     @model_validator(mode="after")
     def unique_updates(self):

@@ -937,8 +937,22 @@ async function openActorContext(actor, window, turn, replace = false, run = acti
     body.append(h("h3","持续事项")); const items=Object.values(memory.open_matters);
     if(!items.length) body.append(h("p","当时没有登记的未完成事项。","hint"));
     for(const m of items) body.append(h("p",m.text),evidenceLinks([m.first_record,m.record].filter(Boolean),run));
-    for(const [key,label] of [["recent","近期原文"],["earlier","历史摘录"],["retrieved","本轮检索"]]) {
+    for(const [key,label] of [["recent","近期原文"],["earlier","历史摘录"]]) {
       if(memory[key]?.length) body.append(disclosure(label+"（"+memory[key].length+"）",h("pre",json(memory[key]))));
+    }
+    if(memory.retrieval_queries?.length || memory.retrieved?.length){
+      const recall=h("div");
+      const names=Object.fromEntries(view.roster.map(person=>[person.id,person.name]));
+      if(memory.retrieval_queries?.length)recall.append(h("p","此前主动提出的回忆线索","hint"),bullets(memory.retrieval_queries));
+      for(const item of memory.retrieved || []){
+        const entry=h("div");
+        entry.append(h("small",windowName(item.window)+(item.from ? " · 来自 "+(item.from_name||names[item.from]||item.from) : ""),"quiet"),
+          readablePassage(item.text),evidenceLinks([item.receipt_id || item.id],run));
+        for(const message of item.sent || [])entry.append(h("p","曾发给 "+message.recipients.map(id=>names[id]||id).join("、")+"　"+message.text,"hint"));
+        recall.append(entry);
+      }
+      if(!memory.retrieved?.length)recall.append(h("p","本轮输入中没有追加较早原文。","hint"));
+      body.append(disclosure("本轮检索（"+(memory.retrieved?.length || 0)+"）",recall));
     }
   } else if (!result.deferred) body.append(disclosure("当时的记忆输入",h("pre",json(memory))));
   if (view.rules?.length) body.append(disclosure("当时已知的规则和条件",bullets(view.rules.map(r=>r.text+(r.active_until ? "　有效至第 "+r.active_until+" 窗末。" : "")))));

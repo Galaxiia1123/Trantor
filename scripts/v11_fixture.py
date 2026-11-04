@@ -100,7 +100,10 @@ def decision(data):
         recent = encode(notebook["recent"] + notebook["retrieved"])
         if "复核通过" in recent:
             text = "已取得直接复核意见和书面担保，决定将扩建议案列入复议；资金缺口仍由财务核对。"
-    return {"text":text, "messages":messages, "matters":matters}
+    answer={"text":text, "messages":messages, "matters":matters}
+    if who=="engineer" and window==7 and turn==2:
+        answer["recall_queries"]=["承运商最早的有条件担保"]
+    return answer
 
 
 def settle(data):

@@ -40,6 +40,8 @@ def world_instruction(allowed):
 
 def actor_instruction(config, documents=False, replies=False):
     instruction=AGENT_INSTRUCTION+"\n需要对方专门回信时可在消息中填 reply_by：希望回信送达的窗口编号，无期限填 open。普通通知省略。收信方自行决定是否回应。"
+    if config.retrieval_count:
+        instruction+="\n确实需要核对较早材料时，可在 recall_queries 写最多三条精简线索，带上事项、对象或曾见的词句。下次自主判断前会按本场检索上限从自己已见的历史取回相关原文。当前信息足够时省略。查询只是待找线索，依据以实际取回的记录为准。"
     if replies:
         instruction+="\n直接答复哪一封来信，就在发给原发件人的那条消息中填 reply_to，使用本轮收件或 reply_targets 中的 receipt_id。主动发起的新话题省略 reply_to。"
     if documents:
@@ -66,8 +68,11 @@ class Notebook:
         self.open = {}
         self.sharing = {}
         self.older = deque(maxlen=4)
+        self.recall_queries = []
 
-    def record(self, action, record_id, window, inbox, recent_count, notices=(), ended=()):
+    def record(self, action, record_id, window, inbox, recent_count, notices=(), ended=(), *, sender_names=None):
+        self.recall_queries = list(dict.fromkeys(query.strip() for query in action.recall_queries if query.strip()))
+        names=sender_names or {}
         for observed,item in ended:
             self._add({"id":observed,"window":window,"kind":"已结束的条件","text":f'“{item["text"]}”截至第 {item["last_window"]} 窗，本轮已失效。'},recent_count)
         for notice in notices:
@@ -79,6 +84,8 @@ class Notebook:
                 self._add({"id":message["receipt_id"],"document":doc["id"],"kind":"已收到的原件","from":message["from"],
                            "window":window,"text":doc["title"]+"　"+doc["text"]},recent_count)
             self._add({"id":message["action_id"],"window":window,"from":message["from"],"text":message["text"],
+                       **({"from_name":names[message["from"]]} if message["from"] in names else {}),
+                       **({"receipt_id":message["receipt_id"]} if message.get("receipt_id") else {}),
                        **({"kind":"已收到的原信","dispatch":message["dispatch_id"],"received_window":window}
                           if message.get("dispatch_id") else {})}, recent_count)
         self._add({"id": record_id, "window": window, "text": action.text,
@@ -101,7 +108,8 @@ class Notebook:
     def _add(self, entry, recent_count):
         position = len(self.records)
         self.records.append(entry)
-        searchable = entry["text"] + " ".join(item["text"] for item in entry.get("sent", []))
+        searchable = " ".join([entry["text"],entry["id"],entry.get("receipt_id",""),entry.get("from",""),entry.get("from_name",""),
+                               *[item["text"]+" "+" ".join(item["recipients"]) for item in entry.get("sent",[])]])
         for term in terms(searchable):
             self.index.setdefault(term, []).append(position)
         if position >= recent_count:
@@ -115,6 +123,8 @@ class Notebook:
         view = decision_view(observation)
         end = max(0, len(self.records) - config.recent_records)
         query = " ".join(m["text"] for m in view["messages"]) or " ".join(item["text"] for item in self.open.values())
+        query = " ".join([query,*self.recall_queries])
+        query += " "+" ".join(actor["id"] for actor in view["roster"] if actor["name"] in query)
         scores = {}
         if query and config.retrieval_count:
             for term in sorted(terms(query)):
@@ -130,6 +140,8 @@ class Notebook:
         retrieved = {r["id"] for r in recall}
         memory = {"open_matters": dict(self.open), "recent": list(self.records[end:]),
                   "earlier": [r for r in self.older if r["record"] not in retrieved], "retrieved": recall}
+        if self.recall_queries and config.retrieval_count:
+            memory["retrieval_queries"] = list(self.recall_queries)
         if self.sharing:
             memory["sharing"] = self.sharing
         payload = {"task": "agent", "actor_id": view["self"]["id"], "window": view["window"],
@@ -146,8 +158,8 @@ class Notebook:
         if reply_targets and not fits():
             del payload["reply_targets"]
             system_size=len(actor_instruction(config,bool(view.get("documents")),bool(view["messages"])))
-        for key in ("earlier", "retrieved", "recent"):
-            while memory[key] and not fits():
+        for key in ("earlier", "retrieval_queries", "retrieved", "recent"):
+            while memory.get(key) and not fits():
                 memory[key].pop(0)
         if not fits():
             raise ModelError("当前可见处境和未完成事项超过模型输入限额。请缩减场景资料或调整模型输入限额。")

@@ -224,6 +224,8 @@ class Journal:
                     raise ValueError("收件箱与这轮实际送达的信件不符")
                 ref=choices[index]["id"];counts[key]=index+1;current.add(ref)
                 messages.append({**message,"receipt_id":ref})
+            if not recent_windows:
+                return {**visible,"messages":messages},[]
             # A few unanswered requests can survive the ordinary recent-history boundary.
             requests=self._requested_letters.get(actor,())
             for letter in reversed(requests[-64:]):
@@ -546,9 +548,12 @@ class Simulation:
     def _record_decision(self,actor,decision,event):
         view=self._observations[actor]
         ended=view.get("ended_conditions",())
-        observed=self.journal.observation_before(event,self._discarded)["id"] if ended else None
+        observation=self.journal.observation_before(event,self._discarded) if ended or view["messages"] else None
+        if view["messages"]:
+            view,_=self.journal.reply_mail(observation,self._discarded,recent_windows=0)
         self.notebooks[actor].record(decision,event["id"],event["window"],view["messages"],self.config.recent_records,
-                                    view.get("external_events",()),((observed,item) for item in ended))
+                                    view.get("external_events",()),((observation["id"],item) for item in ended),
+                                    sender_names={person["id"]:person["name"] for person in view["roster"]})
         self._remember_plan(actor,decision,event["id"])
 
     def _remember_plan(self, actor, decision, record):
