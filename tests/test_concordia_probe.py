@@ -1,4 +1,6 @@
 """Release-specific compatibility gate, exercised before product implementation."""
+import json
+import pytest
 from functools import partial
 from importlib.metadata import version
 
@@ -6,6 +8,7 @@ from concordia.agents.entity_agent import EntityAgent
 from concordia.typing.entity import ActionSpec, OutputType
 from concordia.typing.entity_component import ActingComponent, ContextComponent
 from concordia.utils.concurrency import run_tasks_in_background
+from chuantuo.bridge import Memory as LocalMemory, make_agent, act_together
 
 
 class Memory(ContextComponent):
@@ -40,6 +43,34 @@ class Speak(ActingComponent):
 
     def set_state(self, state):
         pass
+
+
+@pytest.mark.parametrize("limit",[None,0,120])
+def test_local_context_matches_prior_adapter_for_bounded_and_full_memory(limit):
+    class ReferenceMemory(ContextComponent):
+        def __init__(self):
+            self.memory=LocalMemory(limit)
+        def pre_observe(self,value):return self.memory.pre_observe(value)
+        def post_act(self,value):return self.memory.post_act(value)
+        def pre_act(self,spec):return self.memory.pre_act(spec)
+        def get_state(self):return self.memory.get_state()
+        def set_state(self,state):self.memory.set_state(state)
+    observed=[]
+    def reply(context):
+        observed.append(context)
+        return "本轮表达。"
+    native=make_agent("native",reply,limit)
+    speech=Speak("本轮表达。")
+    legacy=EntityAgent("legacy",speech,context_components={"memory":ReferenceMemory()})
+    spec=ActionSpec(call_to_action="Express.",output_type=OutputType.FREE)
+    for value in ("private first", "another view"*30, "new situation"):
+        native.observe(value);legacy.observe(value)
+        answers,errors=act_together({"a":native},1)
+        assert not errors and answers["a"]==legacy.act(spec)
+        assert observed[-1]==json.loads(speech.calls[-1]["memory"])
+    saved=native.get_state()
+    saved["context_components"]["memory"]["items"].append({"kind":"observation","text":"outside mutation"})
+    assert not any(x["text"]=="outside mutation" for x in native.get_component("memory").items)
 
 
 def test_real_release_cross_layer_delivery_independent_agents_and_one_resolution():

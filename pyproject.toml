@@ -4,18 +4,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "chuantuo"
-version = "1.30.0"
+version = "1.31.0"
 description = "Trantor（川陀）· 支持多层主体、私有观察与证据回放的本地 AI 沙盘"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-  "gdm-concordia==2.4.0", "pydantic>=2.10,<3", "httpx>=0.28,<1",
+  "pydantic>=2.10,<3", "httpx>=0.28,<1",
   "fastapi>=0.115,<1", "uvicorn>=0.34,<1",
   "pypdfium2==4.30.0", "rapidocr-onnxruntime==1.4.4", "python-multipart>=0.0.20,<1", "Pillow>=10,<14",
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8,<9"]
+test = ["pytest>=8,<9", "gdm-concordia==2.4.0"]
 browser = ["playwright>=1.52,<2"]
 benchmark = ["tiktoken==0.14.0"]
 

@@ -11,7 +11,7 @@ from chuantuo.schema import Scenario, Settlement
 from chuantuo.services import estimate_weights, generate_report, parse_scenario
 
 
-def test_full_concordia_run_cross_layers_fair_windows_privacy_and_report(tmp_path):
+def test_full_run_cross_layers_fair_windows_privacy_and_report(tmp_path):
     sim = Simulation(demo_scenario(), demo_config(), directory=tmp_path)
     result = sim.run()
     assert result["status"] == "completed"

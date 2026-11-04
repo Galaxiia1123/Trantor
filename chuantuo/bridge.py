@@ -1,16 +1,13 @@
-"""Small real Concordia integration, with no inherited global prompt/memory."""
+"""Independent local agent contexts and a barrier across each concurrent decision batch."""
 import json
 from collections import deque
 from copy import deepcopy
-from functools import partial
-
-from concordia.agents.entity_agent import EntityAgent
-from concordia.typing.entity import ActionSpec, OutputType
-from concordia.typing.entity_component import ActingComponent, ContextComponent
-from concordia.utils.concurrency import run_tasks_in_background
+from concurrent.futures import ThreadPoolExecutor
+from threading import RLock
 
 
-class Memory(ContextComponent):
+
+class Memory:
     def __init__(self, char_limit=None):
         self.char_limit = char_limit
         self.items = deque()
@@ -65,30 +62,71 @@ class Memory(ContextComponent):
         self.total_items = state.get("total_items",self.total_items)
 
 
-class CallModel(ActingComponent):
-    def __init__(self, callback):
-        self.callback = callback
+class LocalAgent:
+    def __init__(self, name, callback, char_limit=None):
+        self.name = name
+        self._callback = callback
+        self._memory = Memory(char_limit)
+        self._lock = RLock()
+        self._acting = False
 
-    def get_action_attempt(self, context, action_spec):
-        return self.callback(json.loads(context["memory"]))
+    def observe(self, observation):
+        with self._lock:
+            if self._acting:
+                raise RuntimeError("不能在同一主体判断期间修改其观察")
+            self._memory.pre_observe(observation)
+
+    def act(self):
+        with self._lock:
+            if self._acting:
+                raise RuntimeError("同一主体不能同时执行两次判断")
+            self._acting = True
+            try:
+                context = json.loads(self._memory.pre_act(None))
+                answer = self._callback(context)
+                if not isinstance(answer,str):
+                    raise TypeError("主体回调须返回原始文字")
+                self._memory.post_act(answer)
+                return answer
+            finally:
+                self._acting = False
+
+    def get_component(self, name, type_=None):
+        if name != "memory":
+            raise KeyError(name)
+        if type_ is not None and not isinstance(self._memory,type_):
+            raise TypeError("主体组件类型不符")
+        return self._memory
 
     def get_state(self):
-        return {}
+        with self._lock:
+            return {"act_component":{}, "context_components":{"memory":self._memory.get_state()}}
 
     def set_state(self, state):
-        pass
+        with self._lock:
+            if self._acting:
+                raise RuntimeError("不能在判断期间替换主体记忆")
+            self._memory.set_state(state["context_components"]["memory"])
 
 
-def make_agent(name: str, callback, char_limit=None) -> EntityAgent:
-    return EntityAgent(name, CallModel(callback), context_components={"memory": Memory(char_limit)})
+def make_agent(name: str, callback, char_limit=None) -> LocalAgent:
+    return LocalAgent(name,callback,char_limit)
 
 
-def act_together(agents: dict[str, EntityAgent], max_workers: int):
-    spec = ActionSpec(call_to_action="自主表达判断、打算和沟通；不需要内部思维链。", output_type=OutputType.FREE)
-    # Unlike the stock Simultaneous engine, caller explicitly rejects an entire
-    # window on ANY error. Waiting for all tasks prevents late writes after failure.
-    return run_tasks_in_background({key: partial(agent.act, spec) for key, agent in agents.items()}, max_workers=max_workers)
+def act_together(agents: dict[str,LocalAgent], max_workers: int):
+    outputs, errors = {}, {}
+    if not agents:
+        return outputs, errors
+    # Every submitted task finishes before returning a complete batch or a failure.
+    with ThreadPoolExecutor(max_workers=max_workers,thread_name_prefix="trantor-agent") as pool:
+        pending={key:pool.submit(agent.act) for key,agent in agents.items()}
+        for key, future in pending.items():
+            try:
+                outputs[key]=future.result()
+            except Exception as error:
+                errors[key]=error
+    return outputs, errors
 
 
-def resolve(world: EntityAgent) -> str:
-    return world.act(ActionSpec(call_to_action="推演客观后果并审查全部字段。", output_type=OutputType.RESOLVE))
+def resolve(world: LocalAgent) -> str:
+    return world.act()

@@ -14,8 +14,6 @@ from tempfile import TemporaryDirectory
 from xml.etree import ElementTree
 from zipfile import BadZipFile, ZipFile
 
-import numpy as np
-import pypdfium2 as pdfium
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from .schema import PublicReference, Source, SourcePage
@@ -70,6 +68,7 @@ def docx_body(raw):
 def recognize(image: Image.Image) -> tuple[str, float | None]:
     global _ocr_engine
     from rapidocr_onnxruntime import RapidOCR
+    import numpy as np
 
     with _ocr_lock:
         if _ocr_engine is None:
@@ -158,6 +157,7 @@ class MaterialStore:
             warnings.append("已按段落读取正文及表格文字。分页、浮动图形和页眉页脚可在原件中核对。")
             mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         elif suffix == ".pdf":
+            import pypdfium2 as pdfium
             mime = "application/pdf"
             with _pdf_lock:
                 try:

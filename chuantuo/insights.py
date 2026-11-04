@@ -162,7 +162,8 @@ def compact(event):
                 "missing_information": scene.get("missing_information", []), "rules": scene.get("rules", []),
                 "actors": [{key: actor.get(key) for key in ("id", "name", "identity", "subsystem_id")} for actor in scene["entities"]],
                 "sources": [{"id": source["id"], "name": source["name"]} for source in scene.get("sources", [])],
-                "models": data["config"].get("model", data["config"].get("models")), "concordia_version": data.get("concordia_version")}
+                "models": data["config"].get("model", data["config"].get("models")),
+                **({"agent_runtime":data["agent_runtime"]} if data.get("agent_runtime") else {"concordia_version":data.get("concordia_version")})}
     elif event["kind"] == "expression":
         data = {key: value for key, value in data.items() if key != "raw"}
     elif event["kind"] == "observation":

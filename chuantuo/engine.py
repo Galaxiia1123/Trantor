@@ -482,7 +482,7 @@ class Simulation:
         if _journal is None:
             self.journal.append("run_created", {"run_id": self.run_id, "launch_job_id":_launch_job_id,
                 "scenario": self._scenario.model_dump(mode="json"), "config": self.config.model_dump(mode="json"),
-                "concordia_version": "2.4.0", "schedule_policy": "all actors observed each round; honor explicit review plans; deliver after barrier; settle once per window"
+                "agent_runtime": "trantor-local-v1", "schedule_policy": "all actors observed each round; honor explicit review plans; deliver after barrier; settle once per window"
                 if getattr(config,"max_review_interval",0) else "all actors once per round; deliver after barrier; settle once per window"})
 
     def _record_decision(self,actor,decision,event):
@@ -600,7 +600,7 @@ class Simulation:
                 if (ref or data.get("enclosures")) and frozen and event["window"]==self._frozen_window:
                     self._current_mail.append(event)
                 self._inbox[data["to"]].append(deepcopy(self._perception.documents.received(event)))
-        # Rebuild Concordia entities at their idle phase, then restore only their
+        # Rebuild entities at their idle phase, then restore only their
         # own observations and expressions. No world/private cross-contamination.
         self.world = make_agent("world", self._world_callback, char_limit=0)
         return [event["id"] for event in events[cutoff:] if event["id"] not in discarded and event["kind"] in
@@ -798,7 +798,7 @@ class Simulation:
         total = len(memory) if total is None else total
         if total == len(memory) and len(AGENT_SYSTEM) + len(encode(payload)) <= limit:
             return
-        # Concordia records the current observation before asking for an action.
+        # The agent records the current observation before asking for an action.
         # It is already included verbatim in observation. Retain older records
         # as whole items, without borrowing from any other entity's memory.
         candidates = memory[:-1] if memory and memory[-1]["kind"] == "observation" else memory

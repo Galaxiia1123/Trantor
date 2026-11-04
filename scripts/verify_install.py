@@ -35,6 +35,7 @@ def main():
         python = base/"venv"/("Scripts/python.exe" if os.name=="nt" else "bin/python")
         call(python,"-m","pip","install","--constraint",project/"requirements.lock.txt",wheel)
         call(python,"-m","pip","check")
+        call(python,"-I","-c","import importlib.util; assert importlib.util.find_spec('concordia') is None; from chuantuo.bridge import make_agent; a=make_agent('check',lambda context:'ready'); a.observe('private'); assert a.act()=='ready'")
         call(python,"-I","-m","chuantuo","example",base/"fixture","--template","release")
         call(python,"-I","-m","chuantuo","run",base/"fixture/scenario.json",base/"fixture/config.json","--output",base/"runs/new","--report")
         call(python,"-I","-m","chuantuo","verify",base/"runs/new")

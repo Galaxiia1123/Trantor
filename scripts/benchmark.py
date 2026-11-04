@@ -5,7 +5,6 @@ import platform
 import tempfile
 import time
 from contextlib import nullcontext
-from importlib.metadata import version
 from pathlib import Path
 
 from chuantuo.engine import Simulation
@@ -60,7 +59,7 @@ def run(directory, count, windows, rounds, parallel, roster, actor_context):
     expected = count * rounds * windows
     if view["statistics"]["expressions"] != expected or snap["state"] != restored.state:
         raise AssertionError("结构验收未通过")
-    return {"fixture":"synthetic_offline","status":"completed","actor_context_chars":actor_context,"python":platform.python_version(), "concordia":version("gdm-concordia"),
+    return {"fixture":"synthetic_offline","status":"completed","actor_context_chars":actor_context,"python":platform.python_version(), "agent_runtime":"trantor-local-v1",
         "os":platform.system(), "actors":count, "levels":len(levels),"edges":len(scene.influences),
         "windows":windows,"rounds_per_window":rounds,"max_parallel":parallel,"roster_policy":roster,"run_id":sim.run_id,
         **view["statistics"], "actor_world_calls":snap["model_calls"], "provider_http_attempts":0,

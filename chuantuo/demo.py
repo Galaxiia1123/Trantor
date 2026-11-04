@@ -166,7 +166,7 @@ def respond(messages: list[dict[str, str]]) -> str:
         last = commits[-1] if commits else created
         result = {"title": f"{scenario['title']}：离线流程验证报告", "sections": [
             {"title": "场景、初始条件与假设", "text": "场景：" + scenario["title"] + "。显式主体：" + "、".join(a["name"] for a in scenario["entities"]) + "。配置的来源与假设见初始记录；此处使用离线脚本演示。", "evidence_ids": [created["id"]]},
-            {"title": "仿真方法", "text": "实际使用 Concordia EntityAgent，主体各有独立记忆；全局统一窗口内按等量轮次表达，轮末交付消息，窗口末统一校验和结算。本报告由离线脚本整理。主体与世界模型配置为 " + execution + "。", "evidence_ids": [created["id"]]},
+            {"title": "仿真方法", "text": "本次使用"+("内置 Agent 运行层" if created["data"].get("agent_runtime") else "Concordia EntityAgent")+"，主体各有独立记忆。全局统一窗口内按等量轮次表达，轮末交付消息，窗口末统一校验和结算。本报告由离线脚本整理。主体与世界模型配置为 " + execution + "。", "evidence_ids": [created["id"]]},
             {"title": "关键事件与状态演化", "text": f"已提交 {len(commits)} 个窗口；记录 {len(expressions)} 次主体表达。具体互动和逐字段变化请核对证据中的原文与窗口结算。", "evidence_ids": [last["id"], *(e["id"] for e in expressions[:2])]},
             {"title": "结果", "text": f"运行状态为 {payload['status']['status']}。只有校验通过的窗口被提交。有关变化须结合执行方式和情境解释。", "evidence_ids": [last["id"]]},
             {"title": "讨论与局限", "text": "报告解释：结果证明基础数据流可以运行，不能据此证明模型推理质量或现实预测效度。真实模型调用、规模性能、权重合成算法和长期记忆压缩需要后续评估。", "evidence_ids": [created["id"], last["id"]]},
