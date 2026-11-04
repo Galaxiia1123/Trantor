@@ -304,6 +304,7 @@ function sourceCitations(scene,source) {
   }
   for(const edge of [...scene.influences,...(scene.mail_routes||[])])visit(edge,(names[edge.source]||edge.source)+" → "+(names[edge.target]||edge.target));
   for(const rule of scene.rules)visit(rule,"规则 · "+rule.text.slice(0,45));
+  for(const pool of scene.capacity_pools||[])visit(pool,"共享上限 · "+pool.name);
   for(const event of scene.scheduled_events||[])visit(event,"日历 · "+(event.title||event.id));
   if(!lines.length)return h("p","草案中还没有逐字引用这份资料的设定。","hint");
   for(const {path,q} of lines)list.append(button(path,()=>{
@@ -334,6 +335,9 @@ function sourceReview(record) {
   if (record.research?.length) list.append(disclosure("查询与候选来源", h("pre", json(record.research))));
   const names = Object.fromEntries(draft.scenario.entities.map(a => [a.id,a.name]));
   const sealed=record.opening_knowledge?.passages || [];
+  const projections=record.read_view_review?.converted || [];
+  if(projections.length)list.append(disclosure("共用同一份字段数据",bullets(projections.map(p=>
+    (names[p.reader]||p.reader)+"按文稿授权读取"+(names[p.owner]||p.owner)+"的实际字段 "+p.field+"。"))));
   if(sealed.length)list.append(disclosure("开局知情与待送达的原文",bullets(sealed.map(item=>
     "“"+item.term+"” · 开局资料在"+item.holders.map(id=>names[id]||id).join("、")+"手中；"+
     item.withheld.map(id=>names[id]||id).join("、")+"的开局判断不含这段文字。依据："+item.quote))));
@@ -435,6 +439,7 @@ function markManualEdits(prior, scene, reason) {
   }
   for (const e of scene.influences || []) mark(e,prior.influences.find(v => v.source === e.source && v.target === e.target));
   for (const r of scene.rules || []) mark(r,prior.rules.find(v => v.text === r.text));
+  for (const pool of scene.capacity_pools || []) mark(pool,(prior.capacity_pools||[]).find(v=>v.id===pool.id));
 }
 function runPlanEditor(settings, specified) {
   const root = h("div"), timing = h("div",null,"plan-fields"), tuning = h("div",null,"plan-fields");
@@ -536,7 +541,7 @@ function renderDraft() {
   const labeled = (text, control) => { const l = h("label", text); l.append(control); return l; };
   const reason = h("input"); reason.placeholder = "变更关系或解决开局冲突时填写";
   adv.append(h("h3","运行方案"),h("p", draft.plan_reason || record.plan_reason, "hint"),plan.node,
-    draftEntryWindows(scene),draftMeanings(scene),
+    draftEntryWindows(scene),draftMeanings(scene),draftCapacities(scene),
     disclosure("编辑完整场景定义", labeled("场景 JSON", sceneEdit)), labeled("修改依据", reason),
     button("校验并保存修改", async () => {
       const editedPlan = plan.read(), editedScene = JSON.parse(sceneEdit.value);
@@ -799,6 +804,7 @@ function renderWindow(view) {
   const experimentSlot=$(s.experiment ? "comparison-lead" : "experiment-follow");
   if($("experiment-tools").parentElement!==experimentSlot)experimentSlot.append($("experiment-tools"));
   safe(()=>showWindowStrip(view))();
+  safe(()=>showCapacities(view))();
   showExperimentTools(view);
   showFieldWatches(view);
   if ($("all-windows").open && historyThrough !== s.window) safe(drawWindowHistory)();
@@ -1135,6 +1141,7 @@ async function route() {
     $("experiment-tools").hidden = true; $("experiment-tools").replaceChildren();
     stripState=null;$("window-strip").hidden=true;$("window-strip").replaceChildren();delete $("window-strip").dataset.stamp;
     $("field-watches").hidden=true; $("field-watches").replaceChildren(); delete $("field-watches").dataset.stamp;
+    $("capacity-summary").hidden=true;$("capacity-summary").replaceChildren();delete $("capacity-summary").dataset.key;
     $("window-outcome").hidden=true; $("feed-actor").replaceChildren(new Option("全部主体","")); $("feed-kind").value=""; actorLimit=8;
     $("all-windows").open = false; historyThrough = -1; requestedWindows = 40; $("window-list").replaceChildren();
     $("changed-windows").checked=false; $("window-order").value="new";

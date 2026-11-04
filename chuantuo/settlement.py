@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from .replies import validate_reply, validate_requested_time
 from .mail_timing import MailTiming
+from .capacity import capacity_use
 from collections import Counter
 from copy import deepcopy
 
@@ -113,6 +114,8 @@ def settled_state(scenario, state, proposal, action_ids, action_owners=None, rec
         raise ValueError("客观后果引用不存在的行动。consequences.action_ids 只能包含本窗口的行动，已到达的旧信应引用本窗送达凭据 event_ids")
     if any(not set(item.event_ids)<=event_ids for item in proposal.consequences):
         raise ValueError("客观后果引用了未在本窗口发生的外部事件")
+    for pool in getattr(scenario,"capacity_pools",()):
+        capacity_use(pool,next_state)
     return next_state, changes
 
 

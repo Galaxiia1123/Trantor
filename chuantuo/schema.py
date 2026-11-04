@@ -296,6 +296,20 @@ class ScheduledValue(Record):
     value: Value
 
 
+class FieldAddress(Record):
+    entity_id: Identifier
+    field_id: Identifier
+
+
+class CapacityPool(Record):
+    id: Identifier
+    name: str = Field(min_length=1,max_length=100)
+    limit: FieldAddress | Annotated[StrictInt,Field(ge=0)] | Annotated[StrictFloat,Field(ge=0,allow_inf_nan=False)]
+    members: list[FieldAddress] = Field(min_length=2,max_length=128)
+    visibility: Visibility = Field(default_factory=Visibility)
+    provenance: Provenance = Field(default_factory=Provenance)
+
+
 class ScheduledEvent(Record):
     id: Identifier
     window: int = Field(ge=1,strict=True)
@@ -354,7 +368,7 @@ class Scenario(Record):
                 raise ValueError("AI 估计的权重必须包含理由")
         if len({(e.source, e.target) for e in self.influences}) != len(self.influences):
             raise ValueError("同一有向边重复；反向边可以独立配置")
-        for obj in [*self.entities, *self.influences, *self.rules, *getattr(self,"scheduled_events",[]), *getattr(self,"mail_routes",[]), *[f for a in self.entities for f in [*a.fields, *a.materials]],
+        for obj in [*self.entities, *self.influences, *self.rules, *getattr(self,"scheduled_events",[]), *getattr(self,"mail_routes",[]), *getattr(self,"capacity_pools",[]), *[f for a in self.entities for f in [*a.fields, *a.materials]],
                     *(m.sharing for a in self.entities for m in a.materials if m.sharing),
                     *(period for a in self.entities for f in a.fields if f.constraints for period in f.constraints.entry_windows),
                     *(m for a in self.entities for f in a.fields if f.constraints for m in f.constraints.meanings),
@@ -438,6 +452,14 @@ class Scenario11(Scenario):
     scheduled_events: list[ScheduledEvent] = Field(default_factory=list,max_length=256)
     mail_routes: list[MailRoute] = Field(default_factory=list,max_length=256)
     public_brief: PublicBrief | None = None
+    capacity_pools: list[CapacityPool] = Field(default_factory=list,max_length=64)
+
+    @model_validator(mode="after")
+    def shared_capacities(self):
+        if self.capacity_pools:
+            from .capacity import validate_pools
+            validate_pools(self)
+        return self
 
     @model_validator(mode="after")
     def validate_calendar(self):
@@ -572,6 +594,8 @@ class Scenario11(Scenario):
                     check(effect.value,actor_ids if field.visibility.public else {effect.entity_id,*field.visibility.readers},"外部事件的字段变更")
         for edge in self.influences:
             check(edge.description, {edge.source,edge.target}, "有向关系描述")
+        for pool in self.capacity_pools:
+            check(pool.name,actor_ids if pool.visibility.public else set(pool.visibility.readers),"共享上限名称")
         for actor in self.entities:
             check(actor.name,actor_ids,"主体名称")
             check(actor.identity + "\n" + actor.preferences,{actor.id},f"主体 {actor.id} 的身份或偏好")

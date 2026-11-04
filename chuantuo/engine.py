@@ -826,6 +826,8 @@ class Simulation:
             instruction+="\ncontinued_waits 只表示主体延续此前的等待。本轮没有由此产生的新承诺、行动或消息。结算可保持原值。"
         if payload.get("ended_conditions"):
             instruction+="\nended_conditions 从本窗起不再生效。保留已结算的后果，不因条件到期自动撤回既有安排或替主体作出新决定。"
+        if self.notebooks and self._scenario.capacity_pools:
+            instruction+="\ncapacity_pools 是按本窗所有字段结算后的共享上限。limit 是容量，members 是实际已配置的占用，合计不能超额。未能安排的申请只记为意向，不能当作新增容量或擅自替主体选择。"
         if self._current_events:
             instruction+="\nexternal_events 是本窗实际发生的预定外部事件。assignments 指定的字段由引擎直接审查，请省略这些字段的 reviews。外部事实可用 event_ids 引用其 record，主体行动仍用 action_ids。"
         elif payload.get("calendar_window"):

@@ -7,7 +7,7 @@ COLUMNS={"主体":"actor","所属主体":"actor","actor":"actor","字段":"field
          "最晚转入窗口":"last","last window":"last","含义":"meaning","判定口径":"meaning","成立条件":"meaning","meaning":"meaning"}
 
 
-def _table_rows(text,required):
+def _table_rows(text,required,columns=COLUMNS):
     cols={}
     header_ready=False
     fence=None
@@ -26,7 +26,7 @@ def _table_rows(text,required):
             cols={};header_ready=False
             continue
         parts=[p.strip().strip("`") for p in re.split(r"(?<!\\)\|",line.strip("|"))]
-        labels={COLUMNS[p.lower()]:i for i,p in enumerate(parts) if p.lower() in COLUMNS}
+        labels={columns[p.lower()]:i for i,p in enumerate(parts) if p.lower() in columns}
         if required<=labels.keys():
             cols=labels;header_ready=False
             continue

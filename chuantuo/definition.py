@@ -71,7 +71,7 @@ changes 用短句列出相对现有草案的实质变化。输出是待用户审
 
 
 def _objects(data):
-    for collection in ("entities", "influences", "rules","scheduled_events","mail_routes"):
+    for collection in ("entities", "influences", "rules","scheduled_events","mail_routes","capacity_pools"):
         for item in data.get(collection, []):
             yield (collection, ""), item
     for actor in data.get("entities", []):

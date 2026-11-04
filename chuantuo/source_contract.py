@@ -101,7 +101,7 @@ def _named_fields(materials):
                 if negative.search(before) or re.match(r"(?:不予|暂不|未被|不被)(?:定义|创建|启用|采用)",after):
                     excluded.add(label)
                 elif not re.search(r"(?:例如|比如|举例|假如|假设以后|for example|e\.g\.)[^，,。]*$",before,re.I):
-                    if re.match(r"(?:初始|固定|为|是|当前|取|表示|可取|默认|[=：:]|starts?\b|is\b|equals?\b)",after,re.I) or re.search(r"(?:定义|设置|新增|登记|包含|维护|declares?|define[s]?)\s*(?:一个|a|the)?\s*$",before,re.I):
+                    if re.match(r"(?:初始|初值|开局|起初|固定|为|是|当前|取|表示|可取|默认|[=：:]|starts?\b|is\b|equals?\b)",after,re.I) or re.search(r"(?:定义|设置|新增|登记|包含|维护|declares?|define[s]?)\s*(?:一个|a|the)?\s*$",before,re.I):
                         named.add(label)
     return named, excluded
 
@@ -150,6 +150,52 @@ def _sharing_rules(bundle):
     return bundle
 
 
+def _reader_named(reader, quote, actors):
+    aliases=_aliases(actors)
+    if any(key==reader and name in quote for name,key in aliases.items()):
+        return True
+    actor=next((a for a in actors if a["id"]==reader),None)
+    if not actor or not re.fullmatch(r"[\u3400-\u9fff]{3,}",actor["name"]):
+        return False
+    short=actor["name"][-2:]
+    if sum(a["name"].endswith(short) for a in actors)!=1:
+        return False
+    return re.search(r"(?:^|[，。；\n])\s*"+re.escape(short)+r"(?:有权|可以|可|已获准)(?:直接)?(?:查阅|读取|访问)",quote) is not None
+
+
+def _resolve_read_copies(scene,record):
+    if record.get("read_view_review"):
+        return
+    sources={s["id"]:s for s in scene["sources"] if not s.get("public_reference") and not s.get("simulation_ref")}
+    named,_=_named_fields(sources.values())
+    converted=[]
+    for reader in scene["entities"]:
+        remaining=[]
+        for field in reader["fields"]:
+            label=field.get("label") or field["id"]
+            stem=re.sub(r"[（(](?:查阅|读取|可见|观察)[）)]$","",label)
+            candidates=[(a,f) for a in scene["entities"] if a["id"]!=reader["id"] for f in a["fields"]
+                        if stem in {a["name"]+(f.get("label") or f["id"]),a["name"]+"的"+(f.get("label") or f["id"])}]
+            quotes=[q for q in field.get("provenance",{}).get("quotes",()) if q["source_id"] in sources
+                    and q["quote"] in sources[q["source_id"]]["text"] and _reader_named(reader["id"],q["quote"],scene["entities"])
+                    and re.search(r"(?:有权|可|获准)(?:直接)?(?:查阅|读取|访问)",q["quote"])]
+            if len(candidates)!=1 or not quotes or field.get("provenance",{}).get("kind")=="user" or named.intersection({field["id"],label}):
+                remaining.append(field)
+                continue
+            owner,original=candidates[0]
+            visibility=original.setdefault("visibility",{})
+            readers=visibility.setdefault("readers",[])
+            if reader["id"] not in readers:readers.append(reader["id"])
+            grants=visibility.setdefault("reader_evidence",[])
+            if not any(g["reader_id"]==reader["id"] for g in grants):
+                grants.append({"reader_id":reader["id"],"quote":quotes[0]})
+            converted.append({"reader":reader["id"],"owner":owner["id"],"field":original["id"],"removed_copy":field["id"],"quote":quotes[0]})
+        reader["fields"]=remaining
+    if converted:
+        record["read_view_review"]={"converted":converted}
+        record.pop("visibility_review",None)
+
+
 def _initial_access(bundle):
     scene, record = bundle["scenario"], bundle["preparation_records"][-1]
     if record.get("visibility_review",{}).get("version") == 1:
@@ -177,7 +223,7 @@ def _initial_access(bundle):
                     body = body[page["text_start"]:page["text_end"]]
                 if q["quote"] not in body:
                     continue
-                if not any(key == grant["reader_id"] and name in q["quote"] for name,key in aliases.items()):
+                if not _reader_named(grant["reader_id"],q["quote"],scene["entities"]):
                     continue
                 # Proof must establish an existing information right or prior delivery.
                 # A future offer to tell the reader cannot confer knowledge at time zero.
@@ -284,6 +330,9 @@ def _document_declarations(scene,record):
 def reconcile(result):
     bundle = deepcopy(result)
     scene, record = bundle["scenario"], bundle["preparation_records"][-1]
+    _resolve_read_copies(scene,record)
+    from .source_capacity import apply_capacity_tables
+    apply_capacity_tables(scene,record)
     _document_declarations(scene,record)
     if not record.get("common_brief_review"):
         if scene.get("public_brief") is None:

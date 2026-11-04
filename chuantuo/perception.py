@@ -188,6 +188,10 @@ class Perception:
             ended=[{"text":r.text,"last_window":r.active_until} for r in self.scene.rules if isinstance(r,ScopedRule) and
                    r.active_until==window-1 and (r.visibility.public or actor_id in r.visibility.readers)]
             if ended:result["ended_conditions"]=ended
+        pools=[p for p in getattr(self.scene,"capacity_pools",()) if p.visibility.public or actor_id in p.visibility.readers]
+        if pools:
+            from .capacity import visible_capacity
+            result["shared_limits"]=[visible_capacity(p,fields,state) for p in pools]
         if routes:
             result["mail_routes"]=routes
             result["mail_timing"]="定向线路的 transit_windows 是从发出至到达的窗口数。大于零时在到达窗口的第一轮前交付；零表示本轮结束后交付。"
