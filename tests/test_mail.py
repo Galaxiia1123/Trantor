@@ -79,6 +79,18 @@ def test_mail_in_flight_is_inherited_private_and_settled_once(tmp_path):
     comparison=experiment_comparison(run,follow,4)
     assert comparison["mode"]=="continuation" and comparison["first_change"]==4
     assert Simulation.restore(tmp_path/"extended",g).state==follow.state
+    condition="仅甲知晓的临时检修窗口"
+    revised=fork_experiment(run,ExperimentRequest(kind="extend",window=3,through=4,extension_limit=7,
+                             condition=condition,audience="readers",readers=["a"],ends_window=4),
+                            "e"*12,None,tmp_path/"extended-condition")
+    assert revised.experiment["continuation_condition"] and revised.state==run.state
+    assert revised.run()["status"]=="completed" and revised.snapshot()["model_calls"]==7
+    assert dispatch_ledger(revised,4)["arrived"]==2 and original.read_bytes()==old_bytes
+    for actor in "abc":
+        context=revised.journal.decision_context(actor,4,1,revised._discarded)
+        assert (condition in json.dumps(context,ensure_ascii=False))==(actor=="a")
+    assert experiment_comparison(run,revised,4)["mode"]=="continuation"
+    assert Simulation.restore(tmp_path/"extended-condition",g).state==revised.state
     selected=ModelConfig(provider="custom",model="new-selected-model",base_url="http://127.0.0.1:9320")
     changed=fork_experiment(run,ExperimentRequest(kind="model_continue",window=3,through=4,extension_limit=7),
                             "d"*12,None,tmp_path/"changed-model",continuation_model=selected)

@@ -171,7 +171,8 @@ function experimentForm(view,idea=null,priorWindow=null) {
 }
 
 const continuationKinds=new Set(["extend","model_continue"]);
-const experimentKind = meta => ({extend:"延长观察",model_continue:"换用模型继续",repeat:"原样重跑",field:"字段实验",opening:"开局初值实验",transit:"线路实验",delivery_time:"单封信改期",event_time:"日历实验",event_cancel:"取消事件对照"}[meta.kind] || "条件实验");
+const experimentKind = meta => meta.continuation_condition ? "带条件续演" :
+  ({extend:"延长观察",model_continue:"换用模型继续",repeat:"原样重跑",field:"字段实验",opening:"开局初值实验",transit:"线路实验",delivery_time:"单封信改期",event_time:"日历实验",event_cancel:"取消事件对照"}[meta.kind] || "条件实验");
 
 async function changeRunModel(view){
   const run=activeRun;
@@ -200,6 +201,28 @@ function extendRun(view,changedModel=null){
     h("p","第 "+(from+1)+" 窗开始采用选定模型。仍在观察的暂停条件也会带入新路线。模型变化会记入方法记录。"+(changedModel.provider==="codex_cli" ? "本次使用 ChatGPT 订阅额度。" : ""),"hint"));
   form.append(h("p","从"+windowName(from)+"的已提交位置继续。主体的记忆、持续事项和仍在途中的信件随新路线保留。原来的报告和实验结果可以照常回看。"),
     label("再观察几个窗口",extra),label("新增窗口的模型调用上限",cap),hint,error,go);
+  const condition=h("textarea"),audience=h("select"),readers=h("fieldset"),until=h("input");
+  condition.rows=3;condition.maxLength=1600;
+  condition.placeholder="例如：从下一窗起，备用场地可供申请。";
+  audience.append(new Option("仅世界系统","world"),new Option("所有主体","public"),new Option("指定主体","readers"));
+  audience.setAttribute("aria-label","开始时谁知道新增条件");
+  readers.append(h("legend","起初获知条件的主体"));
+  for(const actor of view.actors){
+    const box=h("input"),row=h("label",null,"check");box.type="checkbox";box.value=actor.id;
+    row.append(box,document.createTextNode(actor.name));readers.append(row);
+  }
+  until.type="number";until.min=String(from+1);until.placeholder="持续有效";
+  const conditionOptions=disclosure("继续前补充一个条件",
+    h("p","条件从第 "+(from+1)+" 窗开始生效，世界后果仍在窗末结算。","hint"),
+    label("新增条件（可选）",condition),label("开始时谁知道新增条件",audience),readers,
+    label("新增条件最后有效的窗口（可选）",until));
+  function conditionFields(){
+    audience.disabled=until.disabled=!condition.value.trim();
+    readers.hidden=audience.disabled || audience.value!=="readers";
+    if(!changedModel)go.textContent=condition.value.trim() ? "以新条件继续" : "开始延长观察";
+  }
+  condition.oninput=audience.onchange=conditionFields;conditionFields();
+  if(!changedModel)form.insertBefore(conditionOptions,hint);
   form.onsubmit=async e=>{
     e.preventDefault();if(busy||go.disabled||run!==activeRun)return;
     go.disabled=true;error.textContent="";
@@ -208,6 +231,11 @@ function extendRun(view,changedModel=null){
       const payload=changedModel
         ? {window:from,through:from+Number(extra.value),call_limit:Number(cap.value),model:changedModel}
         : {kind:"extend",window:from,through:from+Number(extra.value),extension_limit:Number(cap.value)};
+      if(!changedModel && condition.value.trim()){
+        Object.assign(payload,{condition:condition.value.trim(),audience:audience.value,
+          readers:audience.value==="readers" ? [...readers.querySelectorAll("input:checked")].map(box=>box.value) : []});
+        if(until.value!=="")payload.ends_window=Number(until.value);
+      }
       await job("experiment",path,payload,
         async result=>{$("reading").close();location.hash="run/"+result.run_id+"/"+(from+1);});
     }catch(err){error.textContent=err.message;}finally{go.disabled=false;}
@@ -284,6 +312,13 @@ function showExperimentTools(view) {
   if(meta.reuse_first_round)root.append(h("p","本路线开启了首轮沿用。完整输入一致且通过当前校验的判断采用原文，记录中可查看来源。","hint"));
   if(continuationKinds.has(meta.kind)){
     source.textContent=meta.kind==="extend" ? "回到原路线终点" : "回到原路线的此处";
+    if(meta.continuation_condition){
+      const names=Object.fromEntries(view.actors.map(actor=>[actor.id,actor.name]));
+      const scope=meta.audience==="public" ? "所有主体" : meta.audience==="readers" ? meta.readers.map(id=>names[id]||id).join("、") : "仅世界系统";
+      root.append(h("strong","带条件续演"),readablePassage(meta.condition),
+        h("p","第 "+(meta.window+1)+" 窗起生效"+(meta.ends_window ? "，至第 "+meta.ends_window+" 窗末" : "")+"。起初知情范围为"+scope+"。","hint"),
+        h("p","下方查看从原终点到后续窗口的演变。","hint"));
+    }
     if(meta.model_change)root.append(h("p","第 "+meta.model_change.starts_window+" 窗起，模型由 "+meta.model_change.before.model+" 改为 "+meta.model_change.after.model+"。此前沿用原路线的记录。","hint"));
     const from=meta.window,w=view.settled_through,body=h("div",null,"continuation-result");root.append(body,source);
     if(w<=from){

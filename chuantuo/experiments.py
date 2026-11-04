@@ -196,12 +196,16 @@ class ExperimentRequest(Record):
     def coherent(self):
         if self.through <= self.window:
             raise ValueError("终点须晚于分岔窗口")
-        if self.ends_window is not None and (self.kind!="condition" or self.ends_window<=self.window):
+        if self.ends_window is not None and (self.kind not in {"condition","extend"} or not self.condition.strip() or self.ends_window<=self.window):
             raise ValueError("只有文本条件可设最后有效窗口，且须在分岔点之后")
         if (self.kind in {"extend","model_continue"})!=(self.extension_limit is not None):
             raise ValueError("延长观察需要为新增窗口设定单独的调用上限")
-        if self.kind in {"extend","model_continue"} and (self.through-self.window>100 or self.condition.strip() or self.audience!="world"):
-            raise ValueError("每次可继续 1 至 100 窗，沿用原条件和知情范围")
+        if self.kind in {"extend","model_continue"} and self.through-self.window>100:
+            raise ValueError("每次可继续 1 至 100 窗")
+        if self.kind=="model_continue" and (self.condition.strip() or self.audience!="world"):
+            raise ValueError("换用模型继续时沿用原条件和知情范围")
+        if self.kind=="extend" and not self.condition.strip() and self.audience!="world":
+            raise ValueError("请填写新增条件，再指定其知情范围")
         if (self.kind=="condition" and not self.condition.strip()) or (self.kind=="repeat" and self.condition.strip()):
             raise ValueError("改变条件时请填写具体情境，原样重跑时请留空")
         if (self.kind in {"field","opening"})!=(self.assignment is not None):
@@ -244,7 +248,12 @@ def prepare_experiment(parent, spec, *, allow_same_field=False):
         with parent._lock:
             if parent.status not in {"completed","stopped"} or spec.window!=parent.window or parent.window<1:
                 raise ValueError("请从已经结束的路线最后一次结算继续观察")
-            return boundary(parent,spec.window),parent.scenario,f"从第 {spec.window} 窗继续观察到第 {spec.through} 窗"
+            selected=boundary(parent,spec.window)
+            if spec.condition.strip():
+                intervention=spec.model_copy(update={"kind":"condition","extension_limit":None})
+                scene,condition=apply_intervention(parent._scenario,intervention,parent.run_id,selected["state"],parent.config.catalog.values())
+                return selected,scene,condition
+            return selected,parent.scenario,f"从第 {spec.window} 窗继续观察到第 {spec.through} 窗"
     if spec.through > parent.window:
         raise ValueError("请选择原路线已经提交的终点")
     if parent.experiment and spec.window < parent.experiment["window"]:
@@ -386,6 +395,8 @@ def fork_experiment(parent, spec, run_id, job_id, directory: Path, *, study=None
               "parent_event":selected["event_id"],
               "state_sha256":hashlib.sha256(encode(selected["state"]).encode()).hexdigest()}
     marker["runtime_after"]={"from_window":spec.window+1,"engine":"trantor-local-v1"}
+    if spec.kind=="extend" and spec.condition.strip():
+        marker["continuation_condition"]=True
     model_history=deepcopy((parent.experiment or {}).get("model_history",[]))
     if continuation_model is not None:
         fields={"provider","model","thinking","max_tokens","context_limit_chars"}
