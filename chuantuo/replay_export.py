@@ -13,7 +13,8 @@ MAX_REPLAY_BYTES = 64 * 1024 * 1024
 KINDS = {"run_created","scene_parse","observation","expression","decision_deferred","external_event",
          "message_dispatched","message_delivered","window_committed","report_created","run_status","run_error",
          "run_recovered","round_pending","round_resume_requested","agent_result_reused","settlement_rejected",
-         "settlement_resume_requested","model_failure","model_validation_error","experiment_forked","inherited_reference"}
+         "settlement_resume_requested","model_failure","model_validation_error","experiment_forked","inherited_reference",
+         "pause_goal_set","pause_goal_reached","pause_goal_cancelled","pause_goal_expired"}
 MODEL_FIELDS = {"provider","model","max_tokens","temperature","context_limit_chars","thinking","protocol",
                 "timeout_seconds","max_retries","retry_delay_seconds"}
 

@@ -27,7 +27,7 @@ function showFieldWatches(view) {
   const hasFields=view.actors.some(a=>Object.keys(a.fields).length);
   root.hidden=playback() || (!hasFields && view.format_version!=="1.1");
   if (root.hidden) return;
-  const stamp=[run,view.settled_through,view.status.status].join("/");
+  const stamp=[run,view.settled_through,view.status.status,json(view.status.pause_goals || [])].join("/");
   if(root.dataset.stamp===stamp && root.childElementCount) return;
   root.dataset.stamp=stamp;
   const head=h("div",null,"watchlist-head");
@@ -38,6 +38,35 @@ function showFieldWatches(view) {
   if(view.has_mail_routes)menu.append(button("查询在途与到件",()=>openRunMail(view),"link"));
   if(view.document_count)menu.append(button("原件流转",()=>openDocuments(view),"link"));
   const list=h("div",null,"watch-cards"); root.replaceChildren(head,list);
+  const goals=view.status.pause_goals || [];
+  if(goals.length){
+    const panel=h("div",null,"pause-goals");
+    panel.append(h("h3","达到目标时暂停"));
+    const recent=[...goals.filter(g=>g.status==="watching"),...goals.filter(g=>g.status!=="watching").slice(-3)];
+    for(const goal of recent){
+      const q=goal.question,actor=view.actors.find(a=>a.id===q.actor_id),field=actor?.fields[q.field_id];
+      const relation={equals:"等于",at_least:"至少达到",at_most:"不超过",known:"出现已知值"}[q.operator];
+      const condition=(actor?.name || q.actor_id)+" · "+(field?.label || q.field_id)+" "+relation+
+        (q.operator==="known" ? "" : " "+watchValue({value:q.target},field?.unit));
+      const item=h("div",null,"pause-goal");
+      item.append(h("strong",q.title || condition));
+      if(q.title)item.append(h("p",condition,"hint"));
+      const status={watching:"从"+windowName(goal.armed_after)+"之后开始，在满足条件的窗末暂停一次"+
+        (q.deadline===null ? "。" : "，最晚观察到第 "+q.deadline+" 窗。"),
+        reached:windowName(goal.window)+"已记录达成",expired:"观察期限已到，期限内没有达成记录",
+        cancelled:"已取消自动暂停",ended:"本次运行已结束，尚未记录达成"};
+      item.append(h("p",status[goal.status],"hint"));
+      const actions=h("div",null,"actions");
+      actions.append(button("查看这项观察",()=>openFieldWatch(view,q),"link"));
+      if(goal.commit_id)actions.append(button("查看当窗结算",()=>evidence(goal.commit_id,run),"link"));
+      if(goal.status==="watching")actions.append(button("取消自动暂停",async()=>{
+        await api("/api/runs/"+run+"/pause-goals/"+goal.id,"DELETE");
+        if(activeRun===run){delete root.dataset.stamp;lastView="";await refreshWatch(routeGeneration);}
+      },"link"));
+      item.append(actions);panel.append(item);
+    }
+    root.insertBefore(panel,list);
+  }
   api("/api/runs/"+run+"/watches?through="+view.settled_through).then(rows=>{
     if (!list.isConnected) return;
     if (!rows.length) {list.append(h("p",hasFields ? "关注一个字段，观察它何时达到目标、后来是否回落。" : "这个场景以文字互动为主，可以回看各方记录的持续事项。","hint"));return;}
@@ -154,7 +183,14 @@ function openFieldWatch(view, preset={}, watchId=null) {
   const criterionLabel=label("判断口径",criterion),deadlineLabel=label("观察到第几窗（可选）",deadline), actions=h("div",null,"actions");
   const preview=h("button","查看结果");preview.type="submit";
   const store=button(watchId ? "保存修改" : "固定到观察台",()=>save(),"primary");
-  actions.append(preview,store);
+  const pauseId=uid();
+  const pauseAt=button("达到这个条件时暂停",async()=>{
+    pauseAt.disabled=true;error.textContent="";
+    try{await api("/api/runs/"+run+"/pause-goals/"+pauseId,"PUT",spec());await finish();}
+    catch(err){error.textContent=err.message;}finally{pauseAt.disabled=false;}
+  });
+  pauseAt.title="从当前已结算窗口之后开始关注，在满足条件的窗末暂停一次。";
+  actions.append(preview,store,pauseAt);
   if(watchId) actions.append(button("移除关注",async()=>{
     await api("/api/runs/"+run+"/watches/"+watchId,"DELETE");await finish();
   },"link"));
@@ -177,6 +213,11 @@ function openFieldWatch(view, preset={}, watchId=null) {
     }
     targetBox.replaceChildren(label("目标值"+(f.unit ? "（"+f.unit+"）" : ""),target));
     targetBox.hidden=["track","known"].includes(op.value);criterionLabel.hidden=deadlineLabel.hidden=op.value==="track";
+    updatePause();
+  }
+  function updatePause(){
+    pauseAt.hidden=op.value==="track" || criterion.value!=="ever" ||
+      ["completed","stopped"].includes(view.status.status) || Boolean(view.status.experiment?.study);
   }
   function spec() {
     const f=fieldData[field.selectedIndex];
@@ -206,6 +247,7 @@ function openFieldWatch(view, preset={}, watchId=null) {
   }
   field.onchange=()=>{operators("track");targetControl(null);evaluate();};
   op.onchange=()=>{targetControl(null);ticket++;result.replaceChildren();if(targetBox.hidden)evaluate();};
+  criterion.onchange=updatePause;
   form.oninput=e=>{if(e.target!==title){ticket++;result.replaceChildren();}};
   form.onsubmit=event=>{event.preventDefault();evaluate();};
   operators(preset.operator);targetControl(preset.target);

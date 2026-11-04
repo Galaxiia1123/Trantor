@@ -160,6 +160,7 @@ def _report_inputs(simulation):
              "run_status", "run_recovered", "provider_attempt"}
     if isinstance(simulation.config, RunConfig11):
         kinds.update({"settlement_rejected","settlement_resume_requested","experiment_forked","decision_deferred","external_event","message_dispatched","round_resume_requested","agent_result_reused"})
+    kinds.update({"pause_goal_set","pause_goal_reached","pause_goal_cancelled","pause_goal_expired"})
     snapshot, events = simulation.report_snapshot(kinds)
     discarded = {eid for event in events if event["kind"] == "run_recovered" for eid in event["data"].get("discarded_event_ids", [])}
     # Remove duplicated transport prompts from report input, not from the audit
@@ -179,7 +180,8 @@ def _report_inputs(simulation):
     if simulation.experiment:
         execution["experiment"] = simulation.experiment
     execution["commits"] = {str(e["window"]):e["id"] for e in evidence if e["kind"] == "window_committed"}
-    execution["method_record_ids"] = [e["id"] for e in evidence if e["kind"] in {"run_error","run_status","settlement_rejected","settlement_resume_requested"}]
+    execution["method_record_ids"] = [e["id"] for e in evidence if e["kind"] in {"run_error","run_status","settlement_rejected","settlement_resume_requested",
+                                                                                   "pause_goal_set","pause_goal_reached","pause_goal_cancelled","pause_goal_expired"}]
     messages = [
         {"role": "system", "content": """根据全部证据记录生成中文论文式报告，按 schema 输出 JSON。
 涵盖场景与目标、初始条件及假设、主体及关系、方法、关键事件与状态演化、结果、讨论和局限。
@@ -187,6 +189,7 @@ def _report_inputs(simulation):
 重要结论另列 claims。source 引用材料编号及开局或准备记录；assumption 是模拟假设；simulation 只用于窗口内发生的表达、投递、观察或客观结果。
 描述结算字段时引用 execution.commits 中对应窗口的提交编号。model 调用、错误、重试、完成状态属于 method，以 provider_attempt、run_status 或拒绝记录为据。
 interpretation 用于解释、局限及不能外推的讨论。每条结论按其实际依据填写；同一事实不要在不同章节反复重写。
+操作者设置、取消或触发的 pause_goal 记录属于 method。达成目标的字段值另引用 window_committed，作为 simulation 结论。
 evidence_ids 只填本次 events 的事件 id（形如 e000001）。材料编号只填在结论的 source_ids；引用文稿的章节用收录该文稿的开局事件作 evidence_ids。客观状态变化引用已提交窗口。带 simulation_ref 的来源是先前推演的快照。
 对解释明确标注“报告解释”。模拟结果不能直接作为现实结论。失败或未完成的窗口不得写成已提交。
 分岔时操作者选择的字段、日期和收件范围属于 method，引用 experiment_forked 或带 experiment 的 run_created。实际到件或状态变化另写 simulation 结论，分别引用相应的 message_delivered 或 window_committed。不要把预定到达日期直接写成已到件。
@@ -308,7 +311,8 @@ def generate_report(simulation: Simulation, gateway=None, progress=None, *, max_
                             problems.append(where + "：模拟事件结论缺少已提交窗口内的证据。字段结果应引用提交 " + "、".join(commit_refs[-6:]) + "。若实际讨论请求、错误或完成状态，改用 method；若讨论局限，改用 interpretation")
                     if claim.basis == "source" and any(sources[sid].simulation_ref for sid in claim.source_ids):
                         problems.append(where + "的派生项目状态快照必须标注为模拟来源")
-                    if claim.basis == "method" and not any(e["kind"] in {"run_created","scene_parse","provider_attempt","model_validation_error","run_error","run_status","runtime_verification","run_recovered","settlement_rejected","settlement_resume_requested","round_resume_requested","agent_result_reused","experiment_forked","decision_deferred"} for e in records):
+                    if claim.basis == "method" and not any(e["kind"] in {"run_created","scene_parse","provider_attempt","model_validation_error","run_error","run_status","runtime_verification","run_recovered","settlement_rejected","settlement_resume_requested","round_resume_requested","agent_result_reused","experiment_forked","decision_deferred",
+                        "pause_goal_set","pause_goal_reached","pause_goal_cancelled","pause_goal_expired"} for e in records):
                         problems.append(where + "缺少配置、请求或运行状态记录")
             if problems:
                 raise ValueError(" / ".join(problems[:8]))

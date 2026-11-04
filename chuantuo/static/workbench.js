@@ -922,8 +922,16 @@ function renderWindow(view) {
     const r=s.round_recovery;
     feed.append(h("p","第 "+r.round+" 轮有 "+r.failed+" 个主体尚未完成，已保存 "+r.saved+" 份判断。重试时会核对同一批观察，复用输入一致的结果。","recovery-note"));
   }
-  $("run-problem").hidden=!s.error;
+  const reached=s.status==="paused" ? (s.pause_goals || []).filter(g=>g.status==="reached" && g.window===s.window) : [];
+  $("run-problem").hidden=!s.error && !reached.length;
   $("run-problem").replaceChildren(...(s.error ? [failureCard(s.error)] : []));
+  if(!s.error && reached.length){
+    const reason=h("section",null,"pause-goals");
+    reason.append(h("strong","已在"+windowName(s.window)+"满足条件，推演停在窗末"),
+      h("p",reached.map(g=>g.question.title || names[g.question.actor_id]+" · "+g.question.field_id).join("、"),"hint"),
+      button("查看达成结算",()=>evidence(reached[0].commit_id),"link"));
+    $("run-problem").append(reason);
+  }
   const settlement = view.settlement || view.events.find(e => e.kind === "window_committed");
   const cited = new Set((settlement?.data.consequences || []).concat(settlement?.data.changes || []).flatMap(c => c.action_ids || []));
   const outcome=$("window-outcome"); outcome.hidden=!settlement; outcome.replaceChildren();

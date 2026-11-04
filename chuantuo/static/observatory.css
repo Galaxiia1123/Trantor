@@ -127,6 +127,9 @@
 .activity-cell[aria-pressed=true]{outline:2px solid #453353;outline-offset:1px}
 .activity-detail:not(:empty){border-top:1px solid var(--line);margin-top:16px;padding-top:14px}.activity-detail .actions{gap:8px}
 .activity-pages{display:flex;justify-content:space-between;gap:12px;margin:10px 0}
+.pause-goals{border:1px solid #d7ccbc;border-radius:12px;background:#fbf7ef;padding:15px 18px;margin:12px 0}
+.pause-goals h3{font-size:15px;margin:0 0 10px}.pause-goal+.pause-goal{border-top:1px solid #ded6c7;margin-top:13px;padding-top:13px}
+.pause-goal p{margin:5px 0}.pause-goal .actions{gap:14px}
 .document-holder{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;padding:.4rem 0;border-bottom:1px solid var(--line)}
 .document-holder span{color:#645f67;font-size:13px}.document-holder+details code{overflow-wrap:anywhere}
 .sample-switch{display:flex;flex-wrap:wrap;gap:5px;margin:.6rem 0}

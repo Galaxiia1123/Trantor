@@ -38,6 +38,7 @@ from .live import stream_events
 from .repository import Repository, VersionConflict
 from .project_io import export_project, import_project
 from . import __version__
+from .checkpoints import arm_goal, cancel_goal, pause_goals
 from .experiments import Adoption, ExperimentRequest, adopt_suggestion, branch_payload, compare, experiment_comparison, fork_experiment, outcome_groups
 from .recovery import salvage
 from .observatory import FieldWatch, observe_field, observation_notes, ongoing_matters
@@ -707,6 +708,20 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
         result=observation_notes(sim,repository.field_watches(sim.journal.directory),through)
         return Response(result,media_type="text/markdown; charset=utf-8",
                         headers={"Content-Disposition":f'attachment; filename="trantor-observations-{sim.run_id}.md"'})
+
+    @app.get("/api/runs/{run_id}/pause-goals")
+    def get_pause_goals(run_id:str):
+        sim=get_run(run_id)
+        with sim._lock:
+            return pause_goals(sim)
+
+    @app.put("/api/runs/{run_id}/pause-goals/{goal_id}")
+    def put_pause_goal(run_id:str,goal_id:str,request:FieldWatch):
+        return arm_goal(manual_run(run_id),goal_id,request)
+
+    @app.delete("/api/runs/{run_id}/pause-goals/{goal_id}")
+    def delete_pause_goal(run_id:str,goal_id:str):
+        return cancel_goal(manual_run(run_id),goal_id)
 
     @app.delete("/api/runs/{run_id}/watches/{watch_id}")
     def remove_watch(run_id:str,watch_id:str):

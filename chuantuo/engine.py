@@ -27,6 +27,7 @@ from .briefing import runtime_scene
 from .replies import envelope_key, validate_reply, validate_requested_time
 from .mail_timing import MailTiming
 from .journal_format import HEADER_KEYS, TRANSPORT_KINDS, read_record, record_bytes
+from .checkpoints import evaluate_goals, pause_goals
 
 
 def encode(value) -> str:
@@ -689,6 +690,8 @@ class Simulation:
                     "pause_requested": self._pause.is_set(), "stop_requested": self._stop.is_set()}
             if self.experiment:
                 result["experiment"] = deepcopy(self.experiment)
+            if goals := pause_goals(self):
+                result["pause_goals"] = goals
             if getattr(self.config,"max_review_interval",0):
                 result.update(max_review_interval=self.config.max_review_interval,deferred_reviews=self._deferred_count)
             if self.window != known_window:
@@ -1087,9 +1090,11 @@ class Simulation:
             self.journal.append("run_started", {}, self.window)
             self.status = "running"
         try:
+            evaluate_goals(self)
             while (self.window < self.config.windows and not self._stop.is_set() and not self._pause.is_set()
                    and not (pause_at_boundary and pause_at_boundary.is_set())):
                 self._play_window()
+                evaluate_goals(self)
             with self._lock:
                 self.status = "completed" if self.window == self.config.windows else "stopped" if self._stop.is_set() else "paused"
                 self.journal.append("run_status", self.snapshot(), self.window)
