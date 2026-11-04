@@ -794,17 +794,26 @@ function drawLibrary() {
   if (!savedLibrary) return;
   const {projects,catalog,studies} = savedLibrary, query = $("library-search").value.trim().toLocaleLowerCase();
   const matches = (...parts) => parts.some(x => String(x || "").toLocaleLowerCase().includes(query));
-  const selections = {projects:projects.filter(p => matches(p.title,p.id,p.goal)),runs:catalog.runs.filter(r => matches(r.title,r.run_id,statuses[r.status],r.status,r.experiment?.condition,r.experiment && experimentKind(r.experiment))),
+  const families=routeFamilies(catalog.runs).map(family=>{
+    const matching=family.members.filter(run=>matches(
+      run.title,run.run_id,statuses[run.status],run.status,routeModelLabel(run),
+      run.experiment?.condition,run.experiment && experimentKind(run.experiment)
+    ));
+    return {family,matching};
+  }).filter(item=>item.matching.length);
+  const selections = {projects:projects.filter(p => matches(p.title,p.id,p.goal)),runs:families,
     studies:studies.filter(s=>matches(s.title,s.condition,s.id,studyStatus[s.status],"重复实验"))};
+  const runCount=families.reduce((sum,item)=>sum+item.matching.length,0);
+  $("library-count").textContent=selections.projects.length+" 个场景 · "+families.length+" 组路线 · "+runCount+" 次推演"+(selections.studies.length ? " · "+selections.studies.length+" 个实验组" : "");
   $("studies").parentElement.hidden=!selections.studies.length;
   $("studies").replaceChildren(...selections.studies.slice(0,libraryLimits.studies).map(s=>recordRow(s.condition || s.title+" · 原条件重跑",
     (s.levels ? s.levels+" 档条件 · " : s.paired ? "双条件对照 · " : "")+studyStatus[s.status]+" · "+s.completed+"/"+s.count+" 条完成",()=>{location.hash="study/"+s.id;},"比较结果")));
   $("projects").replaceChildren(...selections.projects.slice(0,libraryLimits.projects).map(p => recordRow(p.title, p.actors + " 个主体 · 第 " + p.version + " 版", () => {location.hash = "project/" + p.id;})));
-  $("runs").replaceChildren(...selections.runs.slice(0,libraryLimits.runs).map(r => recordRow(r.experiment ? experimentKind(r.experiment)+" · "+(r.experiment.condition || r.title) : r.title, (statuses[r.status] || r.status) + " · " + r.window + "/" + r.windows + " 窗 · " + (r.mode === "demo" ? "脚本" : "模型接口"), () => {location.hash = "run/" + r.run_id;}, "回看")));
+  $("runs").replaceChildren(...families.slice(0,libraryLimits.runs).map(({family,matching})=>familyCard(family,matching,Boolean(query))));
   if (!selections.projects.length) $("projects").append(h("p",query ? "没有匹配的场景。" : "整理后的场景会保存在这里。","empty"));
   if (!selections.runs.length) $("runs").append(h("p",query ? "没有匹配的推演。" : "启动后可以在这里回看每次推演。","empty"));
   for (const [key,items] of Object.entries(selections)) {
-    if (items.length > libraryLimits[key]) $(key).append(button("再显示 " + Math.min(20,items.length-libraryLimits[key]) + " 条",() => {libraryLimits[key]+=20; drawLibrary();}));
+    if (items.length > libraryLimits[key]) $(key).append(button("再显示 " + Math.min(20,items.length-libraryLimits[key]) + (key==="runs" ? " 组路线" : " 条"),() => {libraryLimits[key]+=20; drawLibrary();}));
   }
   catalog.warnings.forEach(w => $("runs").append(h("p",w.message,"error")));
 }

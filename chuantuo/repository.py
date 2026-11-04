@@ -192,6 +192,8 @@ class Repository:
                           "status": "interrupted", "window": 0, "windows": config["windows"],
                           "actors": len(data["scenario"]["entities"]), "project_id": None,
                           "mode": "demo" if providers == {"demo"} else "mixed" if "demo" in providers else "api",
+                          "model_provider": config.get("model",{}).get("provider"),
+                          "model_name": config.get("model",{}).get("model"),
                           "directory": path.parent.name, "events": 0, "reports": 0}
                 if data.get("experiment"):
                     record["experiment"] = data["experiment"]

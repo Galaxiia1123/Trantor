@@ -538,6 +538,20 @@ def main():
                 page.locator("#window").select_option("9")
                 expect(page.locator("#watch-meta")).to_contain_text("local-script-http")
                 expect(page.locator("#watch-meta")).not_to_contain_text("local-script-continuation")
+                continued=page.url.split("#run/")[1].split("/")[0]
+                page.goto(url+"/#library")
+                family=page.locator("[data-family='"+rid+"']")
+                expect(family).to_contain_text("条相关路线")
+                family.get_by_text("查看路线脉络",exact=True).click()
+                expect(family.locator(".route-node")).to_have_count(12)
+                family.get_by_role("button",name=re.compile("再显示")).click()
+                expect(family.locator("[data-run='"+continued+"']")).to_contain_text("换用模型继续")
+                page.locator("#library-search").fill(continued)
+                expect(page.locator("#library-count")).to_contain_text("1 组路线 · 1 次推演")
+                expect(page.locator(".route-node")).to_have_count(1)
+                expect(page.locator(".route-origin")).to_have_attribute("href","#run/"+rid+"/9")
+                page.get_by_role("button",name="打开最近路线",exact=True).click()
+                expect(page.locator("#watch-meta")).to_contain_text("local-script-continuation")
             assert len([task for _,task in endpoint.calls if task=="agent"]) == 215
             assert len(endpoint.calls)==242 and {m for m,_ in endpoint.calls}=={"local-script-http","local-script-continuation"},endpoint.calls
             assert not errors and not endpoint.errors,(errors,endpoint.errors)
