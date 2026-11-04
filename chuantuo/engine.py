@@ -50,6 +50,8 @@ class Journal:
         self._offsets = {}
         self._window_rows = {}
         self._round_observations = {}
+        self._pending_rounds = {}
+        self._last_boundary_reset = 0
         self._letters_by_envelope={}
         self._letters_by_reader={}
         self._arrivals={}
@@ -130,6 +132,10 @@ class Journal:
             keys = ("purpose", "actor_id", "config_id", "input_id", "level", "batch")
             event = {**event, "data": {k: event["data"][k] for k in keys if k in event["data"]}}
         self._events.append(event)
+        if kind=="round_pending":
+            self._pending_rounds[event["window"]]=event
+        elif kind=="run_recovered":
+            self._last_boundary_reset=int(event["id"][1:])
         if kind=="observation":
             key=(event["window"],data["visible"]["round"],data["actor_id"])
             self._round_observations.setdefault(key,[]).append(event)
@@ -240,6 +246,17 @@ class Journal:
     def has_requested_mail(self,through,discarded):
         with self._lock:
             return any(e["window"]<=through and e["id"] not in discarded for e in self._request_mail)
+
+    def pending_round(self,window,discarded):
+        with self._lock:
+            event=self._pending_rounds.get(window)
+            if not event or int(event["id"][1:])<=self._last_boundary_reset:
+                return None
+            turn=event["data"]["round"]
+            if any(e["kind"] in {"expression","decision_deferred"} and e["data"]["round"]==turn and e["id"] not in discarded
+                   for e in self._window_rows.get(window,())):
+                return None
+            return deepcopy(event)
 
     def validate_replies(self,decision,actor,observation_id,discarded):
         for message in decision.messages:
@@ -457,6 +474,8 @@ class Simulation:
         self._call_count = 0
         self._settlement_correction = None
         self._frozen_window = None
+        self._resume_round = None
+        self._resume_outputs = {}
         self._discarded = set()
         self.agents = self._make_actors()
         self.world = make_agent("world", self._world_callback, char_limit=0)
@@ -520,7 +539,7 @@ class Simulation:
             simulation.error = "服务已重启，运行停留在最后一次提交。可显式从该窗口继续；未提交窗口会重新调用模型。"
         return simulation
 
-    def _restore_boundary(self, events, *, frozen=False):
+    def _restore_boundary(self, events, *, frozen=False, resuming_round=None):
         commits = [event for event in events if event["kind"] == "window_committed"]
         cutoff = len(events) if frozen else events.index(commits[-1]) + 1 if commits else 1
         discarded = {eid for event in events if event["kind"] == "run_recovered"
@@ -530,6 +549,8 @@ class Simulation:
         self.window = commits[-1]["window"] if commits else 0
         self.round = self.config.rounds_per_window if frozen else 0
         self._frozen_window = self.window + 1 if frozen else None
+        self._resume_round = None
+        self._resume_outputs = {}
         self._committed = {event["window"] for event in commits}
         self._last_feedback = ({"window":self.window, "commit_id":commits[-1]["id"], "changes":commits[-1]["data"]["changes"]}
                                if commits else None)
@@ -553,7 +574,8 @@ class Simulation:
             data = event["data"]
             if event["kind"] == "observation":
                 actor_id = data["actor_id"]
-                memories[actor_id].remember("observation", encode(data["visible"]))
+                if not (event["window"]==self._frozen_window and data["visible"]["round"]==resuming_round):
+                    memories[actor_id].remember("observation", encode(data["visible"]))
                 self._inbox[actor_id] = []
                 self._observations[actor_id] = deepcopy(data["visible"])
             elif event["kind"] == "expression":
@@ -589,7 +611,8 @@ class Simulation:
             if self.status not in {"failed", "interrupted"}:
                 raise ValueError("只有失败或中断的运行需要恢复")
             events = self.journal.selected(transport_details=False)
-            if not self._resume_settlement(events):
+            from .round_recovery import resume_round
+            if not self._resume_settlement(events) and not resume_round(self,events):
                 discarded = self._restore_boundary(events)
                 self.journal.append("run_recovered", {"from_window": self.window,
                     "discarded_event_ids": discarded, "reason": "用户显式从已提交窗口继续；未提交尝试保留为历史证据，不纳入主体记忆或重复结算。"}, self.window)
@@ -655,6 +678,9 @@ class Simulation:
                 result.update(max_review_interval=self.config.max_review_interval,deferred_reviews=self._deferred_count)
             if self.window != known_window:
                 result.update(state=deepcopy(self._state),depths=dict(self.depths))
+            if self.status in {"failed","interrupted"} and (pending:=self.journal.pending_round(self.window+1,self._discarded)):
+                result["round_recovery"]={"round":pending["data"]["round"],"saved":len(pending["data"]["outputs"]),
+                                          "failed":len(pending["data"]["failed"]),"record":pending["id"]}
             return result
 
     def event_status(self, event):
@@ -687,16 +713,22 @@ class Simulation:
                 instruction += "\noutput_correction 给出你上一条响应及格式错误。只修正 JSON 和 schema 错误，保留原有表达含义，不新增行动；返回完整的单个合法 JSON 对象。"
             messages = [{"role": "system", "content": instruction}, {"role": "user", "content": encode(payload)}]
             protect_credentials(messages,self.config.catalog.values())
-            with self._lock:
-                limit = self.config.model_call_limit
-                if limit is not None and self._call_count >= limit:
-                    raise ModelError(f"本场主体和世界模型调用已达到上限 {limit}。未提交的窗口仍保留记录。")
-                before = self.journal.append("model_input", {"purpose": purpose, "actor_id": actor_id,
-                    "config_id": config_id, "messages": messages}, self.window + 1)
-                self._call_count += 1
-            raw = self.call_recorded(config_id, messages, before)
-            output = self.journal.append("model_output", {"purpose": purpose, "actor_id": actor_id,
-                "config_id": config_id, "input_id": before["id"], "text": raw}, self.window + 1)
+            from .round_recovery import reusable_output
+            output=reusable_output(self,actor_id,config_id,messages) if purpose=="agent" and not attempt else None
+            reused=output is not None
+            if output:
+                raw=output["data"]["text"]
+            else:
+                with self._lock:
+                    limit = self.config.model_call_limit
+                    if limit is not None and self._call_count >= limit:
+                        raise ModelError(f"本场主体和世界模型调用已达到上限 {limit}。未提交的窗口仍保留记录。")
+                    before = self.journal.append("model_input", {"purpose": purpose, "actor_id": actor_id,
+                        "config_id": config_id, "messages": messages}, self.window + 1)
+                    self._call_count += 1
+                raw = self.call_recorded(config_id, messages, before)
+                output = self.journal.append("model_output", {"purpose": purpose, "actor_id": actor_id,
+                    "config_id": config_id, "input_id": before["id"], "text": raw}, self.window + 1)
             if schema is None:
                 return raw
 
@@ -704,6 +736,8 @@ class Simulation:
                 result = schema.model_validate_json(raw)
                 if schema is Decision:
                     validate_outbox(result,self._perception.delivery_limits)
+                    if any(not set(m.recipients)<=self.agents.keys() for m in result.messages):
+                        raise ValueError("主体消息的收件人必须在本轮主体名单中")
                     for message in result.messages:
                         validate_requested_time(message.reply_by,self.window+1)
                     self._perception.documents.validate(result,self._observations[actor_id])
@@ -726,6 +760,9 @@ class Simulation:
                 if purpose == "agent":
                     with self._lock:
                         self._accepted_outputs[actor_id] = output["id"]
+                        if reused:
+                            self.journal.append("agent_result_reused",{"actor_id":actor_id,"round":self.round,"output_id":output["id"],
+                                                "input_id":output["data"]["input_id"]},self.window+1)
                 return raw
 
     def call_recorded(self, config_id, messages, input_event, gateway=None):
@@ -869,26 +906,32 @@ class Simulation:
             self._inbox[recipient].append(self._perception.documents.received(receipt))
 
     def _collect_actions(self):
-        self._actions = []
-        self._waiting_steps = []
-        self._current_events=[self.journal.append("external_event",event.model_dump(mode="json"),self.window+1)
-                              for event in self._perception.calendar.get(self.window+1,())]
-        self._current_mail=[]
-        due=[e for e in self._in_transit.values() if self.mail_timing.due(e,self.window)==self.window+1]
-        for dispatch in due:
-            data=self.mail_timing.receipt(dispatch,self.window+1)
-            receipt=self.journal.append("message_delivered",data,self.window+1)
-            self._current_mail.append(receipt)
-            self._inbox[data["to"]].append(self._perception.documents.received(receipt))
-            del self._in_transit[dispatch["id"]]
-        for round_index in range(1, self.config.rounds_per_window + 1):
+        resumed=self._resume_round
+        self._resume_round=None
+        if resumed is None:
+            self._actions = []
+            self._waiting_steps = []
+            self._current_events=[self.journal.append("external_event",event.model_dump(mode="json"),self.window+1)
+                                  for event in self._perception.calendar.get(self.window+1,())]
+            self._current_mail=[]
+            due=[e for e in self._in_transit.values() if self.mail_timing.due(e,self.window)==self.window+1]
+            for dispatch in due:
+                data=self.mail_timing.receipt(dispatch,self.window+1)
+                receipt=self.journal.append("message_delivered",data,self.window+1)
+                self._current_mail.append(receipt)
+                self._inbox[data["to"]].append(self._perception.documents.received(receipt))
+                del self._in_transit[dispatch["id"]]
+        for round_index in range(resumed or 1, self.config.rounds_per_window + 1):
             self.round = round_index
             due, deferred = {}, {}
             self._wake = {}
             for actor_id, agent in self.agents.items():
-                observation = self.observation(actor_id)
-                self._observations[actor_id] = observation
-                self.journal.append("observation", {"actor_id": actor_id, "visible": observation}, self.window + 1)
+                if round_index==resumed:
+                    observation=self._observations[actor_id]
+                else:
+                    observation = self.observation(actor_id)
+                    self._observations[actor_id] = observation
+                    self.journal.append("observation", {"actor_id": actor_id, "visible": observation}, self.window + 1)
                 agent.observe(encode(observation))
                 self._inbox[actor_id] = []
                 plan=self._plans.get(actor_id)
@@ -902,6 +945,10 @@ class Simulation:
             outputs, errors = act_together(due, self.config.max_parallel) if due else ({},{})
             # Do not settle a partial batch or silently replace a failed actor.
             if errors:
+                if self.notebooks:
+                    self.journal.append("round_pending",{"round":self.round,
+                        "outputs":{actor:self._accepted_outputs[actor] for actor in outputs},
+                        "failed":sorted(errors),"waiting":sorted(deferred)},self.window+1)
                 details = {actor_id: str(error) if isinstance(error, ModelError) else type(error).__name__
                            for actor_id, error in errors.items()}
                 self.journal.append("model_failure", {"errors": details}, self.window + 1)

@@ -164,5 +164,6 @@
 @media(min-width:900px){.watch-grid>aside{position:sticky;top:86px}}
 
 #events,#report-panel{scroll-margin-top:90px}
+.recovery-note{padding:12px 14px;border-left:3px solid var(--violet);background:#f2eef6;border-radius:5px}
 
 #watch-meta{display:flex;gap:8px 14px;flex-wrap:wrap}#watch-meta span{max-width:100%;white-space:nowrap;overflow-wrap:anywhere}#watch-meta span+span:before{content:"·";padding-right:14px}.event.settled>small{margin-left:8px}@media(max-width:680px){#events,#actors,#report-panel{scroll-margin-top:145px}}

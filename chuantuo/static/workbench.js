@@ -871,6 +871,10 @@ function renderWindow(view) {
     actorSelect.replaceChildren(new Option("全部主体",""),...view.actors.map(a=>new Option(a.name,a.id)));
     actorSelect.value=names[focus] ? focus : "";
   }
+  if(s.round_recovery){
+    const r=s.round_recovery;
+    feed.append(h("p","第 "+r.round+" 轮有 "+r.failed+" 个主体尚未完成，已保存 "+r.saved+" 份判断。重试时会核对同一批观察，复用输入一致的结果。","recovery-note"));
+  }
   if (s.error) feed.append(h("p", s.error, "error"));
   const settlement = view.settlement || view.events.find(e => e.kind === "window_committed");
   const cited = new Set((settlement?.data.consequences || []).concat(settlement?.data.changes || []).flatMap(c => c.action_ids || []));

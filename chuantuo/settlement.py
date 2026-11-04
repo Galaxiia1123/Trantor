@@ -372,6 +372,15 @@ def verify_references(events, discarded=frozenset()):
                     or response["data"].get("actor_id")!=data["actor_id"] or response["data"].get("purpose")!="agent"
                     or ("text" in response["data"] and response["data"]["text"]!=data["raw"])):
                 raise ValueError("表达与所属主体当时的模型响应不符")
+        if event["kind"]=="agent_result_reused":
+            response=seen.get(data["output_id"])
+            request=seen.get(data["input_id"])
+            if (not response or not request or response["kind"]!="model_output" or request["kind"]!="model_input"
+                    or response["id"] in discarded or request["id"] in discarded
+                    or response["data"].get("input_id")!=request["id"]
+                    or response["data"].get("actor_id")!=data["actor_id"] or request["data"].get("actor_id")!=data["actor_id"]
+                    or response["window"]!=event["window"] or request["data"].get("purpose")!="agent"):
+                raise ValueError("复用记录没有对应到该主体本窗的原始请求与响应")
         if event["kind"] == "report_created":
             reports += 1
             for section in data["report"]["sections"]:
