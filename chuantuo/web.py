@@ -83,6 +83,13 @@ class ProjectRequest(SceneBundle):
     assistant: dict = Field(default_factory=dict)
 
 
+class ModelContinuation(Record):
+    window: int = Field(ge=0)
+    through: int = Field(ge=1)
+    call_limit: int = Field(ge=1,le=1_000_000,strict=True)
+    model: ModelConfig
+
+
 class ParseRequest(Record):
     text: str
     model: ModelConfig
@@ -657,7 +664,11 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
     def observe_window(run_id: str, window: int | None = Query(default=None,ge=0),
                        offset: int = Query(default=0,ge=0), limit: int = Query(default=100,ge=1,le=300),
                        actor: str | None = None, kind: Literal["expression","decision_deferred","external_event","message_dispatched","message_delivered","window_committed","settlement_rejected","model_failure"] | None = None):
-        return watch_window(get_run(run_id), window, offset, limit, actor, kind)
+        simulation=get_run(run_id)
+        result=watch_window(simulation, window, offset, limit, actor, kind)
+        result["can_change_model"]=bool(isinstance(simulation.config,RunConfig11) and profile.model
+                                        and simulation.config.model!=profile.model and simulation.config.model.provider!="demo")
+        return result
 
     @app.get("/api/runs/{run_id}/window-strip")
     def strip(run_id:str,start:int=Query(default=1,ge=1),through:int|None=Query(default=None,ge=0),slots:int=Query(default=32,ge=2,le=64)):
@@ -805,6 +816,8 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
 
     @app.post("/api/jobs/{job_id}/experiment/{parent_id}")
     def experiment_job(job_id: str, parent_id: str, request: ExperimentRequest):
+        if request.kind=="model_continue":
+            raise ValueError("请从观察台的换用模型入口确认后续模型")
         parent = get_run(parent_id)
         check_experiment_parent(parent)
         protect_credentials(request.model_dump(mode="json"),parent.config.catalog.values())
@@ -816,6 +829,24 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
             return alternate.snapshot()
         spec=request.model_dump(mode="json",exclude={name for name in ("route","event_move","extension_limit","ends_window") if getattr(request,name) is None})
         return jobs.submit(job_id,"experiment",{"run_id":run_id,"parent_id":parent_id,"spec":spec},launch)
+
+    @app.post("/api/runs/{parent_id}/jobs/{job_id}/continue-model")
+    def continue_with_model(parent_id:str,job_id:str,request:ModelContinuation):
+        parent=get_run(parent_id)
+        if not isinstance(parent.config,RunConfig11) or parent.config.model.provider=="demo":
+            raise ValueError("换用模型继续适用于实际模型运行的 v1.1 路线")
+        if profile.model!=request.model:
+            raise VersionConflict("当前模型设置已变化，请重新打开换用模型窗口")
+        if owns_gateway and not credential_ready(request.model):
+            raise ValueError("请先完成当前模型的登录或凭据配置")
+        spec=ExperimentRequest(kind="model_continue",window=request.window,through=request.through,extension_limit=request.call_limit)
+        run_id=uuid.uuid5(uuid.NAMESPACE_URL,"chuantuo:model-continuation:"+job_id).hex[:12]
+        def launch(progress):
+            progress("fork","正在保留已提交状态、主体记忆和在途信件，为后续窗口采用选定模型")
+            alternate=fork_run(parent,spec,run_id,job_id,continuation_model=request.model)
+            start(alternate)
+            return alternate.snapshot()
+        return jobs.submit(job_id,"experiment",{"run_id":run_id,"parent_id":parent_id,**request.model_dump(mode="json")},launch)
 
     @app.post("/api/runs/{run_id}/jobs/{job_id}/experiment-plan")
     def plan_for_question(run_id:str,job_id:str,request:PlanQuestion):

@@ -193,6 +193,8 @@ interpretation 用于解释、局限及不能外推的讨论。每条结论按�
 evidence_ids 只填本次 events 的事件 id（形如 e000001）。材料编号只填在结论的 source_ids；引用文稿的章节用收录该文稿的开局事件作 evidence_ids。客观状态变化引用已提交窗口。带 simulation_ref 的来源是先前推演的快照。
 对解释明确标注“报告解释”。模拟结果不能直接作为现实结论。失败或未完成的窗口不得写成已提交。
 分岔时操作者选择的字段、日期和收件范围属于 method，引用 experiment_forked 或带 experiment 的 run_created。实际到件或状态变化另写 simulation 结论，分别引用相应的 message_delivered 或 window_committed。不要把预定到达日期直接写成已到件。
+如果 experiment.model_history 记录了更换模型，应按每次 starts_window 区分前后的模型。换用模型属于方法变化，不能把随后差异全部归因于场景条件。
+experiment.runtime_after 只说明分岔后采用的引擎。分岔前的方法记录以原路线为准。
 不包含密钥或内部思维链，不补造情节。不能将离线脚本演示称为真实模型实验。
 场景虚构与调用方式是两件事。sources 中保留的旧示例运行说明只描述原材料；本次实际调用方式
 如有 runtime_verification，依据其网络请求凭证描述。真实 API 调用不等于现实世界实验或有效性验证。"""},
@@ -344,7 +346,16 @@ def generate_report(simulation: Simulation, gateway=None, progress=None, *, max_
         lines.extend([f"> 证据处理使用 {coverage['batches']} 批摘要，覆盖 {len(evidence)} 条原始记录。逐批输入输出保存在运行日志，归纳可能损失细节。", ""])
     cited_ids = {eid for section in report.sections for eid in section.evidence_ids}
     method_labels = "、".join(f"{cfg['provider']} / {cfg['model']}" for cfg in methods.values())
-    lines.extend([f"> 主体与世界模型配置为 {method_labels}。本报告配置为 {model.provider} / {model.model}。", ""])
+    model_history=(simulation.experiment or {}).get("model_history",[])
+    if model_history:
+        first=model_history[0]["before"]
+        labels=[f"开局沿用 {first['provider']} / {first['model']} 配置。"]
+        labels.extend(f"第 {step['starts_window']} 窗起配置为 {step['after']['provider']} / {step['after']['model']}。"
+                      for step in model_history)
+        method_labels="".join(labels)
+        lines.extend([f"> {method_labels}本报告配置为 {model.provider} / {model.model}。", ""])
+    else:
+        lines.extend([f"> 主体与世界模型配置为 {method_labels}。本报告配置为 {model.provider} / {model.model}。", ""])
     verification = next((e for e in reversed(evidence) if e["kind"] == "runtime_verification"), None)
     if verification:
         receipts = verification["data"]

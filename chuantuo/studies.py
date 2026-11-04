@@ -28,7 +28,7 @@ class StudyRequest(Record):
 
     @model_validator(mode="after")
     def distinct_conditions(self):
-        if self.experiment.kind=="extend":
+        if self.experiment.kind in {"extend","model_continue"}:
             raise ValueError("延长观察请从已结束的单条路线启动")
         if self.additional_values:
             first=self.experiment.assignment

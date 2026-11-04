@@ -94,7 +94,7 @@ def useful_ideas(scene,config,proposals=(),watches=(),*,earliest=0,reviewed=Fals
         try:
             idea=ComparisonIdea.model_validate(item)
             spec=idea.experiment
-            if spec.window<earliest or spec.through>config.windows or spec.kind in {"repeat","extend"}:
+            if spec.window<earliest or spec.through>config.windows or spec.kind in {"repeat","extend","model_continue"}:
                 return
             protect_credentials(idea.model_dump(mode="json"),config.catalog.values())
             if idea.watch:

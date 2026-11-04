@@ -5,6 +5,7 @@ import pytest
 from chuantuo.checkpoints import arm_goal, cancel_goal, pause_goals
 from chuantuo.engine import Simulation
 from chuantuo.experiments import ExperimentRequest, fork_experiment
+from chuantuo.models import ModelConfig
 from chuantuo.observatory import FieldWatch
 from chuantuo.schema import RunConfig11, Scenario11
 
@@ -67,6 +68,13 @@ def test_goal_rechecks_after_interrupted_boundary_and_unknown_deadline_expires(t
         return append(kind,data,window)
     monkeypatch.setattr(sim.journal,"append",fail_receipt)
     assert sim.run()["status"] == "failed" and sim.window == 2 and gateway.calls == 6
+    changed=fork_experiment(sim,ExperimentRequest(kind="model_continue",window=2,through=3,extension_limit=5),
+                            "e"*12,None,tmp_path/"changed",continuation_model=ModelConfig(
+                                provider="custom",model="current-model",base_url="http://127.0.0.1:9320"))
+    assert pause_goals(changed)[0]["armed_after"]==0
+    assert changed.run()["status"]=="paused" and changed.window==2 and gateway.calls==6
+    assert pause_goals(changed)[0]["status"]=="reached"
+    assert pause_goals(sim)[0]["status"]=="watching"
     restored = Simulation.restore(tmp_path/"interrupted",gateway)
     restored.recover()
     assert restored.run()["status"] == "paused" and restored.window == 2 and gateway.calls == 6

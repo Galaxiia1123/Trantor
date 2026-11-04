@@ -993,7 +993,7 @@ function renderWindow(view) {
   $("watch-title").textContent = view.title;
   $("export-replay").hidden=isCase;
   $("export-replay").onclick=()=>replayDownload(view);
-  const mode=view.mode==="recorded_api"?"真实接口实录 · 只读回放":isCase || view.mode==="sample"?"脚本案例 · 未调用真实模型":"模型 "+view.model;
+  const mode=view.mode==="recorded_api"?"真实接口实录 · 只读回放":isCase || view.mode==="sample"?"脚本案例 · 未调用真实模型":"模型 "+(view.model_at_window || view.model);
   $("watch-meta").replaceChildren(...[mode,"每窗 "+s.window_duration,statuses[s.status]||s.status].map(text=>h("span",text)));
   const select = $("window"); select.disabled=false;select.replaceChildren();
   const live = h("option", isCase ? "最后一个窗口" : "跟随最新"); live.value = ""; select.append(live);
@@ -1016,14 +1016,16 @@ function renderWindow(view) {
     const link=h("a","返回实验组 · 路线 "+s.experiment.study.index);link.href="#study/"+s.experiment.study.id;controls.append(link);
   } else if (!isCase) {
     if (s.status === "running" && !s.pause_requested && !s.stop_requested) controls.append(control("暂停","pause"));
-    if (s.status === "paused" && s.can_resume) controls.append(control("继续","resume"));
-    if (["failed","interrupted"].includes(s.status) && s.can_resume) controls.append(control("从上次提交重试","recover"));
+    if (s.status === "paused" && s.can_resume) controls.append(control(view.can_change_model ? "按原模型继续" : "继续","resume"));
+    if (["failed","interrupted"].includes(s.status) && s.can_resume) controls.append(control(view.can_change_model ? "按原模型重试" : "从上次提交重试","recover"));
     if (["ready","running","paused"].includes(s.status) && !s.stop_requested) controls.append(control("提前结束","stop"));
     if (s.pause_requested && s.status === "running") controls.append(h("small","将在当前窗口结束后暂停"));
     if (s.stop_requested && s.status === "running") controls.append(h("small","正在结束"));
   }
-  if(!isCase && view.format_version==="1.1" && s.window>0 && ["completed","stopped"].includes(s.status))
+  if(!isCase && !view.can_change_model && view.format_version==="1.1" && s.window>0 && ["completed","stopped"].includes(s.status))
     controls.append(button("延长观察",()=>extendRun(view),"secondary"));
+  if(!isCase && view.can_change_model && ["paused","failed","interrupted","completed","stopped"].includes(s.status))
+    controls.append(button("用当前模型继续",()=>changeRunModel(view),"secondary"));
   const feed = $("events"); feed.replaceChildren();
   const actorSelect=$("feed-actor"), focus=actorSelect.value;
   if (actorSelect.options.length!==view.actors.length+1 || view.actors.some((a,i)=>actorSelect.options[i+1]?.value!==a.id)) {
@@ -1434,7 +1436,7 @@ function replayDownload(view){
   const label=h("label","导出至哪个窗口");label.append(last);
   form.append(h("p","生成能直接用浏览器打开的只读文件，收录选定终点之前的状态、消息、主体观察和已生成报告。"));
   form.append(h("p","文件包含观察者可读的主体私有资料和文稿内容。接口连接信息在导出时清理。","hint"),label);
-  compare.type="checkbox";compare.checked=Boolean(view.status.experiment && view.status.experiment.kind!=="extend");
+  compare.type="checkbox";compare.checked=Boolean(view.status.experiment && !continuationKinds.has(view.status.experiment.kind));
   const line=h("label",null,"check");line.append(compare,document.createTextNode("随附原路线，在文件中对照"));
   line.hidden=compare.disabled=!view.status.experiment;form.append(line);
   const submit=h("button","下载只读回放","primary");submit.type="submit";form.append(error,submit);

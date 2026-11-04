@@ -482,8 +482,22 @@ def main():
                 expect(page.locator("#window-status")).to_contain_text("第 10 窗 / 共 10 窗")
                 page.get_by_role("link",name="回到原路线终点").click()
                 expect(page.locator("#window-status")).to_contain_text("第 9 窗 / 共 9 窗")
-            assert len([task for _,task in endpoint.calls if task=="agent"]) == 190
-            assert len(endpoint.calls)==214 and {m for m,_ in endpoint.calls}=={"local-script-http"},endpoint.calls
+                selected=page.request.get(url+"/api/model").json()["model"]
+                selected["model"]="local-script-continuation"
+                updated=page.request.put(url+"/api/model",data={"model":selected})
+                assert updated.ok,updated.text()
+                page.goto(run_url)
+                page.get_by_role("button",name="用当前模型继续",exact=True).click()
+                expect(page.locator("#reading-content")).to_contain_text("local-script-http → local-script-continuation")
+                page.get_by_label("再观察几个窗口",exact=True).fill("1")
+                page.get_by_role("button",name="用选定模型开始新路线",exact=True).click()
+                expect(page.locator(".continuation-result")).to_contain_text("新结算 1 窗",timeout=35000)
+                expect(page.locator("#watch-meta")).to_contain_text("local-script-continuation")
+                page.locator("#window").select_option("9")
+                expect(page.locator("#watch-meta")).to_contain_text("local-script-http")
+                expect(page.locator("#watch-meta")).not_to_contain_text("local-script-continuation")
+            assert len([task for _,task in endpoint.calls if task=="agent"]) == 200
+            assert len(endpoint.calls)==225 and {m for m,_ in endpoint.calls}=={"local-script-http","local-script-continuation"},endpoint.calls
             assert not errors and not endpoint.errors,(errors,endpoint.errors)
             browser.close(); print(f"Browser acceptance passed: source intake, nine windows, field and calendar experiments, suggested research question, interview, report and repeated comparisons; {len(endpoint.calls)} loopback model calls.")
     finally:

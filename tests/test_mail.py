@@ -7,7 +7,7 @@ from chuantuo.engine import Simulation
 from chuantuo.contrast import actor_contrast, field_contrast
 from chuantuo.experiments import ExperimentRequest, experiment_comparison, fork_experiment
 from chuantuo.interactions import conversation, dispatch_ledger
-from chuantuo.models import ModelError
+from chuantuo.models import ModelConfig, ModelError
 from chuantuo.schema import RunConfig11, Scenario11
 from chuantuo.settlement import actor_evidence, verify_commits
 from chuantuo.story import actor_activity
@@ -17,8 +17,10 @@ class PostGateway:
     def __init__(self):
         self.fail_at_arrival = True
         self.decisions = []
+        self.models = []
 
     def complete(self, config, messages):
+        self.models.append(config)
         data=json.loads(messages[-1]["content"])
         if data["task"]=="agent":
             owner,window,turn=data["actor_id"],data["window"],data["round"]
@@ -77,6 +79,22 @@ def test_mail_in_flight_is_inherited_private_and_settled_once(tmp_path):
     comparison=experiment_comparison(run,follow,4)
     assert comparison["mode"]=="continuation" and comparison["first_change"]==4
     assert Simulation.restore(tmp_path/"extended",g).state==follow.state
+    selected=ModelConfig(provider="custom",model="new-selected-model",base_url="http://127.0.0.1:9320")
+    changed=fork_experiment(run,ExperimentRequest(kind="model_continue",window=3,through=4,extension_limit=7),
+                            "d"*12,None,tmp_path/"changed-model",continuation_model=selected)
+    assert changed.state==run.state and changed.snapshot()["model_calls"]==0
+    assert changed.experiment["model_change"]["before"]["model"]=="fixture"
+    assert changed.experiment["model_change"]["starts_window"]==4
+    g.models.clear()
+    assert changed.run()["status"]=="completed" and g.models==[selected]*7
+    assert dispatch_ledger(changed,4)["arrived"]==2 and changed.state==follow.state
+    assert original.read_bytes()==old_bytes
+    restored=Simulation.restore(tmp_path/"changed-model",g)
+    assert restored.config.model==selected and restored.state==changed.state
+    assert experiment_comparison(run,restored,4)["mode"]=="continuation"
+    from chuantuo.insights import watch_window
+    assert watch_window(restored,3)["model_at_window"]=="fixture"
+    assert watch_window(restored,4)["model_at_window"]==selected.model
     assert run.journal.settlement(3)["data"]["changes"][0]["event_ids"]==[arrived["receipt"]]
     assert conversation(run,"a","b")["items"][0]["seen"]["window"]==3
     child=fork_experiment(run,ExperimentRequest(window=1,through=3,kind="transit",route={"source":"a","target":"b","transit_windows":0}),

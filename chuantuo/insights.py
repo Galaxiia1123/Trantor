@@ -113,6 +113,13 @@ def watch_window(simulation, selected=None, offset=0, limit=100, actor_id=None, 
             raise ValueError("该场景没有所选主体")
         rows, total = simulation.journal.window_rows(window,offset,limit,actor=actor_id,kind=kind)
         events = [dict(event_preview(e), commit_status=simulation.event_status(e)) for e in rows]
+        model_at_window=None
+        model_history=(simulation.experiment or {}).get("model_history",[])
+        if model_history:
+            model_at_window=model_history[0]["before"]["model"]
+            for change in model_history:
+                if window>=change["starts_window"]:
+                    model_at_window=change["after"]["model"]
         return {"title":scene.title, "format_version":getattr(scene,"format_version","1.0"),
                 "scheduled_count":len(getattr(scene,"scheduled_events",[])),"timed_rule_count":sum(bool(getattr(r,"active_until",None)) for r in scene.rules),
                 "has_mail_routes":bool(getattr(scene,"mail_routes",[])),
@@ -126,6 +133,7 @@ def watch_window(simulation, selected=None, offset=0, limit=100, actor_id=None, 
                 "settlement":event_preview(commit) if commit and committed==window else None,
                 "usage":simulation.journal.usage(),
                 "model":", ".join(dict.fromkeys(m.model for m in simulation.config.catalog.values())),
+                "model_at_window":model_at_window,
                 "mode":"sample" if all(m.provider == "demo" for m in simulation.config.catalog.values()) else "api"}
 
 

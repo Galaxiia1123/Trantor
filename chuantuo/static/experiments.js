@@ -162,13 +162,22 @@ function experimentForm(view,idea=null,priorWindow=null) {
     "两条路线在分岔前拥有相同的状态、私人记忆和已送达消息。新的条件从下一窗开始生效。","hint"),form);
 }
 
-const experimentKind = meta => ({extend:"延长观察",repeat:"原样重跑",field:"字段实验",opening:"开局初值实验",transit:"线路实验",delivery_time:"单封信改期",event_time:"日历实验"}[meta.kind] || "条件实验");
+const continuationKinds=new Set(["extend","model_continue"]);
+const experimentKind = meta => ({extend:"延长观察",model_continue:"换用模型继续",repeat:"原样重跑",field:"字段实验",opening:"开局初值实验",transit:"线路实验",delivery_time:"单封信改期",event_time:"日历实验"}[meta.kind] || "条件实验");
 
-function extendRun(view){
+async function changeRunModel(view){
+  const run=activeRun;
+  profile=await api("/api/model");showProfile();
+  if(run!==activeRun)return;
+  if(!profile.ready){modelDialog();return;}
+  extendRun(view,profile.model);
+}
+function extendRun(view,changedModel=null){
   const run=activeRun,from=view.status.window,form=h("form",null,"experiment-form"),extra=h("input"),cap=h("input");
   const label=(text,field)=>{const el=h("label",text);el.append(field);return el;};
   extra.type=cap.type="number";extra.required=cap.required=true;extra.min=cap.min="1";extra.max="100";cap.max="1000000";
-  extra.value="2";const hint=h("p",null,"experiment-estimate"),error=h("p",null,"form-error"),go=h("button","开始延长观察","primary");
+  extra.value=String(changedModel ? Math.min(100,Math.max(1,view.status.windows-from)) : 2);
+  const hint=h("p",null,"experiment-estimate"),error=h("p",null,"form-error"),go=h("button",changedModel ? "用选定模型开始新路线" : "开始延长观察","primary");
   go.type="submit";let edited=false;
   function update(){
     const n=Number(extra.value);
@@ -179,17 +188,23 @@ function extendRun(view){
       " 次新调用，等待会减少调用，纠正可能增加用量。"+(view.mode==="sample" ? "本机示例脚本不使用 API 额度。" : "");
   }
   extra.oninput=update;cap.oninput=()=>{edited=true;};update();
-  form.append(h("p","从第 "+from+" 窗最后一次结算继续。主体的记忆、持续事项和仍在途中的信件随新路线保留。原来的报告和实验结果可以照常回看。"),
+  if(changedModel)form.append(h("p",view.model+" → "+changedModel.model),
+    h("p","第 "+(from+1)+" 窗开始采用选定模型。仍在观察的暂停条件也会带入新路线。模型变化会记入方法记录。"+(changedModel.provider==="codex_cli" ? "本次使用 ChatGPT 订阅额度。" : ""),"hint"));
+  form.append(h("p","从"+windowName(from)+"的已提交位置继续。主体的记忆、持续事项和仍在途中的信件随新路线保留。原来的报告和实验结果可以照常回看。"),
     label("再观察几个窗口",extra),label("新增窗口的模型调用上限",cap),hint,error,go);
   form.onsubmit=async e=>{
     e.preventDefault();if(busy||go.disabled||run!==activeRun)return;
     go.disabled=true;error.textContent="";
     try{
-      await job("experiment","/api/jobs/{id}/experiment/"+run,{kind:"extend",window:from,through:from+Number(extra.value),extension_limit:Number(cap.value)},
+      const path=changedModel ? "/api/runs/"+run+"/jobs/{id}/continue-model" : "/api/jobs/{id}/experiment/"+run;
+      const payload=changedModel
+        ? {window:from,through:from+Number(extra.value),call_limit:Number(cap.value),model:changedModel}
+        : {kind:"extend",window:from,through:from+Number(extra.value),extension_limit:Number(cap.value)};
+      await job("experiment",path,payload,
         async result=>{$("reading").close();location.hash="run/"+result.run_id+"/"+(from+1);});
     }catch(err){error.textContent=err.message;}finally{go.disabled=false;}
   };
-  reading("从原终点继续观察",form);
+  reading(changedModel ? "用当前模型继续推演" : "从原终点继续观察",form);
 }
 const wakeText = reason => ({message:"收到定向消息，重新判断。",external_event:"收到外部事件通知，重新判断。",visible_change:"可见处境发生变化，重新判断。",due:"到达复看窗口或事项期限，重新判断。"}[reason] || "主体重新判断。");
 
@@ -212,13 +227,13 @@ async function experimentShelf(parent) {
       const s=group.spec, card=h("article",null,"cohort");
       card.append(h("small","第 "+s.window+" 窗后 → 第 "+s.through+" 窗 · "+group.completed+"/"+group.runs.length+" 条完成","quiet"),
         h("h3",s.condition || "原条件重跑"));
-      if(s.kind==="extend")card.append(h("small","原路线在本次延长的起点结束。","quiet"));
+      if(continuationKinds.has(s.kind))card.append(h("small","从所选位置继续观察。","quiet"));
       else if(s.kind==="event_time")card.append(h("small","只移动原日历事件，通知对象和事件内容沿用原设定。","quiet"));
       else if(s.kind==="transit")card.append(h("small","通信双方知道线路时效。分岔前已经寄出的消息仍按原定日期送达。","quiet"));
       else if(s.kind!=="repeat") card.append(h("small","初始知情范围："+(s.audience==="public" ? "所有主体" : s.audience==="world" ? "仅世界系统" : s.readers.map(id=>result.actors[id] || id).join("、")+"与世界系统"),"quiet"));
       if(s.ends_window)card.append(h("small","临时条件有效至第 "+s.ends_window+" 窗末。","quiet"));
       if (result.selected) {
-        card.append(h("p",(s.kind==="extend" ? "延长起点的值为" : "原路线终值为")+format(group.baseline)+"。"));
+        card.append(h("p",(continuationKinds.has(s.kind) ? "继续观察起点的值为" : "原路线终值为")+format(group.baseline)+"。"));
         for (const o of group.outcomes) card.append(h("span",format(o.value)+" · "+o.count+" 次","outcome-count"));
       }
       const links=h("div",null,"cohort-links");
@@ -257,11 +272,12 @@ function showExperimentTools(view) {
     if(view.has_comparisons && view.mode!=="sample")safe(()=>runIdeas(view,root))();return;
   }
   const source=h("a","回看原路线"); source.href="#run/"+meta.parent_id+"/"+meta.window;
-  if(meta.kind==="extend"){
-    source.textContent="回到原路线终点";
+  if(continuationKinds.has(meta.kind)){
+    source.textContent=meta.kind==="extend" ? "回到原路线终点" : "回到原路线的此处";
+    if(meta.model_change)root.append(h("p","第 "+meta.model_change.starts_window+" 窗起，模型由 "+meta.model_change.before.model+" 改为 "+meta.model_change.after.model+"。此前沿用原路线的记录。","hint"));
     const from=meta.window,w=view.settled_through,body=h("div",null,"continuation-result");root.append(body,source);
     if(w<=from){
-      body.append(h("p",view.selected<from ? "这一段沿用原路线的已提交记录。" : "原路线到此结束，后面的发展会记在当前路线。","hint"));return;
+      body.append(h("p",view.selected<from ? "这一段沿用原路线的已提交记录。" : "从此处继续，后面的发展会记在当前路线。","hint"));return;
     }
     const run=activeRun;
     api("/api/runs/"+run+"/experiment?window="+w).then(result=>{

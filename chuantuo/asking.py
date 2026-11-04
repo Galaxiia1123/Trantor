@@ -192,7 +192,7 @@ def plan_question(sim,request,progress=None,*,job_id=None,before_model=None):
                 if spec.kind not in {"field","condition"}:raise ValueError("这项改动会沿用既有通知范围，请先选定要改变的是事件或线路，还是最初的知情对象")
                 spec=spec.model_copy(update={"audience":audience[0],"readers":audience[1]})
                 idea=idea.model_copy(update={"experiment":spec})
-            if spec.kind in {"repeat","extend"}:raise ValueError("原样重复或延长可直接从观察台启动")
+            if spec.kind in {"repeat","extend","model_continue"}:raise ValueError("原样重复或继续观察可直接从观察台启动")
             if spec.through>end or spec.window<earliest:raise ValueError("拟定的时段超出了原路线可对照的范围")
             if idea.additional_values:
                 study=StudyRequest(experiment=spec,additional_values=idea.additional_values,repetitions=1,call_limit=1)
