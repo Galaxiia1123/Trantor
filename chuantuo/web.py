@@ -848,6 +848,17 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
                 headers={"Content-Disposition":f'attachment; filename="comparison-{run_id}-{other_id}-w{brief["through"]}.md"'})
         return brief
 
+    @app.get("/api/runs/{run_id}/replay.html")
+    def download_run_replay(run_id:str,through:int|None=Query(default=None,ge=0),comparison:bool=False):
+        from .replay_export import export_replay
+        sim=get_run(run_id)
+        parent=get_run(sim.experiment["parent_id"]) if comparison and sim.experiment else None
+        if comparison and parent is None:
+            raise ValueError("这条路线没有可随附的原路线")
+        document=export_replay(sim,through,parent)
+        return Response(document,media_type="text/html; charset=utf-8",
+                        headers={"Content-Disposition":f'attachment; filename="trantor-{run_id}-replay.html"'})
+
     @app.get("/api/runs/{run_id}/capacities")
     def shared_capacity(run_id:str,window:int|None=Query(default=None,ge=0)):
         from .capacity import capacities_at

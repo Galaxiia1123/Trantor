@@ -323,6 +323,17 @@ def main():
                 with page.expect_download() as download: page.get_by_role("button",name="下载 Markdown").click()
                 assert download.value.suggested_filename.endswith(".md")
                 page.keyboard.press("Escape"); page.reload(); expect(page.locator("#reports")).to_contain_text("有条件担保")
+                page.get_by_role("button",name="导出回放",exact=True).click()
+                page.get_by_label("导出至哪个窗口",exact=True).fill("9")
+                with page.expect_download() as replay:page.get_by_role("button",name="下载只读回放",exact=True).click()
+                replay_file=Path(tmp)/"portable.html";replay.value.save_as(replay_file)
+                exported=replay_file.read_text("utf8")
+                assert "local-test-fixture-11" not in exported and ("http://127.0.0.1:"+str(endpoint.server_port)) not in exported
+                with browser.new_context(offline=True) as offline:
+                    viewer=offline.new_page();viewer.goto(replay_file.as_uri())
+                    expect(viewer.get_by_role("heading",name="过程记录")).to_be_visible()
+                    expect(viewer.locator("summary")).to_contain_text("有条件担保")
+                page.keyboard.press("Escape")
                 page.locator("#followup>summary").click(); page.locator("#question-scope").select_option("resident")
                 page.locator("#question-text").fill("我当时知道哪些夜间施工安排？"); page.locator("#ask").click()
                 expect(page.locator("#reading-title")).to_have_text("记录回答"); page.keyboard.press("Escape")

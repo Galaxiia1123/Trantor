@@ -834,6 +834,8 @@ function renderWindow(view) {
   scope.replaceChildren(everyone, ...view.actors.map(a => {const o = h("option",a.name + "当时可见的记录"); o.value = a.id; return o;}));
   if (names[priorScope]) scope.value = priorScope;
   $("watch-title").textContent = view.title;
+  $("export-replay").hidden=isCase;
+  $("export-replay").onclick=()=>replayDownload(view);
   const mode=view.mode==="recorded_api"?"真实接口实录 · 只读回放":isCase || view.mode==="sample"?"脚本案例 · 未调用真实模型":"模型 "+view.model;
   $("watch-meta").replaceChildren(...[mode,"每窗 "+s.window_duration,statuses[s.status]||s.status].map(text=>h("span",text)));
   const select = $("window"); select.disabled=false;select.replaceChildren();
@@ -1244,3 +1246,26 @@ safe(async () => {
   } catch (err) { if (!(err instanceof TypeError)) keep("job", null); throw err; }
   finally { busy = false; $("prepare").disabled = false; }
 })();
+
+function replayDownload(view){
+  const run=activeRun,form=h("form",null,"advanced"),last=h("input"),compare=h("input"),error=h("p",null,"form-error");
+  last.type="number";last.min="0";last.max=String(view.status.window);last.step="1";last.required=true;last.value=String(view.settled_through);
+  last.setAttribute("aria-label","导出至哪个窗口");
+  const label=h("label","导出至哪个窗口");label.append(last);
+  form.append(h("p","生成能直接用浏览器打开的只读文件，收录选定终点之前的状态、消息、主体观察和已生成报告。"));
+  form.append(h("p","文件包含观察者可读的主体私有资料和文稿内容。接口连接信息在导出时清理。","hint"),label);
+  compare.type="checkbox";compare.checked=Boolean(view.status.experiment && view.status.experiment.kind!=="extend");
+  const line=h("label",null,"check");line.append(compare,document.createTextNode("随附原路线，在文件中对照"));
+  line.hidden=compare.disabled=!view.status.experiment;form.append(line);
+  const submit=h("button","下载只读回放","primary");submit.type="submit";form.append(error,submit);
+  form.onsubmit=async event=>{
+    event.preventDefault();submit.disabled=true;error.textContent="正在整理已提交的记录…";
+    try{
+      const params=new URLSearchParams({through:last.value,comparison:String(!compare.disabled && compare.checked)});
+      const reply=await fetch("/api/runs/"+run+"/replay.html?"+params,{cache:"no-store"});
+      if(!reply.ok){const info=await reply.json();throw new Error(info.detail||"回放未能导出");}
+      const blob=await reply.blob(),url=URL.createObjectURL(blob),link=h("a");link.href=url;link.download="trantor-"+run+"-replay.html";link.click();
+      setTimeout(()=>URL.revokeObjectURL(url),15000);error.textContent="回放已交给浏览器保存，可打开这份 HTML 阅读。";
+    }catch(err){error.textContent=err.message;}finally{submit.disabled=false;}
+  };reading("导出本次推演回放",form);
+}
