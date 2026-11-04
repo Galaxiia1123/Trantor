@@ -26,6 +26,7 @@ from .documents import envelope_scope
 from .briefing import runtime_scene
 from .replies import envelope_key, validate_reply, validate_requested_time
 from .mail_timing import MailTiming
+from .journal_format import HEADER_KEYS, TRANSPORT_KINDS, read_record, record_bytes
 
 
 def encode(value) -> str:
@@ -37,8 +38,7 @@ class InvalidSettlement(ValueError):
 
 
 class Journal:
-    _TRANSPORT = {"model_input", "model_output", "report_input", "report_output",
-                  "analysis_input", "analysis_output", "report_batch_input", "report_batch_output"}
+    _TRANSPORT = TRANSPORT_KINDS
 
     def __init__(self, directory: Path | None = None):
         self._events: list[dict] = []
@@ -74,7 +74,7 @@ class Journal:
         with path.open("rb") as stream:
             for index, line in enumerate(stream, 1):
                 try:
-                    event = json.loads(line)
+                    event = read_record(line)
                     if not line.endswith(b"\n") or event["id"] != f"e{index:06d}" or not isinstance(event["data"], dict):
                         raise ValueError("事件不完整")
                     event["kind"], event["window"], event["recorded_at"]
@@ -129,8 +129,7 @@ class Journal:
         if self.directory and event["kind"] in self._TRANSPORT:
             # Keep large model prompts on disk. Polling and recovery need only the header.
             self._offsets[event["id"]] = (self._disk_size, size)
-            keys = ("purpose", "actor_id", "config_id", "input_id", "level", "batch")
-            event = {**event, "data": {k: event["data"][k] for k in keys if k in event["data"]}}
+            event = {**event, "data": {k: event["data"][k] for k in HEADER_KEYS if k in event["data"]}}
         self._events.append(event)
         if kind=="round_pending":
             self._pending_rounds[event["window"]]=event
@@ -280,7 +279,7 @@ class Journal:
             return deepcopy(event)
         with (self.directory / "events.jsonl").open("rb") as stream:
             stream.seek(position[0])
-            return json.loads(stream.read(position[1]))
+            return read_record(stream.read(position[1]))
 
     def append(self, kind: str, data: dict, window: int = 0) -> dict:
         with self._lock:
@@ -288,7 +287,7 @@ class Journal:
                      "window": window, "recorded_at": datetime.now(timezone.utc).isoformat(),
                      "data": deepcopy(data)}
             if self.directory:
-                raw = (encode(event) + "\n").encode("utf-8")
+                raw = record_bytes(event)
                 mode = "ab" if self._events else "xb"
                 with writer_lock(self.directory / ".journal.lock", wait=True), (self.directory / "events.jsonl").open(mode) as stream:
                     if stream.tell() != self._disk_size:
@@ -304,6 +303,22 @@ class Journal:
     def wait_for_offset(self, offset, timeout):
         with self._changed:
             return self._changed.wait_for(lambda: len(self._events) > offset, timeout)
+
+    def export_lines(self):
+        """Freeze the completed append boundary while allowing the simulation to continue."""
+        with self._lock:
+            count = len(self._events)
+        if self.directory:
+            with (self.directory / "events.jsonl").open("rb") as stream:
+                for index in range(1, count + 1):
+                    line = stream.readline()
+                    event = read_record(line)
+                    if not line.endswith(b"\n") or event["id"] != f"e{index:06d}":
+                        raise ValueError("导出范围内的运行记录不完整")
+                    yield (encode(event) + "\n").encode("utf-8")
+        else:
+            for index in range(1, count + 1):
+                yield (encode(self.event(f"e{index:06d}")) + "\n").encode("utf-8")
 
     def snapshot(self, kinds=None) -> list[dict]:
         return self.selected(kinds)

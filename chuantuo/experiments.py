@@ -384,6 +384,7 @@ def fork_experiment(parent, spec, run_id, job_id, directory: Path, *, study=None
                   {"project_linked","provider_attempt","prepare_provider_attempt","runtime_verification"}):
                 # Historical usage and post-run analyses belong to the parent. Preserve the slot for links.
                 event.update(kind="inherited_reference", data={"source_run":parent.run_id,"source_kind":kind})
+                event.pop("_packed", None)
             else:
                 dest.write(raw)
                 continue

@@ -1019,8 +1019,9 @@ def create_app(runs_directory: Path | None = None, gateway=None, *, public_searc
 
     @app.get("/api/runs/{run_id}/export")
     def export(run_id: str):
-        path = get_run(run_id).journal.directory / "events.jsonl"
-        return FileResponse(path, media_type="application/x-ndjson", filename=f"chuantuo-{run_id}.jsonl")
+        journal = get_run(run_id).journal
+        return StreamingResponse(journal.export_lines(), media_type="application/x-ndjson",
+                                 headers={"Content-Disposition":f'attachment; filename="chuantuo-{run_id}.jsonl"'})
 
     # A running service serves a matched UI/API release even when the source is edited.
     static = Path(__file__).parent / "static"
